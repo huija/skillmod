@@ -1,0 +1,8 @@
+# 构建产物
+/skillmod
+/dist/
+.agents/
+
+# 编辑器与系统
+*.swp
+.DS_Store

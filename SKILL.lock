@@ -1,0 +1,20 @@
+[[skill]]
+name = 'go-code-review'
+source = 'https://github.com/cxuu/golang-skills//skills/go-code-review'
+version = 'v0.0.0-20260620041203-91f0c2eef559'
+commit = '91f0c2eef559a3168f9d3c38f5f99936d472b508'
+dirhash = 'h1:RTngiTJxnhPE1HBOxATfREM6MXdIuTpXWoC7uNF45Bc='
+
+[[skill]]
+name = 'go-testing'
+source = 'https://github.com/cxuu/golang-skills//skills/go-testing'
+version = 'v0.0.0-20260620041203-91f0c2eef559'
+commit = '91f0c2eef559a3168f9d3c38f5f99936d472b508'
+dirhash = 'h1:nrie+jA4KcIdmg5lry6ffrD1zPn80umvpYM78A3dmUc='
+
+[[skill]]
+name = 'golang-continuous-integration'
+source = 'https://github.com/samber/cc-skills-golang//skills/golang-continuous-integration'
+version = 'v2.0.0'
+commit = '053894c088317d7ba2038cffcbf5fd57b5494fa6'
+dirhash = 'h1:5roxuFYuI0DCIQOqnjk8Z1RggT5hCH+o2E34aQJRBsg='

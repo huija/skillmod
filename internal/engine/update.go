@@ -1,0 +1,194 @@
+// Copyright 2026 huija
+//
+// SPDX-License-Identifier: MIT
+
+package engine
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/huija/skillmod/internal/modfile"
+	"github.com/huija/skillmod/internal/resolve"
+	"github.com/huija/skillmod/internal/store"
+)
+
+// Update implements skillmod update [names...]: resolve the latest versions, update the lock, and install.
+// With no names it updates all remote entries; commit-pinned entries, including pseudo-versions, advance to a new pseudo-version at default-branch HEAD (PRD §3.6).
+func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, error) {
+	m, err := e.loadMod()
+	if err != nil {
+		return nil, err
+	}
+	lock := e.loadLock()
+
+	want := map[string]bool{}
+	for _, n := range names {
+		want[n] = true
+	}
+	var targets []modfile.ModSkill
+	for _, sk := range m.Skills {
+		if sk.Local || (len(want) > 0 && !want[sk.Name]) {
+			continue
+		}
+		targets = append(targets, sk)
+	}
+	for n := range want {
+		found := false
+		for _, sk := range m.Skills {
+			if sk.Name == n {
+				found = true
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("条目 %q 不在 SKILL.mod 中", n)
+		}
+	}
+
+	rep := &Report{Action: "update"}
+	var plans []plannedInstall
+	var conflicts []conflict
+	contentByDir := map[string]string{}
+	memo := refsMemo{}
+	adapters, err := e.adapters()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, sk := range targets {
+		repo, subdir, err := splitSource(sk.Source)
+		if err != nil {
+			return nil, err
+		}
+		refs, err := e.refs(ctx, repo, memo)
+		if err != nil {
+			return nil, fmt.Errorf("update 需要联网解析最新版本: %w", err)
+		}
+		if err := e.Store.PutRepoRefs(repo, refs); err != nil {
+			return nil, err
+		}
+		lk := findLock(lock, sk.Name)
+		cur := sk.Version
+
+		var res resolve.Resolution
+		if resolve.IsPseudoVersion(cur) || resolve.IsSHA(cur) {
+			// Advance a commit-pinned entry to default-branch HEAD (PRD §3.6).
+			if refs.DefaultHead == "" {
+				return nil, fmt.Errorf("条目 %s: 远端无默认分支", sk.Name)
+			}
+			if lk != nil && refs.DefaultHead == lk.Commit {
+				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "keep", Version: cur, Note: "已是最新"})
+				continue
+			}
+			fetchRef := "HEAD"
+			if refs.DefaultBranch != "" {
+				fetchRef = "refs/heads/" + refs.DefaultBranch
+			}
+			res = resolve.Resolution{Kind: resolve.KindCommit, Commit: refs.DefaultHead, FetchRef: fetchRef}
+		} else {
+			r, err := resolve.Resolve(resolve.Request{Repo: repo, Subdir: subdir}, refs)
+			if err != nil {
+				return nil, err
+			}
+			if r.Version == cur && lk != nil && lk.Commit != "" {
+				if r.Commit == lk.Commit {
+					rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "keep", Version: cur, Note: "已是最新"})
+					continue
+				}
+				path, _ := e.Store.SnapshotPath(repo, cur)
+				return nil, &store.SnapshotConflictError{
+					Path: path,
+					Have: store.SnapshotInfo{Repo: repo, Version: cur, Commit: lk.Commit},
+					Want: store.SnapshotInfo{Repo: repo, Version: r.Version, Commit: r.Commit},
+				}
+			}
+			res = *r
+		}
+
+		mat, err := e.materialize(ctx, repo, subdir, res, "")
+		if err != nil {
+			return nil, err
+		}
+		contentByDir[sk.DirName()] = mat.contentDir
+		// Conflict preflight: overwrite a clean old version matching the old lock hash; only local modifications conflict.
+		prevHash := ""
+		if lk != nil {
+			prevHash = lk.Dirhash
+		}
+		var tgts []string
+		for _, a := range adapters {
+			dst := adapterDir(a, e.Root, sk.DirName())
+			switch classifyTarget(dst, mat.dirhash, prevHash) {
+			case "install":
+				tgts = append(tgts, dst)
+			case "conflict":
+				conflicts = append(conflicts, conflict{name: sk.DirName(), dir: dst})
+			}
+		}
+		if len(tgts) > 0 {
+			plans = append(plans, plannedInstall{name: sk.DirName(), contentDir: mat.contentDir, targets: tgts})
+		}
+		rep.Entries = append(rep.Entries, EntryReport{
+			Name: sk.Name, Source: sk.Source, Action: "update",
+			Version: mat.version, Note: fmt.Sprintf("%s → %s", cur, mat.version),
+		})
+		// Update the in-memory mod and lock; write them only after success.
+		for i := range m.Skills {
+			if m.Skills[i].Name == sk.Name {
+				m.Skills[i].Version = mat.version
+			}
+		}
+		upsertLock(lock, modfile.LockSkill{
+			Name: sk.Name, Source: sk.Source, Version: mat.version, Commit: mat.commit, Dirhash: mat.dirhash,
+		})
+	}
+
+	skip, err := resolveConflicts(io, conflicts)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range conflicts {
+		if skip[c.dir] {
+			continue
+		}
+		// For an overwrite, locate the corresponding entry's contentDir.
+		for _, sk := range targets {
+			if sk.DirName() != c.name {
+				continue
+			}
+			if dir := contentByDir[c.name]; dir != "" {
+				plans = append(plans, plannedInstall{name: c.name, contentDir: dir, targets: []string{c.dir}})
+			}
+		}
+	}
+
+	if io.DryRun {
+		rep.Notes = append(rep.Notes, "dry-run：未写任何文件")
+		return rep, nil
+	}
+
+	finalize, err := applyInstalls(plans)
+	if err != nil {
+		return nil, err
+	}
+	if err := modfile.SaveMod(e.Root, m); err != nil {
+		finalize(false)
+		return nil, err
+	}
+	if err := modfile.SaveLock(e.Root, lock); err != nil {
+		finalize(false)
+		return nil, err
+	}
+	if err := finalize(true); err != nil {
+		return nil, err
+	}
+	for _, en := range rep.Entries {
+		switch en.Action {
+		case "keep":
+			io.printf("%s: %s（%s）", en.Name, en.Version, en.Note)
+		case "update":
+			io.printf("%s: %s", en.Name, en.Note)
+		}
+	}
+	return rep, nil
+}
