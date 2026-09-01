@@ -4,13 +4,16 @@
 
 package cli
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/huija/skillmod/internal/i18n"
+	"github.com/spf13/cobra"
+)
 
 func newUpdateCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "update [名称…]",
-		Short: "重新解析最新版本，更新 lock 并安装",
-		Long:  "不带名称时作用于全部条目；commit 钉住的条目（含伪版本）升到默认分支 HEAD 的新伪版本。",
+		Use:   i18n.Text("update [names…]"),
+		Short: i18n.Text("resolve the latest versions, update the lock, and install"),
+		Long:  i18n.Text("With no names, update every entry. Commit-pinned entries, including pseudo-versions, advance to a new pseudo-version at default-branch HEAD."),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			eng, err := newEngine()
 			if err != nil {

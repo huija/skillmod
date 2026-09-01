@@ -16,7 +16,10 @@ import (
 	"time"
 
 	"github.com/huija/skillmod/internal/resolve"
+	"github.com/huija/skillmod/internal/testutil"
 )
+
+func TestMain(m *testing.M) { testutil.RunMain(m) }
 
 func TestParseLsRemote(t *testing.T) {
 	out := "ref: refs/heads/main\tHEAD\n" +
@@ -29,17 +32,135 @@ func TestParseLsRemote(t *testing.T) {
 		"ffff\trefs/tags/lark-doc/v0.8.1\n"
 	refs := ParseLsRemote(out)
 	if refs.DefaultBranch != "main" || refs.DefaultHead != "aaaa" {
-		t.Errorf("HEAD 解析错: %+v", refs)
+		t.Errorf("HEAD parsed incorrectly: %+v", refs)
 	}
 	if refs.Heads["dev"] != "bbbb" {
 		t.Errorf("Heads = %+v", refs.Heads)
 	}
 	// Use the peeled commit for an annotated tag.
 	if refs.Tags["v2.0.0"] != "eeee" {
-		t.Errorf("annotated tag 未取 peeled: %q", refs.Tags["v2.0.0"])
+		t.Errorf("annotated tag did not use peeled commit: %q", refs.Tags["v2.0.0"])
 	}
 	if refs.Tags["v1.0.0"] != "cccc" || refs.Tags["lark-doc/v0.8.1"] != "ffff" {
 		t.Errorf("Tags = %+v", refs.Tags)
+	}
+}
+
+func TestParseLsTree(t *testing.T) {
+	out := "100644 blob aaaa\troot.txt\x00" +
+		"100755 blob bbbb\tskills/demo/run.sh\x00" +
+		"160000 commit cccc\tskills/demo/vendor\x00" +
+		"040000 tree dddd\tskills/demo/ignored\x00"
+	entries, err := parseLsTree(out, "skills/demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries = %+v", entries)
+	}
+	if entries[0] != (lsEntry{mode: "100755", typ: "blob", sha: "bbbb", path: "run.sh"}) {
+		t.Errorf("blob entry = %+v", entries[0])
+	}
+	if entries[1].typ != "commit" || entries[1].path != "vendor" {
+		t.Errorf("submodule entry = %+v", entries[1])
+	}
+
+	for _, malformed := range []string{"no-tab", "100644 blob\tfile"} {
+		if _, err := parseLsTree(malformed, ""); err == nil {
+			t.Errorf("parseLsTree(%q) succeeded", malformed)
+		}
+	}
+}
+
+func TestSkillNameParsing(t *testing.T) {
+	for name, tc := range map[string]struct {
+		content string
+		want    string
+	}{
+		"plain":         {content: "---\nname: demo\ndescription: test\n---\n# Demo\n", want: "demo"},
+		"double quoted": {content: "---\nname: \"demo skill\"\n---\n", want: "demo skill"},
+		"single quoted": {content: "---\nname: 'demo'\n---", want: "demo"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := ParseSkillName(tc.content)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.want {
+				t.Fatalf("name = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSkillMetadataParsing(t *testing.T) {
+	metadata, err := ParseSkillMetadata("---\nname: demo\ndescription: 'A useful demo'\n---\n# Demo\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metadata != (SkillMetadata{Name: "demo", Description: "A useful demo"}) {
+		t.Fatalf("metadata = %+v", metadata)
+	}
+}
+
+func TestSkillNameParsingErrors(t *testing.T) {
+	for name, content := range map[string]string{
+		"opening delimiter": "name: demo\n---\n",
+		"closing delimiter": "---\nname: demo\n",
+		"missing name":      "---\ndescription: test\n---\n",
+		"empty name":        "---\nname: \"\"\n---\n",
+		"slash":             "---\nname: a/b\n---\n",
+		"backslash":         "---\nname: a\\b\n---\n",
+		"dot":               "---\nname: .\n---\n",
+		"dot dot":           "---\nname: ..\n---\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := ParseSkillName(content)
+			var invalid *NoSkillMDError
+			if !errors.As(err, &invalid) || invalid.Detail == "" {
+				t.Fatalf("error = %v (%T), want NoSkillMDError", err, err)
+			}
+		})
+	}
+}
+
+func TestTreeAndDirectorySkillName(t *testing.T) {
+	content := []byte("---\nname: demo\n---\n")
+	tree := &Tree{Files: []File{{Path: "other.txt"}, {Path: "SKILL.md", Data: content}}}
+	if got, err := tree.SkillName(); err != nil || got != "demo" {
+		t.Fatalf("Tree.SkillName = %q, %v", got, err)
+	}
+	if _, err := (&Tree{}).SkillName(); err == nil {
+		t.Fatal("Tree.SkillName succeeded without SKILL.md")
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := SkillNameFromDir(dir); err != nil || got != "demo" {
+		t.Fatalf("SkillNameFromDir = %q, %v", got, err)
+	}
+	if _, err := SkillNameFromDir(t.TempDir()); err == nil {
+		t.Fatal("SkillNameFromDir succeeded without SKILL.md")
+	}
+}
+
+func TestSourceErrors(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{err: &SymlinkError{Path: "link"}, want: "symlink"},
+		{err: &SubmoduleError{Path: "vendor"}, want: "submodule"},
+		{err: &NoSkillMDError{Detail: "bad frontmatter"}, want: "bad frontmatter"},
+		{err: &RepoError{Kind: RepoNotFound, Repo: "repo"}, want: "not found"},
+		{err: &RepoError{Kind: RepoAuth, Repo: "repo"}, want: "authentication"},
+		{err: &RepoError{Kind: RepoOther, Repo: "repo", Stderr: "network down"}, want: "network down"},
+	} {
+		if got := tc.err.Error(); !strings.Contains(got, tc.want) {
+			t.Errorf("%T.Error() = %q, want substring %q", tc.err, got, tc.want)
+		}
 	}
 }
 
@@ -57,10 +178,10 @@ func TestRepoIdentity_NormalizesTransportAndGitSuffix(t *testing.T) {
 		}
 	}
 	if RepoIdentity("ssh://git@github.com:2222/acme/skills.git") == want {
-		t.Error("非默认 SSH 端口不应与标准 HTTPS 身份合并")
+		t.Error("a non-default SSH port must not share the standard HTTPS identity")
 	}
 	if vcsKey("git@github.com:acme/skills.git") != vcsKey(want) {
-		t.Error("同一逻辑 repo 未复用 VCS key")
+		t.Error("the same logical repository did not reuse its VCS key")
 	}
 }
 
@@ -81,14 +202,14 @@ func TestOpenRepo_ReusesCanonicalIdentity(t *testing.T) {
 	}
 	defer cleanup()
 	if dir1 != dir2 {
-		t.Fatalf("同一逻辑 repo 使用了不同 bare repo: %s != %s", dir1, dir2)
+		t.Fatalf("the same logical repository used different bare repositories: %s != %s", dir1, dir2)
 	}
 	remote, err := s.run(ctx, dir2, "remote", "get-url", "origin")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.TrimSpace(remote) != sshRepo {
-		t.Fatalf("origin = %q, want 当前请求 URL %q", strings.TrimSpace(remote), sshRepo)
+		t.Fatalf("origin = %q, want current request URL %q", strings.TrimSpace(remote), sshRepo)
 	}
 }
 
@@ -98,7 +219,7 @@ func TestOpenRepo_ReusesCanonicalIdentity(t *testing.T) {
 func newFixtureRepo(t *testing.T) (url string, headSHA string) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git 不可用")
+		t.Skip("git is unavailable")
 	}
 	dir := t.TempDir()
 	work := filepath.Join(dir, "work")
@@ -166,28 +287,28 @@ func TestPrefetchMissingBlobs_Batched(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(missing) < 3 {
-		t.Fatalf("blob:none 后缺失对象数 = %d，未覆盖批量抓取路径", len(missing))
+		t.Fatalf("missing objects after blob:none fetch = %d; batch-fetch path was not exercised", len(missing))
 	}
 	if err := s.prefetchMissingBlobs(ctx, repoDir, entries); err != nil {
-		t.Fatalf("批量抓取 blob: %v", err)
+		t.Fatalf("batch-fetch blobs: %v", err)
 	}
 	remaining, err := s.missingBlobs(ctx, repoDir, entries)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(remaining) != 0 {
-		t.Fatalf("批量抓取后仍缺少 %d 个 blob", len(remaining))
+		t.Fatalf("%d blobs remain missing after batch fetch", len(remaining))
 	}
 }
 
 func TestFetchRef_BatchUnsupportedFallsBackToLazyFetch(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("测试使用 POSIX shell 包装器")
+		t.Skip("test uses a POSIX shell wrapper")
 	}
 	url, _ := newFixtureRepo(t)
 	realGit, err := exec.LookPath("git")
 	if err != nil {
-		t.Skip("git 不可用")
+		t.Skip("git is unavailable")
 	}
 	marker := filepath.Join(t.TempDir(), "batch-attempted")
 	wrapper := filepath.Join(t.TempDir(), "git")
@@ -206,13 +327,13 @@ func TestFetchRef_BatchUnsupportedFallsBackToLazyFetch(t *testing.T) {
 	}
 	tree, err := s.FetchRef(ctx, url, refs.Tags["v1.0.0"], "refs/tags/v1.0.0")
 	if err != nil {
-		t.Fatalf("批量抓取失败后惰性兜底未生效: %v", err)
+		t.Fatalf("lazy-fetch fallback failed after batch-fetch failure: %v", err)
 	}
 	if len(tree.Files) < 3 {
 		t.Fatalf("tree files = %d, want at least 3", len(tree.Files))
 	}
 	if _, err := os.Stat(marker); err != nil {
-		t.Fatalf("未进入批量抓取路径: %v", err)
+		t.Fatalf("batch-fetch path was not exercised: %v", err)
 	}
 }
 
@@ -230,7 +351,7 @@ func TestRefs_Integration(t *testing.T) {
 	}
 	for _, tag := range []string{"v1.0.0", "v2.0.0", "lark-doc/v0.8.1"} {
 		if _, ok := refs.Tags[tag]; !ok {
-			t.Errorf("缺 tag %s, Tags = %+v", tag, refs.Tags)
+			t.Errorf("missing tag %s; Tags = %+v", tag, refs.Tags)
 		}
 	}
 	// An annotated tag must peel to the commit at main HEAD rather than the tag object.
@@ -238,7 +359,7 @@ func TestRefs_Integration(t *testing.T) {
 		t.Errorf("v2.0.0 = %s, want peeled commit %s", refs.Tags["v2.0.0"], headSHA)
 	}
 	if _, ok := refs.Heads["dev"]; !ok {
-		t.Error("缺 dev 分支")
+		t.Error("dev branch is missing")
 	}
 }
 
@@ -315,13 +436,13 @@ func TestFetchRef_PersistentTargetedRepo(t *testing.T) {
 	for _, d := range dents {
 		if d.IsDir() {
 			if repoDir != "" {
-				t.Fatalf("同一远端创建了多个 bare repo: %s, %s", repoDir, d.Name())
+				t.Fatalf("one remote created multiple bare repositories: %s, %s", repoDir, d.Name())
 			}
 			repoDir = filepath.Join(vcsRoot, d.Name())
 		}
 	}
 	if repoDir == "" {
-		t.Fatal("未创建持久 bare repo")
+		t.Fatal("persistent bare repository was not created")
 	}
 	if got := strings.TrimSpace(git(t, repoDir, "rev-parse", "--is-bare-repository")); got != "true" {
 		t.Fatalf("is-bare-repository = %q", got)
@@ -330,7 +451,7 @@ func TestFetchRef_PersistentTargetedRepo(t *testing.T) {
 	cmd := exec.Command("git", "-C", repoDir, "cat-file", "-e", headSHA+"^{commit}")
 	cmd.Env = append(os.Environ(), "GIT_NO_LAZY_FETCH=1")
 	if err := cmd.Run(); err == nil {
-		t.Fatal("定向抓取 v1 时意外下载了 v2 commit")
+		t.Fatal("targeted v1 fetch unexpectedly downloaded the v2 commit")
 	}
 
 	if _, err := s.FetchRef(ctx, url, headSHA, "refs/tags/lark-doc/v0.8.1"); err != nil {
@@ -344,14 +465,113 @@ func TestFetchRef_PersistentTargetedRepo(t *testing.T) {
 		}
 	}
 	if dirCount != 1 {
-		t.Fatalf("两次抓取后 bare repo 数 = %d, want 1", dirCount)
+		t.Fatalf("bare repository count after two fetches = %d, want 1", dirCount)
 	}
 
 	if err := os.Rename(strings.TrimPrefix(url, "file://"), strings.TrimPrefix(url, "file://")+".gone"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.FetchRef(ctx, url, headSHA, "refs/tags/lark-doc/v0.8.1"); err != nil {
-		t.Fatalf("远端消失后复用已有 Git 对象失败: %v", err)
+		t.Fatalf("failed to reuse existing Git objects after the remote disappeared: %v", err)
+	}
+}
+
+func TestFetchWrapper(t *testing.T) {
+	url, headSHA := newFixtureRepo(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	tree, err := (&Source{VCSRoot: t.TempDir()}).Fetch(ctx, url, headSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tree.Commit != headSHA || len(tree.Files) == 0 {
+		t.Fatalf("Fetch tree = commit %q, %d files", tree.Commit, len(tree.Files))
+	}
+}
+
+func TestOpenRepoRejectsCacheIdentityConflict(t *testing.T) {
+	repo := "https://example.com/acme/skills"
+	s := &Source{VCSRoot: t.TempDir()}
+	dir := filepath.Join(s.VCSRoot, vcsKey(repo))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+".info", []byte("git:https://example.com/other/repository\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, cleanup, err := s.openRepo(context.Background(), repo); err == nil || !strings.Contains(err.Error(), "identity conflict") {
+		if cleanup != nil {
+			cleanup()
+		}
+		t.Fatalf("openRepo error = %v", err)
+	}
+}
+
+func TestRepositoryFetchHelpers(t *testing.T) {
+	commit := strings.Repeat("a", 40)
+	for _, tc := range []struct {
+		name     string
+		fetchRef string
+		want     string
+	}{
+		{name: "HEAD", fetchRef: "HEAD", want: "HEAD:refs/skillmod/" + commit},
+		{name: "full ref", fetchRef: "refs/tags/v1.0.0", want: "+refs/tags/v1.0.0:refs/tags/v1.0.0"},
+		{name: "direct commit", fetchRef: "", want: commit + ":refs/skillmod/" + commit},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := refspec(commit, tc.fetchRef); got != tc.want {
+				t.Fatalf("refspec = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	dir := filepath.Join(t.TempDir(), "repo")
+	if got := repoOrigin(dir); got != dir {
+		t.Fatalf("repoOrigin without metadata = %q, want %q", got, dir)
+	}
+	if err := os.WriteFile(dir+".info", []byte("git:https://example.com/acme/skills\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := repoOrigin(dir); got != "https://example.com/acme/skills" {
+		t.Fatalf("repoOrigin = %q", got)
+	}
+	if got := shortSHA(commit); got != commit[:12] {
+		t.Fatalf("shortSHA = %q", got)
+	}
+	if got := shortSHA("short"); got != "short" {
+		t.Fatalf("shortSHA(short) = %q", got)
+	}
+}
+
+func TestMapGitErrorClassificationAndTruncation(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test obtains a deterministic exit status through a POSIX shell")
+	}
+	exitErr := exec.Command("sh", "-c", "exit 128").Run()
+	for _, tc := range []struct {
+		name   string
+		stderr string
+		kind   RepoErrorKind
+	}{
+		{name: "not found", stderr: "repository not found", kind: RepoNotFound},
+		{name: "authentication", stderr: "Authentication failed", kind: RepoAuth},
+		{name: "permission", stderr: "Permission denied", kind: RepoAuth},
+		{name: "other", stderr: strings.Repeat("network failure ", 30), kind: RepoOther},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := mapGitError(exitErr, tc.stderr, "repo")
+			var repoErr *RepoError
+			if !errors.As(err, &repoErr) || repoErr.Kind != tc.kind {
+				t.Fatalf("error = %v (%T), want RepoError kind %v", err, err, tc.kind)
+			}
+			if len(repoErr.Stderr) > 303 {
+				t.Fatalf("stderr was not truncated: %d bytes", len(repoErr.Stderr))
+			}
+		})
+	}
+	plain := errors.New("start failed")
+	if err := mapGitError(plain, "", "repo"); !errors.Is(err, plain) {
+		t.Fatalf("non-exit error = %v, want wrapped original error", err)
 	}
 }
 

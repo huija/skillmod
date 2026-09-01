@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/huija/skillmod/internal/i18n"
 )
 
 // File is one file in a subtree, including Git blob bytes and its executable bit.
@@ -33,25 +35,25 @@ type Tree struct {
 	Submodules []string // paths relative to the repository root; record boundaries because no blob can be materialized
 }
 
-// SymlinkError reports a skill containing a symlink, which v0.1 refuses to install (PRD §4).
+// SymlinkError reports a skill containing a symlink, which skillmod refuses to install.
 type SymlinkError struct{ Path string }
 
 func (e *SymlinkError) Error() string {
-	return fmt.Sprintf("skill 包含 symlink（%s），v0.1 不支持含 symlink 的 skill", e.Path)
+	return i18n.Format("skill contains a symlink (%s); skillmod does not support skills containing symlinks", e.Path)
 }
 
 // SubmoduleError reports a Git submodule that cannot be preserved byte for byte.
 type SubmoduleError struct{ Path string }
 
 func (e *SubmoduleError) Error() string {
-	return fmt.Sprintf("skill 包含 submodule（%s），v0.1 不支持", e.Path)
+	return i18n.Format("skill contains a submodule (%s), which skillmod does not support", e.Path)
 }
 
 // NoSkillMDError reports a subtree with no SKILL.md or an unparseable frontmatter name.
 type NoSkillMDError struct{ Detail string }
 
 func (e *NoSkillMDError) Error() string {
-	return "skill 包 SKILL.md 缺失或 frontmatter name 非法（联系作者修复）: " + e.Detail
+	return i18n.Text("skill package is missing SKILL.md or has an invalid frontmatter name (contact the author to fix it): ") + e.Detail
 }
 
 // Fetch retrieves the complete repository tree at repo@commit, first attempting a targeted commit fetch
@@ -80,7 +82,7 @@ func (s *Source) FetchRef(ctx context.Context, repo, commit, fetchRef string) (*
 	}
 	ct, err := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
 	if err != nil {
-		return nil, fmt.Errorf("解析 commit 时间失败: %q", out)
+		return nil, fmt.Errorf(i18n.Text("failed to parse commit time: %q"), out)
 	}
 
 	// List the complete repository; -z prevents core.quotePath from escaping non-ASCII paths.
@@ -113,7 +115,7 @@ func (s *Source) FetchRef(ctx context.Context, repo, commit, fetchRef string) (*
 	}
 	if err != nil {
 		if prefetchErr != nil {
-			return nil, fmt.Errorf("批量抓取 repo blob 失败（惰性抓取兜底也失败）: %v: %w", prefetchErr, err)
+			return nil, fmt.Errorf(i18n.Text("batch repository blob fetch failed (lazy-fetch fallback also failed): %v: %w"), prefetchErr, err)
 		}
 		return nil, err
 	}
@@ -144,12 +146,12 @@ func parseLsTree(out, prefix string) ([]lsEntry, error) {
 		}
 		tab := strings.IndexByte(rec, '\t')
 		if tab < 0 {
-			return nil, fmt.Errorf("ls-tree 输出畸形: %q", rec)
+			return nil, fmt.Errorf(i18n.Text("malformed ls-tree output: %q"), rec)
 		}
 		meta, path := rec[:tab], rec[tab+1:]
 		parts := strings.Fields(meta)
 		if len(parts) != 3 {
-			return nil, fmt.Errorf("ls-tree 输出畸形: %q", rec)
+			return nil, fmt.Errorf(i18n.Text("malformed ls-tree output: %q"), rec)
 		}
 		mode, typ, sha := parts[0], parts[1], parts[2]
 		if typ != "blob" && typ != "commit" {
@@ -198,7 +200,7 @@ func (s *Source) prefetchMissingBlobs(ctx context.Context, dir string, entries [
 		return err
 	}
 	if len(remaining) != 0 {
-		return fmt.Errorf("批量 fetch 后仍缺少 %d 个 blob（stdout=%q stderr=%q）", len(remaining), strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()))
+		return fmt.Errorf(i18n.Text("%d blobs are still missing after batch fetch (stdout=%q stderr=%q)"), len(remaining), strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()))
 	}
 	return nil
 }
@@ -231,7 +233,7 @@ func (s *Source) missingBlobs(ctx context.Context, dir string, entries []lsEntry
 	}
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
 	if len(lines) != len(ids) {
-		return nil, fmt.Errorf("cat-file --batch-check 返回 %d 行，期望 %d 行", len(lines), len(ids))
+		return nil, fmt.Errorf(i18n.Text("cat-file --batch-check returned %d lines; expected %d"), len(lines), len(ids))
 	}
 	var missing []string
 	for i, line := range lines {
@@ -241,7 +243,7 @@ func (s *Source) missingBlobs(ctx context.Context, dir string, entries []lsEntry
 			continue
 		}
 		if len(fields) < 3 || fields[0] != ids[i] || fields[1] != "blob" {
-			return nil, fmt.Errorf("cat-file --batch-check 输出畸形: %q", line)
+			return nil, fmt.Errorf(i18n.Text("malformed cat-file --batch-check output: %q"), line)
 		}
 	}
 	return missing, nil
@@ -268,7 +270,7 @@ func (s *Source) catFileBatch(ctx context.Context, dir string, entries []lsEntry
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("启动 git cat-file: %w", err)
+		return nil, fmt.Errorf(i18n.Text("start git cat-file: %w"), err)
 	}
 	go func() {
 		for _, e := range entries {
@@ -283,12 +285,12 @@ func (s *Source) catFileBatch(ctx context.Context, dir string, entries []lsEntry
 		header, err := r.ReadString('\n')
 		if err != nil {
 			cmd.Wait()
-			return nil, fmt.Errorf("读 blob %s 头失败: %w", e.sha, err)
+			return nil, fmt.Errorf(i18n.Text("failed to read blob %s header: %w"), e.sha, err)
 		}
 		parts := strings.Fields(strings.TrimRight(header, "\n"))
 		if len(parts) != 3 || parts[1] != "blob" {
 			cmd.Wait()
-			return nil, fmt.Errorf("blob %s 不可读: %s", e.sha, strings.TrimSpace(header))
+			return nil, fmt.Errorf(i18n.Text("blob %s is unreadable: %s"), e.sha, strings.TrimSpace(header))
 		}
 		size, err := strconv.Atoi(parts[2])
 		if err != nil {
@@ -298,7 +300,7 @@ func (s *Source) catFileBatch(ctx context.Context, dir string, entries []lsEntry
 		data := make([]byte, size)
 		if _, err := io.ReadFull(r, data); err != nil {
 			cmd.Wait()
-			return nil, fmt.Errorf("读 blob %s 内容失败: %w", e.sha, err)
+			return nil, fmt.Errorf(i18n.Text("failed to read blob %s contents: %w"), e.sha, err)
 		}
 		if _, err := r.ReadByte(); err != nil { // Separator newline after the blob.
 			cmd.Wait()
@@ -324,42 +326,68 @@ func (t *Tree) SkillName() (string, error) {
 		}
 		return name, nil
 	}
-	return "", &NoSkillMDError{Detail: "子树根缺少 SKILL.md"}
+	return "", &NoSkillMDError{Detail: i18n.Text("SKILL.md is missing from the subtree root")}
+}
+
+// SkillMetadata describes the frontmatter fields used to identify a skill.
+type SkillMetadata struct {
+	Name        string
+	Description string
+}
+
+// SkillMetadataFromDir reads the SKILL.md frontmatter from a directory on disk.
+func SkillMetadataFromDir(dir string) (SkillMetadata, error) {
+	data, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+	if err != nil {
+		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Text("SKILL.md is missing from the subtree root")}
+	}
+	return ParseSkillMetadata(string(data))
 }
 
 // SkillNameFromDir reads the SKILL.md frontmatter name from a directory on disk for version-snapshot hits.
 func SkillNameFromDir(dir string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+	metadata, err := SkillMetadataFromDir(dir)
 	if err != nil {
-		return "", &NoSkillMDError{Detail: "子树根缺少 SKILL.md"}
+		return "", err
 	}
-	return ParseSkillName(string(data))
+	return metadata.Name, nil
 }
 
 // ParseSkillName parses the name field from SKILL.md frontmatter using a minimal YAML subset:
 // it extracts a scalar `name:` from a block delimited by `---`, which covers canonical frontmatter.
 func ParseSkillName(content string) (string, error) {
+	metadata, err := ParseSkillMetadata(content)
+	if err != nil {
+		return "", err
+	}
+	return metadata.Name, nil
+}
+
+// ParseSkillMetadata parses the scalar name and description fields from SKILL.md frontmatter.
+func ParseSkillMetadata(content string) (SkillMetadata, error) {
 	if !strings.HasPrefix(content, "---\n") {
-		return "", &NoSkillMDError{Detail: "缺少 --- frontmatter 起始行"}
+		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Text("missing opening --- frontmatter line")}
 	}
 	rest := content[len("---\n"):]
 	end := strings.Index(rest, "\n---")
 	if end < 0 {
-		return "", &NoSkillMDError{Detail: "缺少 --- frontmatter 结束行"}
+		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Text("missing closing --- frontmatter line")}
 	}
+	metadata := SkillMetadata{}
 	for _, line := range strings.Split(rest[:end], "\n") {
-		v, ok := strings.CutPrefix(line, "name:")
-		if !ok {
+		if v, ok := strings.CutPrefix(line, "name:"); ok {
+			metadata.Name = strings.Trim(strings.TrimSpace(v), `"'`)
 			continue
 		}
-		name := strings.Trim(strings.TrimSpace(v), `"'`)
-		if name == "" {
-			return "", &NoSkillMDError{Detail: "name 字段为空"}
+		if v, ok := strings.CutPrefix(line, "description:"); ok {
+			metadata.Description = strings.Trim(strings.TrimSpace(v), `"'`)
 		}
-		if strings.ContainsAny(name, "/\\") || name == "." || name == ".." {
-			return "", &NoSkillMDError{Detail: fmt.Sprintf("name %q 含非法字符", name)}
-		}
-		return name, nil
 	}
-	return "", &NoSkillMDError{Detail: "frontmatter 中无 name 字段"}
+	if metadata.Name == "" {
+		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Text("frontmatter has no name field")}
+	}
+	if strings.ContainsAny(metadata.Name, "/\\") || metadata.Name == "." || metadata.Name == ".." {
+		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Format("name %q contains invalid characters", metadata.Name)}
+	}
+	return metadata, nil
 }

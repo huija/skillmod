@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/huija/skillmod/internal/i18n"
 )
 
 // Adapter defines directory conventions for a target platform.
@@ -42,7 +44,7 @@ var registry = map[string]Adapter{
 func ByName(name string) (Adapter, error) {
 	a, ok := registry[name]
 	if !ok {
-		return nil, fmt.Errorf("不支持的平台 %q，当前支持: %s", name, strings.Join(Names(), ", "))
+		return nil, fmt.Errorf(i18n.Text("unsupported platform %q; supported platforms: %s"), name, strings.Join(Names(), ", "))
 	}
 	return a, nil
 }
@@ -99,7 +101,7 @@ func CopyDir(src, dst string) error {
 			return os.MkdirAll(to, 0o755)
 		}
 		if !d.Type().IsRegular() {
-			return fmt.Errorf("版本快照含非常规文件: %s", p)
+			return fmt.Errorf(i18n.Text("version snapshot contains an irregular file: %s"), p)
 		}
 		data, err := os.ReadFile(p)
 		if err != nil {
@@ -132,7 +134,7 @@ func Install(srcDir, dst string) (restore func() error, commit func(), err error
 	os.RemoveAll(tmp)
 	if err := CopyDir(srcDir, tmp); err != nil {
 		os.RemoveAll(tmp)
-		return nil, nil, fmt.Errorf("拷贝到临时目录失败: %w", err)
+		return nil, nil, fmt.Errorf(i18n.Text("copy to temporary directory failed: %w"), err)
 	}
 
 	bak := ""
@@ -141,7 +143,7 @@ func Install(srcDir, dst string) (restore func() error, commit func(), err error
 		os.RemoveAll(bak)
 		if err := os.Rename(dst, bak); err != nil {
 			os.RemoveAll(tmp)
-			return nil, nil, fmt.Errorf("备份既有目录失败: %w", err)
+			return nil, nil, fmt.Errorf(i18n.Text("backing up the existing directory failed: %w"), err)
 		}
 	}
 	if err := os.Rename(tmp, dst); err != nil {
@@ -149,7 +151,7 @@ func Install(srcDir, dst string) (restore func() error, commit func(), err error
 			os.Rename(bak, dst) // Best-effort restoration.
 		}
 		os.RemoveAll(tmp)
-		return nil, nil, fmt.Errorf("落盘失败: %w", err)
+		return nil, nil, fmt.Errorf(i18n.Text("writing to disk failed: %w"), err)
 	}
 
 	restore = func() error {

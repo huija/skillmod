@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-// Package address parses the <repo>[//<subdir>][@<ref>] addressing syntax (dev-design §4).
+// Package address parses the <repo>[//<subdir>][@<ref>] addressing syntax.
 package address
 
 import (
@@ -10,6 +10,8 @@ import (
 	"path"
 	"regexp"
 	"strings"
+
+	"github.com/huija/skillmod/internal/i18n"
 )
 
 // Address is a parsed skill address.
@@ -38,7 +40,7 @@ var scpLike = regexp.MustCompile(`^[^/@\s:]+@[^/@\s:]+:`)
 // Branch names are rejected later by package resolve using ls-remote data rather than string heuristics.
 func Parse(raw string) (*Address, error) {
 	if raw == "" {
-		return nil, fmt.Errorf("寻址串为空，格式为 <repo>[//<subdir>][@<ref>]")
+		return nil, fmt.Errorf("%s", i18n.Text("address is empty; expected <repo>[//<subdir>][@<ref>]"))
 	}
 
 	base, ref, err := splitRef(raw)
@@ -51,10 +53,10 @@ func Parse(raw string) (*Address, error) {
 		return nil, err
 	}
 	if repo == "" {
-		return nil, fmt.Errorf("缺少仓库地址: %q", raw)
+		return nil, fmt.Errorf(i18n.Text("missing repository address: %q"), raw)
 	}
 	if strings.ContainsAny(repo, " \t") {
-		return nil, fmt.Errorf("仓库地址含空白字符: %q", repo)
+		return nil, fmt.Errorf(i18n.Text("repository address contains whitespace: %q"), repo)
 	}
 	repo = normalizeRepo(repo)
 
@@ -75,16 +77,16 @@ func splitRef(s string) (base, ref string, err error) {
 	}
 	if suffix := s[i+1:]; suffix == "" || strings.Contains(suffix, "/") {
 		if suffix == "" {
-			return "", "", fmt.Errorf("@ 后缺少版本引用: %q", s)
+			return "", "", fmt.Errorf(i18n.Text("missing version reference after @: %q"), s)
 		}
 		return s, "", nil // git@host:path form with no ref
 	}
 	if s[:i] == "" {
-		return "", "", fmt.Errorf("缺少仓库地址: %q", s)
+		return "", "", fmt.Errorf(i18n.Text("missing repository address: %q"), s)
 	}
 	ref = s[i+1:]
 	if strings.ContainsAny(ref, " \t") {
-		return "", "", fmt.Errorf("版本引用含空白字符: %q", ref)
+		return "", "", fmt.Errorf(i18n.Text("version reference contains whitespace: %q"), ref)
 	}
 	return s[:i], ref, nil
 }
@@ -101,7 +103,7 @@ func splitSubdir(s string) (repo, subdir string, err error) {
 	}
 	repo, subdir = s[:off+rel], s[off+rel+2:]
 	if subdir == "" {
-		return "", "", fmt.Errorf("// 后缺少子目录: %q", s)
+		return "", "", fmt.Errorf(i18n.Text("missing subdirectory after //: %q"), s)
 	}
 	return repo, subdir, nil
 }
@@ -117,11 +119,11 @@ func normalizeRepo(repo string) string {
 // cleanSubdir validates a canonical slash-separated Git path with no redundant or escaping segments.
 func cleanSubdir(s string) (string, error) {
 	if strings.Contains(s, "\\") {
-		return "", fmt.Errorf("子目录须用 / 分隔: %q", s)
+		return "", fmt.Errorf(i18n.Text("subdirectory must use / separators: %q"), s)
 	}
 	c := path.Clean(s)
 	if c != s || c == "." || c == ".." || strings.HasPrefix(c, "../") {
-		return "", fmt.Errorf("子目录路径不规范: %q（应为 %q 形式，不含 . / .. / 多余斜杠）", s, strings.TrimPrefix(c, "./"))
+		return "", fmt.Errorf(i18n.Text("non-canonical subdirectory path: %q (expected %q without '.', '..', or redundant slashes)"), s, strings.TrimPrefix(c, "./"))
 	}
 	return s, nil
 }

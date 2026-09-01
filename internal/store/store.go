@@ -27,6 +27,7 @@ import (
 
 	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/filelock"
+	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/resolve"
 	"github.com/huija/skillmod/internal/source"
 	"golang.org/x/mod/module"
@@ -45,13 +46,13 @@ type Store struct {
 func Open() (*Store, error) {
 	if root := os.Getenv(HomeEnv); root != "" {
 		if !filepath.IsAbs(root) {
-			return nil, fmt.Errorf("%s 必须是绝对路径: %q", HomeEnv, root)
+			return nil, fmt.Errorf(i18n.Text("%s must be an absolute path: %q"), HomeEnv, root)
 		}
 		return newStore(filepath.Clean(root), true), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, fmt.Errorf("确定用户主目录: %w", err)
+		return nil, fmt.Errorf(i18n.Text("determine user home directory: %w"), err)
 	}
 	return newStore(filepath.Join(home, ".agents", "skillmod"), true), nil
 }
@@ -99,7 +100,7 @@ type SnapshotConflictError struct {
 }
 
 func (e *SnapshotConflictError) Error() string {
-	return fmt.Sprintf("版本快照冲突，拒绝覆盖 %s\n已有: %s @ %s (%s)\n请求: %s @ %s (%s)\n可能原因：远端 tag 被移动或同一版本内容被改写",
+	return i18n.Format("version snapshot conflict; refusing to overwrite %s\nexisting:  %s @ %s (%s)\nrequested: %s @ %s (%s)\nPossible cause: the remote tag moved or the contents of the same version were rewritten",
 		e.Path,
 		e.Have.Version, shortCommit(e.Have.Commit), displayHash(e.Have.Treehash),
 		e.Want.Version, shortCommit(e.Want.Commit), displayHash(e.Want.Treehash))
@@ -112,12 +113,12 @@ type CorruptError struct {
 }
 
 func (e *CorruptError) Error() string {
-	return fmt.Sprintf("全局版本快照损坏或被修改: %s（%s）", e.Path, e.Detail)
+	return i18n.Format("global version snapshot is corrupt or modified: %s (%s)", e.Path, e.Detail)
 }
 
 func shortCommit(commit string) string {
 	if commit == "" {
-		return "commit 待解析"
+		return i18n.Text("commit pending resolution")
 	}
 	if len(commit) > 12 {
 		return commit[:12]
@@ -127,7 +128,7 @@ func shortCommit(commit string) string {
 
 func displayHash(hash string) string {
 	if hash == "" {
-		return "哈希待校验"
+		return i18n.Text("hash pending verification")
 	}
 	return hash
 }
@@ -150,7 +151,7 @@ func versionKey(version string) (prefix, key string, err error) {
 		semverVersion = semverVersion[i+1:]
 	}
 	if !semver.IsValid(semverVersion) {
-		return "", "", fmt.Errorf("版本不是规范 semver/伪版本: %q", version)
+		return "", "", fmt.Errorf(i18n.Text("version is not a canonical semver or pseudo-version: %q"), version)
 	}
 	key, err = module.EscapeVersion(semverVersion)
 	return prefix, key, err
@@ -185,7 +186,7 @@ func repoPath(repo string) (string, error) {
 	identity := source.RepoIdentity(repo)
 	u, err := url.Parse(identity)
 	if err != nil {
-		return "", fmt.Errorf("解析仓库身份 %q: %w", identity, err)
+		return "", fmt.Errorf(i18n.Text("parse repository identity %q: %w"), identity, err)
 	}
 	var raw []string
 	if u.Scheme != "" {
@@ -210,12 +211,12 @@ func repoPath(repo string) (string, error) {
 		}
 	}
 	if len(raw) < 2 {
-		return "", fmt.Errorf("仓库身份缺少项目路径: %q", identity)
+		return "", fmt.Errorf(i18n.Text("repository identity has no project path: %q"), identity)
 	}
 	escaped := make([]string, 0, len(raw))
 	for _, segment := range raw {
 		if segment == "" || segment == "." || segment == ".." {
-			return "", fmt.Errorf("仓库身份包含不安全路径段: %q", identity)
+			return "", fmt.Errorf(i18n.Text("repository identity contains an unsafe path segment: %q"), identity)
 		}
 		escaped = append(escaped, escapePathSegment(segment))
 	}
@@ -284,14 +285,14 @@ func (s *Store) FindSnapshotVersionByCommit(repo, commit string) (string, bool, 
 		}
 		var info SnapshotInfo
 		if err := json.Unmarshal(data, &info); err != nil {
-			return "", false, fmt.Errorf("版本元数据无法解析 %s: %w", filepath.Join(dir, entry.Name()), err)
+			return "", false, fmt.Errorf(i18n.Text("cannot parse version metadata %s: %w"), filepath.Join(dir, entry.Name()), err)
 		}
 		if source.RepoIdentity(info.Repo) != source.RepoIdentity(repo) {
-			return "", false, fmt.Errorf("版本元数据 repo 身份不匹配: %s", filepath.Join(dir, entry.Name()))
+			return "", false, fmt.Errorf(i18n.Text("version metadata repository identity mismatch: %s"), filepath.Join(dir, entry.Name()))
 		}
 		expectedPath, err := s.snapshotInfoPath(repo, info.Version)
 		if err != nil || filepath.Clean(expectedPath) != filepath.Join(dir, entry.Name()) {
-			return "", false, fmt.Errorf("版本元数据 version 与文件名不匹配: %s", filepath.Join(dir, entry.Name()))
+			return "", false, fmt.Errorf(i18n.Text("version metadata version does not match its file name: %s"), filepath.Join(dir, entry.Name()))
 		}
 		if info.Commit == commit {
 			return info.Version, true, nil
@@ -317,24 +318,24 @@ func (s *Store) GetSnapshot(repo, version string) (*Snapshot, error) {
 		return nil, fs.ErrNotExist
 	}
 	if infoErr != nil {
-		return nil, &CorruptError{Path: dir, Detail: "版本元数据不可读: " + infoErr.Error()}
+		return nil, &CorruptError{Path: dir, Detail: i18n.Text("version metadata is unreadable: ") + infoErr.Error()}
 	}
 	if dirErr != nil {
-		return nil, &CorruptError{Path: dir, Detail: "版本目录不可读: " + dirErr.Error()}
+		return nil, &CorruptError{Path: dir, Detail: i18n.Text("version directory is unreadable: ") + dirErr.Error()}
 	}
 	var info SnapshotInfo
 	if err := json.Unmarshal(data, &info); err != nil {
-		return nil, &CorruptError{Path: dir, Detail: "版本元数据无法解析: " + err.Error()}
+		return nil, &CorruptError{Path: dir, Detail: i18n.Text("cannot parse version metadata: ") + err.Error()}
 	}
 	if source.RepoIdentity(info.Repo) != source.RepoIdentity(repo) || info.Version != version {
-		return nil, &CorruptError{Path: dir, Detail: "版本元数据的 repo/version 与目录身份不一致"}
+		return nil, &CorruptError{Path: dir, Detail: i18n.Text("repository/version in version metadata does not match the directory identity")}
 	}
 	h, err := dirhash.HashDir(dir)
 	if err != nil {
-		return nil, &CorruptError{Path: dir, Detail: "版本目录无法校验: " + err.Error()}
+		return nil, &CorruptError{Path: dir, Detail: i18n.Text("version directory cannot be verified: ") + err.Error()}
 	}
 	if h != info.Treehash {
-		return nil, &CorruptError{Path: dir, Detail: fmt.Sprintf("treehash 不符，记录 %s，实算 %s", info.Treehash, h)}
+		return nil, &CorruptError{Path: dir, Detail: i18n.Format("treehash mismatch: recorded %s, computed %s", info.Treehash, h)}
 	}
 	return &Snapshot{Info: info, ContentDir: dir}, nil
 }
@@ -384,7 +385,7 @@ func (s *Store) PutSnapshot(info SnapshotInfo, files []source.File) (*Snapshot, 
 		return nil, err
 	}
 	if gotHash != info.Treehash {
-		return nil, fmt.Errorf("写入版本快照前 treehash 校验失败: 期望 %s，实算 %s", info.Treehash, gotHash)
+		return nil, fmt.Errorf(i18n.Text("treehash verification failed before writing version snapshot: expected %s, computed %s"), info.Treehash, gotHash)
 	}
 	meta, err := json.MarshalIndent(info, "", "  ")
 	if err != nil {
@@ -412,20 +413,20 @@ func (s *Store) PutSnapshot(info SnapshotInfo, files []source.File) (*Snapshot, 
 		return nil, err
 	}
 	if err := os.Rename(tmp, dst); err != nil {
-		return nil, fmt.Errorf("版本快照落盘失败: %w", err)
+		return nil, fmt.Errorf(i18n.Text("failed to commit version snapshot to disk: %w"), err)
 	}
 	if err := replaceFile(metaTmpName, infoPath); err != nil {
 		_ = os.RemoveAll(dst)
-		return nil, fmt.Errorf("版本元数据落盘失败: %w", err)
+		return nil, fmt.Errorf(i18n.Text("failed to commit version metadata to disk: %w"), err)
 	}
 	if s.readOnly {
 		if err := os.Chmod(infoPath, 0o444); err != nil {
-			return nil, fmt.Errorf("设置版本元数据只读失败: %w", err)
+			return nil, fmt.Errorf(i18n.Text("failed to make version metadata read-only: %w"), err)
 		}
 	}
 	if s.readOnly {
 		if err := makeReadOnly(dst); err != nil {
-			return nil, fmt.Errorf("设置版本快照只读失败: %w", err)
+			return nil, fmt.Errorf(i18n.Text("failed to make version snapshot read-only: %w"), err)
 		}
 	}
 	return &Snapshot{Info: info, ContentDir: dst}, nil
@@ -435,7 +436,7 @@ func writeTree(dir string, files []source.File) error {
 	for _, f := range files {
 		rel := filepath.Clean(filepath.FromSlash(f.Path))
 		if rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("skill 文件路径不安全: %q", f.Path)
+			return fmt.Errorf(i18n.Text("unsafe skill file path: %q"), f.Path)
 		}
 		p := filepath.Join(dir, rel)
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
@@ -498,10 +499,10 @@ func (s *Store) GetRepoRefs(repo string) (*resolve.Refs, bool, error) {
 	}
 	var rec repoRefsRecord
 	if err := json.Unmarshal(data, &rec); err != nil {
-		return nil, false, fmt.Errorf("repo 引用缓存损坏 %s: %w", p, err)
+		return nil, false, fmt.Errorf(i18n.Text("repository reference cache is corrupt %s: %w"), p, err)
 	}
 	if source.RepoIdentity(rec.Repo) != source.RepoIdentity(repo) {
-		return nil, false, fmt.Errorf("repo 引用缓存身份不匹配: %s", p)
+		return nil, false, fmt.Errorf(i18n.Text("repository reference cache identity mismatch: %s"), p)
 	}
 	if rec.Refs.Tags == nil {
 		rec.Refs.Tags = map[string]string{}
@@ -516,7 +517,7 @@ func (s *Store) GetRepoRefs(repo string) (*resolve.Refs, bool, error) {
 // is left untouched so multiple skills from the same repo do not churn the file.
 func (s *Store) PutRepoRefs(repo string, refs *resolve.Refs) error {
 	if refs == nil {
-		return fmt.Errorf("repo 引用缓存不能为空")
+		return fmt.Errorf("%s", i18n.Text("repository reference cache cannot be nil"))
 	}
 	p := s.repoRefsPath(repo)
 	rec := repoRefsRecord{Repo: source.RepoIdentity(repo), Refs: *refs}
@@ -589,10 +590,10 @@ func (s *Store) GetResolved(repo, subdir, ref string) (ResolveEntry, bool, error
 	}
 	var rec resolveRecord
 	if err := json.Unmarshal(data, &rec); err != nil {
-		return ResolveEntry{}, false, fmt.Errorf("解析缓存索引损坏 %s: %w", p, err)
+		return ResolveEntry{}, false, fmt.Errorf(i18n.Text("resolution cache index is corrupt %s: %w"), p, err)
 	}
 	if source.RepoIdentity(rec.Repo) != source.RepoIdentity(repo) || rec.Subdir != subdir || rec.Ref != ref {
-		return ResolveEntry{}, false, fmt.Errorf("解析缓存索引身份不匹配: %s", p)
+		return ResolveEntry{}, false, fmt.Errorf(i18n.Text("resolution cache index identity mismatch: %s"), p)
 	}
 	return rec.ResolveEntry, true, nil
 }

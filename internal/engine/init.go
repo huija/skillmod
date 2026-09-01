@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/huija/skillmod/internal/dirhash"
+	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/install"
 	"github.com/huija/skillmod/internal/modfile"
 	"github.com/huija/skillmod/internal/resolve"
@@ -27,10 +28,10 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 	modPath := filepath.Join(e.Root, modfile.ModFileName)
 	if _, err := os.Stat(modPath); err == nil {
 		if !force {
-			return nil, fmt.Errorf("已存在 %s\n建议：确认后再用 --force 重新生成（原文件备份为 SKILL.mod.bak）", modPath)
+			return nil, fmt.Errorf(i18n.Text("%s already exists\nAdvice: review it, then use --force to regenerate it (the original is backed up as SKILL.mod.bak)"), modPath)
 		}
 		if err := copyFile(modPath, modPath+".bak"); err != nil {
-			return nil, fmt.Errorf("备份失败: %w", err)
+			return nil, fmt.Errorf(i18n.Text("backup failed: %w"), err)
 		}
 	}
 
@@ -63,12 +64,12 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 			name, err := source.SkillNameFromDir(dir)
 			if err != nil {
 				s.name = d.Name() // Use the directory name as specified by the PRD §3.1 error table.
-				s.note = "SKILL.md name 解析失败，以目录名占位，请人工修正"
+				s.note = i18n.Text("failed to parse the SKILL.md name; using the directory name as a placeholder—please correct it manually")
 			} else {
 				s.name = name
 			}
 			if prev, ok := seen[s.name]; ok {
-				prev.note = "同名 skill 出现在多个平台目录，已合并为一条"
+				prev.note = i18n.Text("a skill with the same name appears in multiple platform directories; merged into one entry")
 				continue // Treat matching names as the same skill.
 			}
 			seen[s.name] = s
@@ -86,7 +87,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 		refs, err := e.Source.Refs(rctx, repo)
 		cancel()
 		if err != nil {
-			io.printf("提示: 源 %s 匹配失败（%v），相关条目按 local 处理", repo, err)
+			io.printf(i18n.Text("notice: failed to match source %s (%v); related entries will be treated as local"), repo, err)
 			continue
 		}
 		sources = append(sources, srcRefs{repo, refs})
@@ -141,19 +142,19 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 	}
 
 	if len(rep.Entries) == 0 {
-		rep.Notes = append(rep.Notes, "未发现 skill，已生成空清单，可用 skillmod get 添加")
+		rep.Notes = append(rep.Notes, i18n.Text("no skills found; generated an empty manifest—use skillmod get to add one"))
 	}
 
 	// Confirm each entry individually as required by the PRD interaction flow.
 	if !io.Yes && io.Confirm == nil {
-		rep.Notes = append(rep.Notes, "非交互环境未确认：重跑加 --yes 全部采纳")
-		return rep, fmt.Errorf("init 需要确认：交互模式逐项选择，或 --yes 全部采纳")
+		rep.Notes = append(rep.Notes, i18n.Text("not confirmed in a non-interactive environment; rerun with --yes to accept all entries"))
+		return rep, fmt.Errorf("%s", i18n.Text("init requires confirmation: select each entry interactively or use --yes to accept all"))
 	}
 	if io.Confirm != nil && !io.Yes {
 		var kept []modfile.ModSkill
 		var keptEntries []EntryReport
 		for i, sk := range m.Skills {
-			if io.Confirm.Confirm(fmt.Sprintf("采纳条目 %s（%s）？", sk.Name, rep.Entries[i].Action)) {
+			if io.Confirm.Confirm(i18n.Format("accept entry %s (%s)?", sk.Name, rep.Entries[i].Action)) {
 				kept = append(kept, sk)
 				keptEntries = append(keptEntries, rep.Entries[i])
 			}
@@ -175,7 +176,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 	}
 
 	if io.DryRun {
-		rep.Notes = append(rep.Notes, "dry-run：未写任何文件")
+		rep.Notes = append(rep.Notes, i18n.Text("dry-run: no files were written"))
 		return rep, nil
 	}
 	if err := modfile.SaveMod(e.Root, m); err != nil {
@@ -186,8 +187,8 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 			return nil, err
 		}
 	}
-	io.printf("已生成 %s（%d 个条目），原文件零改动", modPath, len(m.Skills))
-	io.printf("下一步：skillmod sync 对齐锁定状态，并将 SKILL.mod / SKILL.lock 提交进版本库")
+	io.printf(i18n.Text("generated %s (%d entries) without changing the original files"), modPath, len(m.Skills))
+	io.printf(i18n.Text("next: run skillmod sync to align the locked state, then commit SKILL.mod and SKILL.lock"))
 	return rep, nil
 }
 

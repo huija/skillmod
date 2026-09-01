@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/huija/skillmod/internal/dirhash"
+	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/resolve"
 )
 
@@ -39,20 +40,20 @@ func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 			continue
 		}
 		// Installation status.
-		status := "已安装"
+		status := "installed"
 		lk := findLock(lock, sk.Name)
 		if lk == nil {
-			status = "未锁定"
+			status = "unlocked"
 		} else {
 			for _, a := range adapters {
 				dst := adapterDir(a, e.Root, sk.DirName())
 				h, err := dirhash.HashDir(dst)
 				if err != nil {
-					status = "缺失"
+					status = "missing"
 					break
 				}
 				if h != lk.Dirhash {
-					status = "漂移"
+					status = "drift"
 					break
 				}
 			}
@@ -76,7 +77,7 @@ func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 				latestCache[key] = latest
 			}
 			if latest != "" && latest != sk.Version {
-				entry.Note = "可升级 → " + latest
+				entry.Note = i18n.Text("upgrade available → ") + latest
 			}
 		}
 		rep.Entries = append(rep.Entries, entry)
@@ -85,9 +86,24 @@ func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 	for _, en := range rep.Entries {
 		note := ""
 		if en.Note != "" {
-			note = "（" + en.Note + "）"
+			note = i18n.Format(" (%s)", en.Note)
 		}
-		io.printf("%-24s %-28s %s%s", en.Name, en.Version, en.Action, note)
+		io.printf("%-24s %-28s %s%s", en.Name, en.Version, displayListAction(en.Action), note)
 	}
 	return rep, nil
+}
+
+func displayListAction(action string) string {
+	switch action {
+	case "installed":
+		return i18n.Text("installed")
+	case "unlocked":
+		return i18n.Text("unlocked")
+	case "missing":
+		return i18n.Text("missing")
+	case "drift":
+		return i18n.Text("drift")
+	default:
+		return action
+	}
 }

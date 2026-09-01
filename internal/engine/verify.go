@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/huija/skillmod/internal/dirhash"
+	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/modfile"
 )
 
@@ -34,7 +35,7 @@ func (e *Engine) Verify(ctx context.Context, io IO) (*Report, error) {
 	for _, sk := range m.Skills {
 		lk := findLock(lock, sk.Name)
 		if lk == nil {
-			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Source: sk.Source, Action: "drift", Note: "SKILL.lock 中无记录，建议执行 skillmod sync"})
+			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Source: sk.Source, Action: "drift", Note: i18n.Text("no record in SKILL.lock; run skillmod sync")})
 			drift = true
 			continue
 		}
@@ -43,12 +44,12 @@ func (e *Engine) Verify(ctx context.Context, io IO) (*Report, error) {
 			h, err := dirhash.HashDir(dst)
 			switch {
 			case err != nil:
-				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "drift", Note: "缺失: " + dst, Targets: []string{dst}})
+				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "drift", Note: i18n.Text("missing: ") + dst, Targets: []string{dst}})
 				drift = true
 			case h != lk.Dirhash:
-				kind := "内容与锁定不符"
+				kind := i18n.Text("contents do not match the lock")
 				if sk.Local {
-					kind = "local 条目内容与基线不符（本地改动）"
+					kind = i18n.Text("local entry contents do not match the baseline (local changes)")
 				}
 				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "drift", Note: kind, Targets: []string{dst}})
 				drift = true
@@ -60,14 +61,14 @@ func (e *Engine) Verify(ctx context.Context, io IO) (*Report, error) {
 	// Report stale entries without treating them as drift.
 	for _, lk := range staleEntries(m, lock) {
 		rep.Entries = append(rep.Entries, EntryReport{
-			Name: lk.Name, Action: "stale", Note: "已从 mod 移除，建议 skillmod prune 清理"})
+			Name: lk.Name, Action: "stale", Note: i18n.Text("removed from the mod; run skillmod prune to clean it")})
 	}
 
 	if drift {
-		io.printf("校验结论：有漂移")
+		io.printf(i18n.Text("verification result: drift detected"))
 		return rep, &DriftError{Report: rep}
 	}
-	io.printf("校验结论：全部一致")
+	io.printf(i18n.Text("verification result: all entries are consistent"))
 	return rep, nil
 }
 
@@ -75,7 +76,7 @@ func (e *Engine) Verify(ctx context.Context, io IO) (*Report, error) {
 func loadLockStrict(root string) (*modfile.Lock, error) {
 	l, err := modfile.LoadLock(root)
 	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("未找到 SKILL.lock\n建议先执行 skillmod sync 生成锁定文件")
+		return nil, fmt.Errorf("%s", i18n.Text("SKILL.lock not found\nAdvice: run skillmod sync first to generate the lock file"))
 	}
 	return l, err
 }

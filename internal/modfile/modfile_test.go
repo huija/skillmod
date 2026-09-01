@@ -10,7 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/huija/skillmod/internal/testutil"
 )
+
+func TestMain(m *testing.M) { testutil.RunMain(m) }
 
 // This PRD §3.0 format example keeps the implementation textually aligned with the specification.
 const prdModExample = `schemaversion = 1
@@ -65,12 +69,12 @@ func TestParseLock_PRDExample(t *testing.T) {
 func TestParseMod_FutureSchemaRejected(t *testing.T) {
 	_, err := ParseMod([]byte("schemaversion = 99\n"))
 	if err == nil || !strings.Contains(err.Error(), "schemaversion") {
-		t.Errorf("err = %v, want schemaversion 拒绝", err)
+		t.Errorf("err = %v, want unsupported schemaversion rejection", err)
 	}
 }
 
 func TestParseMod_UnknownFieldsTolerated(t *testing.T) {
-	// requires is reserved; v0.1 does not parse it but must not reject it.
+	// requires is reserved; v0.0.1 does not parse it but must not reject it.
 	m, err := ParseMod([]byte("schemaversion = 1\n\n[[skill]]\nname = \"a\"\nrequires = [\"b\"]\n"))
 	if err != nil {
 		t.Fatalf("ParseMod with requires: %v", err)
@@ -104,7 +108,7 @@ func TestMarshalLock_Deterministic(t *testing.T) {
 			t.Fatal(err)
 		}
 		if !bytes.Equal(first, again) {
-			t.Fatal("重复序列化结果不一致")
+			t.Fatal("repeated serialization produced different bytes")
 		}
 	}
 	// Entry sorting makes unordered input produce the same bytes as ordered input.
@@ -114,14 +118,14 @@ func TestMarshalLock_Deterministic(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(first, revOut) {
-		t.Errorf("排序不确定：\n正序:\n%s\n乱序:\n%s", first, revOut)
+		t.Errorf("sorting is nondeterministic:\nordered:\n%s\nreversed:\n%s", first, revOut)
 	}
 	// The file ends with exactly one newline and contains no \r.
 	if !bytes.HasSuffix(first, []byte("}\n")) && !strings.HasSuffix(string(first), "\n") {
-		t.Error("缺少文件尾换行")
+		t.Error("serialized file is missing its trailing newline")
 	}
 	if bytes.HasSuffix(first, []byte("\n\n")) || bytes.Contains(first, []byte("\r")) {
-		t.Error("文件尾多余换行或含 \\r")
+		t.Error("serialized file has extra trailing newlines or contains \\r")
 	}
 }
 
@@ -131,7 +135,7 @@ func TestMarshalMod_DoesNotMutateInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	if m.Skills[0].Name != "b" {
-		t.Error("MarshalMod 修改了调用方的切片顺序")
+		t.Error("MarshalMod mutated the caller's slice order")
 	}
 }
 
@@ -154,19 +158,31 @@ func TestMod_RoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(data, again) {
-		t.Errorf("round-trip 不稳定：\n%s\n---\n%s", data, again)
+		t.Errorf("round trip is unstable:\n%s\n---\n%s", data, again)
 	}
 }
 
 func TestSaveAndLoad_Atomic(t *testing.T) {
 	dir := t.TempDir()
+	m := &Mod{SchemaVersion: SchemaVersion, Skills: []ModSkill{{Name: "local", Local: true}}}
+	if err := SaveMod(dir, m); err != nil {
+		t.Fatal(err)
+	}
+	loadedMod, err := LoadMod(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loadedMod.Skills) != 1 || loadedMod.Skills[0].Name != "local" {
+		t.Fatalf("LoadMod = %+v", loadedMod.Skills)
+	}
+
 	l := &Lock{Skills: []LockSkill{{Name: "a", Source: "s", Version: "v1.0.0", Dirhash: "h1:x"}}}
 	if err := SaveLock(dir, l); err != nil {
 		t.Fatal(err)
 	}
 	// Leave no temporary files.
 	if _, err := os.Stat(filepath.Join(dir, LockFileName+".tmp")); !os.IsNotExist(err) {
-		t.Error("残留 .tmp 文件")
+		t.Error("temporary file remains after atomic save")
 	}
 	back, err := LoadLock(dir)
 	if err != nil {
@@ -175,7 +191,38 @@ func TestSaveAndLoad_Atomic(t *testing.T) {
 	if len(back.Skills) != 1 || back.Skills[0].Dirhash != "h1:x" {
 		t.Errorf("LoadLock = %+v", back.Skills)
 	}
+	if err := os.Remove(filepath.Join(dir, ModFileName)); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := LoadMod(dir); !os.IsNotExist(err) {
-		t.Errorf("缺失 SKILL.mod 时 err = %v, want ErrNotExist", err)
+		t.Errorf("missing SKILL.mod error = %v, want ErrNotExist", err)
+	}
+}
+
+func TestParseRejectsMalformedTOML(t *testing.T) {
+	if _, err := ParseMod([]byte("schemaversion = [")); err == nil || !strings.Contains(err.Error(), "SKILL.mod") {
+		t.Fatalf("ParseMod error = %v", err)
+	}
+	if _, err := ParseLock([]byte("[[skill]\n")); err == nil || !strings.Contains(err.Error(), "SKILL.lock") {
+		t.Fatalf("ParseLock error = %v", err)
+	}
+}
+
+func TestAtomicWriteFailureDoesNotLeaveTemporaryFile(t *testing.T) {
+	missingParent := filepath.Join(t.TempDir(), "missing", ModFileName)
+	if err := atomicWrite(missingParent, []byte("data")); err == nil || !strings.Contains(err.Error(), "write SKILL.mod") {
+		t.Fatalf("missing parent error = %v", err)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, ModFileName)
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicWrite(path, []byte("data")); err == nil || !strings.Contains(err.Error(), "commit SKILL.mod") {
+		t.Fatalf("rename error = %v", err)
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("temporary file remains after failed rename: %v", err)
 	}
 }

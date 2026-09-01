@@ -9,7 +9,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/huija/skillmod/internal/i18n"
+	"github.com/huija/skillmod/internal/testutil"
 )
+
+func TestMain(m *testing.M) { testutil.RunMain(m) }
 
 const sha1 = "0123456789abcdef0123456789abcdef01234567"
 const sha2 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -42,15 +47,15 @@ func TestResolve_Explicit(t *testing.T) {
 		wantCommit  string
 		wantErr     any // nil means no error; otherwise this is the errors.As target
 	}{
-		{"根 tag 精确命中", Request{Ref: "v1.0.0"}, "v1.0.0", sha1, nil},
-		{"子目录裸版本自动补前缀", Request{Subdir: "code-review", Ref: "v1.2.0"}, "code-review/v1.2.0", sha2, nil},
-		{"子目录写全 tag 也命中", Request{Subdir: "code-review", Ref: "code-review/v1.0.0"}, "code-review/v1.0.0", sha1, nil},
-		{"子目录裸版本回退根 tag", Request{Subdir: "pdf", Ref: "v1.0.0"}, "v1.0.0", sha1, nil},
-		{"40 位 SHA 直接钉", Request{Ref: sha1}, "", sha1, nil},
-		{"子目录下 40 位 SHA", Request{Subdir: "pdf", Ref: sha2}, "", sha2, nil},
-		{"分支名拒绝", Request{Ref: "main"}, "", "", &BranchError{}},
-		{"子目录下分支名拒绝", Request{Subdir: "pdf", Ref: "dev"}, "", "", &BranchError{}},
-		{"版本不存在", Request{Ref: "v9.9.9"}, "", "", &NotFoundError{}},
+		{"exact root tag", Request{Ref: "v1.0.0"}, "v1.0.0", sha1, nil},
+		{"bare subdirectory version adds prefix", Request{Subdir: "code-review", Ref: "v1.2.0"}, "code-review/v1.2.0", sha2, nil},
+		{"fully qualified subdirectory tag", Request{Subdir: "code-review", Ref: "code-review/v1.0.0"}, "code-review/v1.0.0", sha1, nil},
+		{"bare subdirectory version falls back to root tag", Request{Subdir: "pdf", Ref: "v1.0.0"}, "v1.0.0", sha1, nil},
+		{"40-character SHA pin", Request{Ref: sha1}, "", sha1, nil},
+		{"40-character SHA under subdirectory", Request{Subdir: "pdf", Ref: sha2}, "", sha2, nil},
+		{"branch rejected", Request{Ref: "main"}, "", "", &BranchError{}},
+		{"branch under subdirectory rejected", Request{Subdir: "pdf", Ref: "dev"}, "", "", &BranchError{}},
+		{"version not found", Request{Ref: "v9.9.9"}, "", "", &NotFoundError{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -78,8 +83,9 @@ func TestResolve_BranchErrorMessage(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 	// Exact wording required by PRD §3.2.
-	if be.Error() != `分支不可锁定，请用 tag 或 commit SHA（"main" 是分支名）` {
-		t.Errorf("文案 = %q", be.Error())
+	want := i18n.Format("branches cannot be locked; use a tag or commit SHA (%q is a branch name)", "main")
+	if be.Error() != want {
+		t.Errorf("message = %q", be.Error())
 	}
 }
 
@@ -106,7 +112,7 @@ func TestResolve_NotFoundFallsBackToRootTags(t *testing.T) {
 	}
 	for _, c := range nf.Candidates {
 		if strings.Contains(c, "/") || c == "latest" {
-			t.Errorf("候选混入非根级/非 semver tag: %v", nf.Candidates)
+			t.Errorf("candidates contain a non-root or non-semver tag: %v", nf.Candidates)
 		}
 	}
 }
@@ -125,7 +131,7 @@ func TestResolve_NotFoundCapsAt10(t *testing.T) {
 		t.Errorf("len(Candidates) = %d, want 10", len(nf.Candidates))
 	}
 	if nf.Candidates[0] != "v1.11.0" {
-		t.Errorf("最高版本应为 v1.11.0, got %s", nf.Candidates[0])
+		t.Errorf("highest version = %s, want v1.11.0", nf.Candidates[0])
 	}
 }
 
@@ -138,11 +144,11 @@ func TestResolve_Latest(t *testing.T) {
 		wantCommit  string
 		wantErr     any
 	}{
-		{"根级最高 semver", testRefs(), Request{}, "v1.2.0", sha2, nil},
-		{"子目录最高 semver", testRefs(), Request{Subdir: "code-review"}, "code-review/v1.2.0", sha2, nil},
-		{"子目录无 tag 回退根级", testRefs(), Request{Subdir: "lark-doc"}, "v1.2.0", sha2, nil},
-		{"无 tag 仓走 HEAD", &Refs{Heads: map[string]string{"main": sha1}, DefaultHead: sha1}, Request{}, "", sha1, nil},
-		{"空仓库报错", &Refs{}, Request{}, "", "", &EmptyRepoError{}},
+		{"highest root semver", testRefs(), Request{}, "v1.2.0", sha2, nil},
+		{"highest subdirectory semver", testRefs(), Request{Subdir: "code-review"}, "code-review/v1.2.0", sha2, nil},
+		{"subdirectory without tag falls back to root", testRefs(), Request{Subdir: "lark-doc"}, "v1.2.0", sha2, nil},
+		{"untagged repository uses HEAD", &Refs{Heads: map[string]string{"main": sha1}, DefaultHead: sha1}, Request{}, "", sha1, nil},
+		{"empty repository returns error", &Refs{}, Request{}, "", "", &EmptyRepoError{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -171,7 +177,7 @@ func TestResolve_LatestPrefersStableOverPrerelease(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.Version != "v1.9.0" {
-		t.Errorf("Version = %q, want v1.9.0（prerelease 避让）", got.Version)
+		t.Errorf("Version = %q, want stable v1.9.0 instead of a prerelease", got.Version)
 	}
 	// Select a prerelease when it is the only option.
 	refs = &Refs{Tags: map[string]string{"v2.0.0-beta": sha2, "v2.0.0-alpha": sha1}}
@@ -186,7 +192,7 @@ func TestResolve_LatestPrefersStableOverPrerelease(t *testing.T) {
 
 func TestIsSHA(t *testing.T) {
 	if !IsSHA(sha1) {
-		t.Error("40 位 hex 应判定为 SHA")
+		t.Error("a 40-character lowercase hexadecimal string should be a SHA")
 	}
 	for _, s := range []string{"", "v1.0.0", sha1 + "0", sha1[:39], strings.ToUpper(sha1), "g123456789abcdef0123456789abcdef01234567"} {
 		if IsSHA(s) {
@@ -203,9 +209,28 @@ func TestPseudoVersion(t *testing.T) {
 		t.Errorf("PseudoVersion = %q", v)
 	}
 	if !IsPseudoVersion(v) {
-		t.Errorf("生成的伪版本 %q 未通过 IsPseudoVersion", v)
+		t.Errorf("generated pseudo-version %q was rejected by IsPseudoVersion", v)
 	}
 	if IsPseudoVersion("v1.2.0") || IsPseudoVersion("v0.0.0-999") {
-		t.Error("IsPseudoVersion 误判")
+		t.Error("IsPseudoVersion accepted a non-pseudo-version")
+	}
+}
+
+func TestResolutionErrorDiagnostics(t *testing.T) {
+	tests := []struct {
+		err  error
+		want []string
+	}{
+		{err: &NotFoundError{Ref: "v9.0.0"}, want: []string{"v9.0.0", "no available tags"}},
+		{err: &NotFoundError{Ref: "v9.0.0", Candidates: []string{"v2.0.0", "v1.0.0"}}, want: []string{"v9.0.0", "v2.0.0, v1.0.0"}},
+		{err: &EmptyRepoError{Repo: "https://example.com/acme/skills"}, want: []string{"example.com/acme/skills", "default-branch HEAD"}},
+	}
+	for _, tt := range tests {
+		message := tt.err.Error()
+		for _, want := range tt.want {
+			if !strings.Contains(message, want) {
+				t.Errorf("%T message %q is missing %q", tt.err, message, want)
+			}
+		}
 	}
 }

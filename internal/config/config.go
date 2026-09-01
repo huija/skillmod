@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/huija/skillmod/internal/i18n"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -52,7 +53,7 @@ func Load() (*Config, error) {
 	}
 	var cfg Config
 	if err := toml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("解析 %s: %w", p, err)
+		return nil, fmt.Errorf(i18n.Text("parse %s: %w"), p, err)
 	}
 	if len(cfg.Agents) == 0 {
 		cfg.Agents = Default().Agents

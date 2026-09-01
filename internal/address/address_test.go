@@ -7,7 +7,11 @@ package address
 import (
 	"strings"
 	"testing"
+
+	"github.com/huija/skillmod/internal/testutil"
 )
+
+func TestMain(m *testing.M) { testutil.RunMain(m) }
 
 func TestParse(t *testing.T) {
 	tests := []struct {
@@ -17,32 +21,32 @@ func TestParse(t *testing.T) {
 		wantErr string
 	}{
 		// Add https:// to a bare path.
-		{"裸路径", "github.com/a/b", &Address{Repo: "https://github.com/a/b"}, ""},
-		{"裸路径带子目录", "github.com/a/b//sub", &Address{Repo: "https://github.com/a/b", Subdir: "sub"}, ""},
-		{"裸路径带子目录和版本", "github.com/a/b//sub@v1.2.0", &Address{Repo: "https://github.com/a/b", Subdir: "sub", Ref: "v1.2.0"}, ""},
-		{"裸路径带版本无子目录", "github.com/a/b@v1.2.0", &Address{Repo: "https://github.com/a/b", Ref: "v1.2.0"}, ""},
+		{"bare repository", "github.com/a/b", &Address{Repo: "https://github.com/a/b"}, ""},
+		{"bare repository with subdirectory", "github.com/a/b//sub", &Address{Repo: "https://github.com/a/b", Subdir: "sub"}, ""},
+		{"bare repository with subdirectory and version", "github.com/a/b//sub@v1.2.0", &Address{Repo: "https://github.com/a/b", Subdir: "sub", Ref: "v1.2.0"}, ""},
+		{"bare repository with version", "github.com/a/b@v1.2.0", &Address{Repo: "https://github.com/a/b", Ref: "v1.2.0"}, ""},
 		// Preserve a complete URL.
 		{"https", "https://github.com/a/b", &Address{Repo: "https://github.com/a/b"}, ""},
-		{"https 带子目录", "https://github.com/a/b//sub/dir@v2.0.0", &Address{Repo: "https://github.com/a/b", Subdir: "sub/dir", Ref: "v2.0.0"}, ""},
-		{"file 协议", "file:///tmp/repo//skill", &Address{Repo: "file:///tmp/repo", Subdir: "skill"}, ""},
+		{"https with subdirectory", "https://github.com/a/b//sub/dir@v2.0.0", &Address{Repo: "https://github.com/a/b", Subdir: "sub/dir", Ref: "v2.0.0"}, ""},
+		{"file scheme", "file:///tmp/repo//skill", &Address{Repo: "file:///tmp/repo", Subdir: "skill"}, ""},
 		// In scp-like syntax, @ is not a version separator.
-		{"scp-like 无 ref", "git@github.com:a/b", &Address{Repo: "git@github.com:a/b"}, ""},
-		{"scp-like 带 ref", "git@github.com:a/b@v1.0.0", &Address{Repo: "git@github.com:a/b", Ref: "v1.0.0"}, ""},
-		{"scp-like 带子目录和 ref", "git@github.com:a/b//x@v1.0.0", &Address{Repo: "git@github.com:a/b", Subdir: "x", Ref: "v1.0.0"}, ""},
+		{"scp-like without ref", "git@github.com:a/b", &Address{Repo: "git@github.com:a/b"}, ""},
+		{"scp-like with ref", "git@github.com:a/b@v1.0.0", &Address{Repo: "git@github.com:a/b", Ref: "v1.0.0"}, ""},
+		{"scp-like with subdirectory and ref", "git@github.com:a/b//x@v1.0.0", &Address{Repo: "git@github.com:a/b", Subdir: "x", Ref: "v1.0.0"}, ""},
 		// Commit SHA reference.
-		{"40 位 SHA", "github.com/a/b@0123456789abcdef0123456789abcdef01234567", &Address{Repo: "https://github.com/a/b", Ref: "0123456789abcdef0123456789abcdef01234567"}, ""},
+		{"40-character SHA", "github.com/a/b@0123456789abcdef0123456789abcdef01234567", &Address{Repo: "https://github.com/a/b", Ref: "0123456789abcdef0123456789abcdef01234567"}, ""},
 		// Invalid addresses.
-		{"空串", "", nil, "为空"},
-		{"@ 后为空", "github.com/a/b@", nil, "缺少版本引用"},
-		{"缺仓库", "@v1.0.0", nil, "缺少仓库地址"},
-		{"// 后为空", "github.com/a/b//", nil, "缺少子目录"},
-		{"仓库含空格", "git hub.com/a/b", nil, "空白字符"},
-		{"ref 含空格", "github.com/a/b@v1 .0", nil, "空白字符"},
-		{"子目录越界", "github.com/a/b//../x", nil, "不规范"},
-		{"子目录点段", "github.com/a/b//./x", nil, "不规范"},
-		{"子目录尾斜杠", "github.com/a/b//x/", nil, "不规范"},
-		{"子目录反斜杠", `github.com/a/b//x\y`, nil, "用 / 分隔"},
-		{"子目录重复斜杠", "github.com/a/b//x//y", nil, "不规范"},
+		{"empty", "", nil, "is empty"},
+		{"empty version after at sign", "github.com/a/b@", nil, "missing version reference"},
+		{"missing repository", "@v1.0.0", nil, "missing repository address"},
+		{"empty subdirectory after separator", "github.com/a/b//", nil, "missing subdirectory"},
+		{"repository contains whitespace", "git hub.com/a/b", nil, "whitespace"},
+		{"ref contains whitespace", "github.com/a/b@v1 .0", nil, "whitespace"},
+		{"subdirectory escapes root", "github.com/a/b//../x", nil, "non-canonical"},
+		{"subdirectory dot segment", "github.com/a/b//./x", nil, "non-canonical"},
+		{"subdirectory trailing slash", "github.com/a/b//x/", nil, "non-canonical"},
+		{"subdirectory backslash", `github.com/a/b//x\y`, nil, "use / separators"},
+		{"subdirectory redundant slash", "github.com/a/b//x//y", nil, "non-canonical"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

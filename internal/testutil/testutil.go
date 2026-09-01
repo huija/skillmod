@@ -11,7 +11,18 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/huija/skillmod/internal/i18n"
 )
+
+// RunMain runs a package's tests with a deterministic English locale.
+// Packages that explicitly test locale selection should not use this helper.
+func RunMain(m *testing.M) {
+	if err := os.Setenv(i18n.Env, "en"); err != nil {
+		panic("set test locale: " + err.Error())
+	}
+	os.Exit(m.Run())
+}
 
 // Repo is a scripted test repository with a Work tree and a Bare repository created by Finish.
 // After Finish, Work and Bare are connected through origin so tests can push commits and tags to simulate upstream changes.
@@ -25,7 +36,7 @@ type Repo struct {
 func NewRepo(t *testing.T) *Repo {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git 不可用")
+		t.Skip("git is unavailable")
 	}
 	r := &Repo{t: t, Work: filepath.Join(t.TempDir(), "work")}
 	r.git("", "init", "-b", "main", r.Work)

@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-// Package resolve implements fixed-priority version resolution without heuristics (dev-design §4).
+// Package resolve implements fixed-priority version resolution without heuristics.
 //
 // This package is a pure-function layer that accepts an ls-remote snapshot (Refs) and returns a resolution or classified error.
 // It performs no network or subprocess calls; package source handles Git interactions.
@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/huija/skillmod/internal/i18n"
 	"golang.org/x/mod/semver"
 )
 
@@ -56,7 +57,7 @@ type Request struct {
 type BranchError struct{ Ref string }
 
 func (e *BranchError) Error() string {
-	return fmt.Sprintf("分支不可锁定，请用 tag 或 commit SHA（%q 是分支名）", e.Ref)
+	return i18n.Format("branches cannot be locked; use a tag or commit SHA (%q is a branch name)", e.Ref)
 }
 
 // NotFoundError reports a ref that is neither a tag nor a 40-character SHA or branch.
@@ -67,16 +68,16 @@ type NotFoundError struct {
 
 func (e *NotFoundError) Error() string {
 	if len(e.Candidates) == 0 {
-		return fmt.Sprintf("版本 %q 不存在，该仓库/子目录没有任何可用 tag", e.Ref)
+		return i18n.Format("version %q does not exist; this repository/subdirectory has no available tags", e.Ref)
 	}
-	return fmt.Sprintf("版本 %q 不存在。可用 tag（semver 降序，最多 10 个）: %s", e.Ref, strings.Join(e.Candidates, ", "))
+	return i18n.Format("version %q does not exist. Available tags (descending semver order, up to 10): %s", e.Ref, strings.Join(e.Candidates, ", "))
 }
 
 // EmptyRepoError reports a repository with no tags and no available default-branch HEAD.
 type EmptyRepoError struct{ Repo string }
 
 func (e *EmptyRepoError) Error() string {
-	return fmt.Sprintf("仓库 %s 无任何 tag，也无法解析默认分支 HEAD（空仓库或权限不足）", e.Repo)
+	return i18n.Format("repository %s has no tags and its default-branch HEAD cannot be resolved (empty repository or insufficient permissions)", e.Repo)
 }
 
 // Resolve selects a version using this fixed priority:
@@ -220,7 +221,7 @@ func IsSHA(s string) bool {
 }
 
 // PseudoVersion creates v0.0.0-<UTC commit time: yyyymmddhhmmss>-<sha12>,
-// following the Go pseudo-version format (dev-design §4).
+// following the Go pseudo-version format.
 func PseudoVersion(commitTime time.Time, sha string) string {
 	return fmt.Sprintf("v0.0.0-%s-%s", commitTime.UTC().Format("20060102150405"), sha[:12])
 }

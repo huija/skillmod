@@ -56,6 +56,22 @@ skillmod sync                                          # 按 lock 对齐，幂�
 skillmod verify                                        # CI 校验，漂移退出码非零
 ```
 
+### 命令输出语言
+
+命令帮助、执行摘要、交互提示、错误信息及 JSON 中的人类可读说明优先采用显式设置的 `SKILLMOD_LANG`。未设置时，skillmod 按 `LC_ALL` → `LC_MESSAGES` → `LANG` 读取第一个非空的系统 locale。目前识别英文和中文 locale；未设置或无法识别时回退到英文。可用 `SKILLMOD_LANG=zh` 显式选择中文；也支持 `en_US.UTF-8`、`zh_CN.UTF-8` 这类 locale 值。
+
+```bash
+SKILLMOD_LANG=zh skillmod sync
+```
+
+JSON 的字段名和供程序消费的 action 标识不会翻译。
+
+翻译统一维护在 [`locales/`](locales/) 下对等的 gettext/POSIX locale catalog：`en_US.po` 和 `zh_CN.po` 拥有完全相同的 msgid 集合。CLI 构建时会同时嵌入两份文件，后续官网和文档工具也能通过统一的 `{{locale}}.po` 路径选择语言；`SKILLMOD_LANG=en` 与 `SKILLMOD_LANG=zh` 仍作为便捷别名。修改用户可见文案后运行：
+
+```bash
+go generate ./internal/i18n
+```
+
 第一次获取某个 `repo@version` 时会物化完整仓库版本；之后添加该版本下的其他 skill，直接从本地子目录校验并安装，不调用 Git、不访问远端。显式 `@commit` 同样可通过已有 repo commit 快照复用。省略版本的 latest 与 `skillmod update` 保留联网刷新语义。
 
 ```text

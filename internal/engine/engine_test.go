@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-// Engine integration tests follow the AC traceability table in dev-design §10 and use local bare repositories through file://.
+// Engine integration tests cover the acceptance criteria and use local bare repositories through file://.
 package engine_test
 
 import (
@@ -18,6 +18,7 @@ import (
 	"github.com/huija/skillmod/internal/config"
 	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/engine"
+	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/modfile"
 	"github.com/huija/skillmod/internal/resolve"
 	"github.com/huija/skillmod/internal/source"
@@ -26,6 +27,8 @@ import (
 )
 
 var ctx = context.Background()
+
+func TestMain(m *testing.M) { testutil.RunMain(m) }
 
 func newEngine(t *testing.T, root, storeDir string) *engine.Engine {
 	t.Helper()
@@ -67,7 +70,7 @@ func loadLockSkill(t *testing.T, root, name string) modfile.LockSkill {
 			return s
 		}
 	}
-	t.Fatalf("lock 中无条目 %s: %+v", name, l.Skills)
+	t.Fatalf("lock has no entry for %s: %+v", name, l.Skills)
 	return modfile.LockSkill{}
 }
 
@@ -91,7 +94,7 @@ func TestGet_Tag(t *testing.T) {
 	}
 	lk := loadLockSkill(t, root, "hello")
 	if !strings.HasPrefix(lk.Dirhash, "h1:") || lk.Commit == "" {
-		t.Errorf("lock 条目缺 dirhash/commit: %+v", lk)
+		t.Errorf("lock entry is missing dirhash or commit: %+v", lk)
 	}
 	// Installed bytes match the Git source.
 	got, err := os.ReadFile(filepath.Join(installedDir(root, "hello"), "SKILL.md"))
@@ -100,7 +103,7 @@ func TestGet_Tag(t *testing.T) {
 	}
 	want, _ := os.ReadFile(filepath.Join(r.Work, "SKILL.md"))
 	if string(got) != string(want) {
-		t.Error("安装内容与源不一致")
+		t.Error("installed content differs from the source")
 	}
 	// Recomputing the installation directory produces the locked dirhash.
 	h, err := dirhash.HashDir(installedDir(root, "hello"))
@@ -108,8 +111,149 @@ func TestGet_Tag(t *testing.T) {
 		t.Fatal(err)
 	}
 	if h != lk.Dirhash {
-		t.Errorf("安装目录重算哈希 %s != lock %s", h, lk.Dirhash)
+		t.Errorf("recomputed installation hash %s != lock %s", h, lk.Dirhash)
 	}
+}
+
+func TestGet_DiscoversSingleSkillInSkillsDirectory(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.Write("README.md", "skill collection\n")
+	r.WriteSkill("skills/only", "only")
+	r.CommitAll("add skill collection")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get collection root: %v", err)
+	}
+	mod, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mod.Skills) != 1 || mod.Skills[0].Name != "only" || mod.Skills[0].Source != r.URL+"//skills/only" {
+		t.Fatalf("discovered mod entry = %+v", mod.Skills)
+	}
+	if _, err := os.Stat(filepath.Join(installedDir(root, "only"), "SKILL.md")); err != nil {
+		t.Fatalf("discovered skill was not installed: %v", err)
+	}
+}
+
+func TestGet_DiscoversSkillsDirectoryWithSubdirectoryTag(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.Write("README.md", "skill collection\n")
+	r.WriteSkill("skills/only", "only")
+	r.CommitAll("add skill collection")
+	r.Tag("skills/only/v1.0.0")
+	r.Finish()
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get collection root with subdirectory tag: %v", err)
+	}
+	mod, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mod.Skills) != 1 || mod.Skills[0].Source != r.URL+"//skills/only" || mod.Skills[0].Version != "skills/only/v1.0.0" {
+		t.Fatalf("discovered mod entry = %+v", mod.Skills)
+	}
+}
+
+func TestGet_SelectsFromRootAndSkillsDirectory(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.WriteSkill("", "root-skill")
+	r.WriteSkill("skills/nested", "nested-skill")
+	r.CommitAll("add root and nested skills")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	chooser := &getSkillChooser{choices: []int{1}}
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	io := engine.IO{Out: io.Discard, Err: io.Discard, Confirm: chooser}
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", io); err != nil {
+		t.Fatalf("Get collection root: %v", err)
+	}
+	if chooser.calls != 1 {
+		t.Fatalf("candidate selector calls = %d, want 1", chooser.calls)
+	}
+	if len(chooser.options) != 2 || !strings.Contains(chooser.options[1], "test skill") || !strings.Contains(chooser.options[1], "//skills/nested") {
+		t.Fatalf("candidate options = %q", chooser.options)
+	}
+	mod, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mod.Skills) != 1 || mod.Skills[0].Name != "nested-skill" || mod.Skills[0].Source != r.URL+"//skills/nested" {
+		t.Fatalf("selected mod entry = %+v", mod.Skills)
+	}
+}
+
+func TestGet_RequiresExplicitSelectionForMultipleSkills(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.WriteSkill("", "root-skill")
+	r.WriteSkill("skills/nested", "nested-skill")
+	r.CommitAll("add root and nested skills")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	eng := newEngine(t, t.TempDir(), t.TempDir())
+	_, err := eng.Get(ctx, r.URL+"@v1.0.0", "", engine.IO{Out: io.Discard, Err: io.Discard})
+	if err == nil || !strings.Contains(err.Error(), "select one or more") || !strings.Contains(err.Error(), "//skills/nested") {
+		t.Fatalf("Get multiple candidates error = %v", err)
+	}
+}
+
+func TestGet_YesInstallsAllDiscoveredNestedSkills(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.Write("README.md", "skill collection\n")
+	r.WriteSkill("skills/.curated/ci", "ci")
+	r.WriteSkill("skills/.system/review", "review")
+	r.CommitAll("add nested skill collection")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get nested collection with --yes: %v", err)
+	}
+	mod, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mod.Skills) != 2 {
+		t.Fatalf("discovered skill count = %d, want 2: %+v", len(mod.Skills), mod.Skills)
+	}
+	byName := map[string]modfile.ModSkill{}
+	for _, skill := range mod.Skills {
+		byName[skill.Name] = skill
+	}
+	if byName["ci"].Source != r.URL+"//skills/.curated/ci" || byName["review"].Source != r.URL+"//skills/.system/review" {
+		t.Fatalf("discovered nested entries = %+v", mod.Skills)
+	}
+}
+
+type getSkillChooser struct {
+	choices []int
+	calls   int
+	options []string
+}
+
+func (*getSkillChooser) Confirm(string) bool { return false }
+
+func (c *getSkillChooser) Choose(string, []string) int {
+	c.calls++
+	return 0
+}
+
+func (c *getSkillChooser) ChooseMany(_ string, options []string) []int {
+	c.calls++
+	c.options = append([]string(nil), options...)
+	return c.choices
 }
 
 func TestGet_DefaultTargetIsGenericAgents(t *testing.T) {
@@ -120,10 +264,10 @@ func TestGet_DefaultTargetIsGenericAgents(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".agents", "skills", "hello", "SKILL.md")); err != nil {
-		t.Fatalf("通用目录未安装: %v", err)
+		t.Fatalf("generic target was not installed: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".claude")); !os.IsNotExist(err) {
-		t.Fatalf("默认不应创建 .claude，stat err = %v", err)
+		t.Fatalf("default target unexpectedly created .claude; stat error = %v", err)
 	}
 }
 
@@ -146,7 +290,7 @@ func TestGet_MultiTargetAgentsAndClaude(t *testing.T) {
 		t.Fatal(err)
 	}
 	if hGeneric != hClaude {
-		t.Fatalf("双目标 dirhash 不同: agents=%s claude=%s", hGeneric, hClaude)
+		t.Fatalf("target dirhash values differ: agents=%s claude=%s", hGeneric, hClaude)
 	}
 }
 
@@ -172,7 +316,7 @@ func TestUpdate_MovedTagConflictsWithImmutableSnapshot(t *testing.T) {
 
 func TestGet_ExactSnapshotSkipsGit(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("测试使用 POSIX shell 包装器")
+		t.Skip("test uses a POSIX shell wrapper")
 	}
 	r := newHelloRepo(t)
 	sharedStore := t.TempDir()
@@ -192,12 +336,12 @@ func TestGet_ExactSnapshotSkipsGit(t *testing.T) {
 	eng.Source.Git = wrapper
 	rep, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO())
 	if err != nil {
-		t.Fatalf("精确版本快照命中失败: %v", err)
+		t.Fatalf("exact version snapshot hit failed: %v", err)
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
-		t.Fatalf("精确版本命中仍调用了 git: %v", err)
+		t.Fatalf("exact version snapshot hit still invoked git: %v", err)
 	}
-	if rep.Entries[0].Note != "来自本地版本快照，未联网校验" {
+	if rep.Entries[0].Note != i18n.Text("from a local version snapshot; not verified online") {
 		t.Fatalf("Note = %q", rep.Entries[0].Note)
 	}
 }
@@ -229,7 +373,7 @@ func TestSync_CrossMachine(t *testing.T) {
 	hB, _ := dirhash.HashDir(installedDir(rootB, "hello"))
 	lk := loadLockSkill(t, rootB, "hello")
 	if hA != hB || hB != lk.Dirhash {
-		t.Errorf("跨机不一致: A=%s B=%s lock=%s", hA, hB, lk.Dirhash)
+		t.Errorf("cross-machine mismatch: A=%s B=%s lock=%s", hA, hB, lk.Dirhash)
 	}
 }
 
@@ -250,12 +394,12 @@ func TestSync_Idempotent(t *testing.T) {
 	}
 	for _, en := range rep.Entries {
 		if en.Action == "install" {
-			t.Errorf("二次 sync 仍有安装动作: %+v", en)
+			t.Errorf("second sync still reports an install action: %+v", en)
 		}
 	}
 	st2, _ := os.Stat(lockPath)
 	if st1.ModTime() != st2.ModTime() {
-		t.Error("无变更时 SKILL.lock 被重写")
+		t.Error("SKILL.lock was rewritten without changes")
 	}
 }
 
@@ -294,12 +438,13 @@ func TestGet_BranchRejected(t *testing.T) {
 	if !errors.As(err, &be) {
 		t.Fatalf("err = %v (%T), want BranchError", err, err)
 	}
-	if !strings.Contains(err.Error(), "分支不可锁定，请用 tag 或 commit SHA") {
-		t.Errorf("文案 = %q", err)
+	wantMessage := i18n.Format("branches cannot be locked; use a tag or commit SHA (%q is a branch name)", "main")
+	if err.Error() != wantMessage {
+		t.Errorf("message = %q", err)
 	}
 	// No files were written.
 	if _, err := os.Stat(filepath.Join(root, modfile.ModFileName)); !os.IsNotExist(err) {
-		t.Error("拒绝后仍写入了 SKILL.mod")
+		t.Error("SKILL.mod was written after the request was rejected")
 	}
 }
 
@@ -318,7 +463,7 @@ func TestGet_ByCommitSHA(t *testing.T) {
 	}
 	lk := loadLockSkill(t, root, "noskill-tag")
 	if !resolve.IsPseudoVersion(lk.Version) {
-		t.Errorf("lock 版本 %q 不是伪版本", lk.Version)
+		t.Errorf("locked version %q is not a pseudo-version", lk.Version)
 	}
 	if lk.Commit != sha {
 		t.Errorf("lock commit = %s, want %s", lk.Commit, sha)
@@ -332,7 +477,7 @@ func TestGet_ByCommitSHA(t *testing.T) {
 	}
 	lk2 := loadLockSkill(t, root2, "noskill-tag")
 	if lk2.Version != lk.Version {
-		t.Errorf("伪版本不可复现: %q vs %q", lk2.Version, lk.Version)
+		t.Errorf("pseudo-version is not reproducible: %q vs %q", lk2.Version, lk.Version)
 	}
 }
 
@@ -356,14 +501,14 @@ func TestGet_MonorepoSubdir(t *testing.T) {
 	}
 	// The installation contains only subtree content, not other repository content.
 	if _, err := os.Stat(filepath.Join(installedDir(root, "code-review"), "checklist.md")); err != nil {
-		t.Error("子树文件缺失")
+		t.Error("subtree file is missing")
 	}
 	if _, err := os.Stat(filepath.Join(installedDir(root, "code-review"), "pdf")); !os.IsNotExist(err) {
-		t.Error("安装目录混入了仓库其他内容")
+		t.Error("installation directory contains unrelated repository content")
 	}
 	h, _ := dirhash.HashDir(installedDir(root, "code-review"))
 	if h != lk.Dirhash {
-		t.Error("子树哈希与 lock 不一致")
+		t.Error("subtree hash differs from the lock")
 	}
 }
 
@@ -384,13 +529,13 @@ func TestGet_SameRepoVersionSecondSkillIsFullyLocal(t *testing.T) {
 	eng.Source.Git = filepath.Join(t.TempDir(), "git-must-not-run")
 	rep, err := eng.Get(ctx, r.URL+"//beta@v1.0.0", "", testIO())
 	if err != nil {
-		t.Fatalf("同 repo@version 第二个 skill 未纯本地命中: %v", err)
+		t.Fatalf("second skill at the same repo@version did not use a local-only hit: %v", err)
 	}
-	if rep.Entries[0].Note != "来自本地 repo 版本快照，未联网校验" {
-		t.Fatalf("同仓缓存提示 = %q", rep.Entries[0].Note)
+	if rep.Entries[0].Note != i18n.Text("from a local repository version snapshot; not verified online") {
+		t.Fatalf("same-repository cache note = %q", rep.Entries[0].Note)
 	}
 	if _, err := os.Stat(filepath.Join(installedDir(root, "beta"), "beta.txt")); err != nil {
-		t.Fatalf("第二个 skill 未安装: %v", err)
+		t.Fatalf("second skill was not installed: %v", err)
 	}
 	vcsEntries, err := os.ReadDir(filepath.Join(storeDir, "pkg", "mod", "cache", "vcs"))
 	if err != nil {
@@ -403,17 +548,17 @@ func TestGet_SameRepoVersionSecondSkillIsFullyLocal(t *testing.T) {
 		}
 	}
 	if vcsRepos != 1 {
-		t.Fatalf("同 repo 两个 skill 创建了 %d 个 bare repo，want 1", vcsRepos)
+		t.Fatalf("two skills from one repository created %d bare repositories, want 1", vcsRepos)
 	}
 	snapshotPath, err := eng.Store.SnapshotPath(r.URL, "v1.0.0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(snapshotPath, "alpha", "alpha.txt")); err != nil {
-		t.Fatalf("repo 快照缺少 alpha: %v", err)
+		t.Fatalf("repository snapshot is missing alpha: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(snapshotPath, "beta", "beta.txt")); err != nil {
-		t.Fatalf("repo 快照缺少 beta: %v", err)
+		t.Fatalf("repository snapshot is missing beta: %v", err)
 	}
 }
 
@@ -435,18 +580,18 @@ func TestGet_SameRepoCommitSecondSkillIsFullyLocal(t *testing.T) {
 	}
 	rep, err := eng.Get(ctx, r.URL+"//beta@"+commit, "", testIO())
 	if err != nil {
-		t.Fatalf("同 repo@commit 第二个 skill 未纯本地命中: %v", err)
+		t.Fatalf("second skill at the same repo@commit did not use a local-only hit: %v", err)
 	}
-	if rep.Entries[0].Note != "来自本地 repo commit 快照，未联网校验" {
-		t.Fatalf("commit 缓存提示 = %q", rep.Entries[0].Note)
+	if rep.Entries[0].Note != i18n.Text("from a local repository commit snapshot; not verified online") {
+		t.Fatalf("commit cache note = %q", rep.Entries[0].Note)
 	}
 	alpha := loadLockSkill(t, root, "alpha")
 	beta := loadLockSkill(t, root, "beta")
 	if alpha.Commit != commit || beta.Commit != commit || alpha.Version != beta.Version {
-		t.Fatalf("同 commit 未共享版本: alpha=%+v beta=%+v", alpha, beta)
+		t.Fatalf("skills at the same commit did not share a version: alpha=%+v beta=%+v", alpha, beta)
 	}
 	if _, err := os.Stat(filepath.Join(installedDir(root, "beta"), "beta.txt")); err != nil {
-		t.Fatalf("第二个 skill 未安装: %v", err)
+		t.Fatalf("second skill was not installed: %v", err)
 	}
 }
 
@@ -476,13 +621,13 @@ func TestGet_ExplicitLocalRepoVersionWinsOverNewSubdirTag(t *testing.T) {
 	}
 	lk := loadLockSkill(t, root, "beta")
 	if lk.Version != "v1.0.0" {
-		t.Fatalf("version = %q, want 本地根版本 v1.0.0", lk.Version)
+		t.Fatalf("version = %q, want local root version v1.0.0", lk.Version)
 	}
 	if _, err := os.Stat(filepath.Join(installedDir(root, "beta"), "old.txt")); err != nil {
-		t.Fatalf("未从本地 repo 版本安装 beta: %v", err)
+		t.Fatalf("beta was not installed from the local repository version: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(installedDir(root, "beta"), "new.txt")); !os.IsNotExist(err) {
-		t.Fatal("显式本地版本意外使用了后来新增的远端子目录 tag")
+		t.Fatal("explicit local version unexpectedly used a later remote subdirectory tag")
 	}
 }
 
@@ -516,7 +661,7 @@ func TestGet_NameConflict(t *testing.T) {
 		t.Fatalf("alias get: %v", err)
 	}
 	if _, err := os.Stat(installedDir(root, "dup-b")); err != nil {
-		t.Error("别名目录未安装")
+		t.Error("alias directory was not installed")
 	}
 }
 
@@ -544,11 +689,11 @@ func TestSync_LocalModification(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Error("未标记冲突")
+		t.Error("conflict was not reported")
 	}
 	data, _ := os.ReadFile(target)
 	if string(data) != "user modified\n" {
-		t.Error("用户修改被覆盖")
+		t.Error("user modification was overwritten")
 	}
 }
 
@@ -571,15 +716,15 @@ func TestSync_LockWins(t *testing.T) {
 	}
 	lk := loadLockSkill(t, root, "hello")
 	if lk.Version != "v1.0.0" {
-		t.Errorf("sync 后版本 = %s, want v1.0.0（lock 权威）", lk.Version)
+		t.Errorf("version after sync = %s, want authoritative locked version v1.0.0", lk.Version)
 	}
 	for _, en := range rep.Entries {
 		if en.Name == "hello" && en.Action == "install" {
-			t.Error("lock 未变时不应重装")
+			t.Error("unchanged lock should not trigger reinstallation")
 		}
 	}
 	if _, err := os.Stat(filepath.Join(installedDir(root, "hello"), "new-feature.md")); !os.IsNotExist(err) {
-		t.Error("新版本内容被安装")
+		t.Error("newer version content was installed")
 	}
 }
 
@@ -593,7 +738,7 @@ func TestVerify_Drift(t *testing.T) {
 	}
 	// Matching content passes.
 	if _, err := eng.Verify(ctx, testIO()); err != nil {
-		t.Fatalf("一致时 verify 报错: %v", err)
+		t.Fatalf("verify returned an error for a consistent installation: %v", err)
 	}
 	// Changing installed content causes drift.
 	if err := os.WriteFile(filepath.Join(installedDir(root, "hello"), "SKILL.md"), []byte("tampered\n"), 0o644); err != nil {
@@ -654,23 +799,23 @@ func TestInit_ScanAndMatch(t *testing.T) {
 		byName[sk.Name] = sk
 	}
 	if byName["pdf"].Source != monoURL+"//pdf" || byName["pdf"].Version != "pdf/v1.0.0" {
-		t.Errorf("pdf 条目 = %+v", byName["pdf"])
+		t.Errorf("pdf entry = %+v", byName["pdf"])
 	}
 	if byName["solo"].Source != soloURL || byName["solo"].Version != "v1.0.0" {
-		t.Errorf("solo 条目 = %+v", byName["solo"])
+		t.Errorf("solo entry = %+v", byName["solo"])
 	}
 	if !byName["scratch"].Local {
-		t.Errorf("scratch 应为 local: %+v", byName["scratch"])
+		t.Errorf("scratch should be local: %+v", byName["scratch"])
 	}
 	// Lock baseline for a local entry.
 	lk := loadLockSkill(t, root, "scratch")
 	if !strings.HasPrefix(lk.Dirhash, "h1:") {
-		t.Error("local 条目缺 dirhash 基线")
+		t.Error("local entry is missing its dirhash baseline")
 	}
 	// Original files remain unchanged.
 	after, _ := os.ReadFile(filepath.Join(installedDir(root, "scratch"), "SKILL.md"))
 	if string(after) != string(scratchMD) {
-		t.Error("init 改动了原文件")
+		t.Error("init modified the original file")
 	}
 	_ = rep
 }
@@ -684,13 +829,13 @@ func TestInit_RefuseExisting(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := eng.Init(ctx, false, testIO()); err == nil {
-		t.Error("已有 SKILL.mod 时 init 应拒绝")
+		t.Error("init should reject an existing SKILL.mod")
 	}
 	if _, err := eng.Init(ctx, true, testIO()); err != nil {
 		t.Fatalf("init --force: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, modfile.ModFileName+".bak")); err != nil {
-		t.Error("未生成 .bak 备份")
+		t.Error(".bak backup was not created")
 	}
 }
 
@@ -724,7 +869,7 @@ func TestInit_ScansAllKnownAdapters(t *testing.T) {
 	}
 	for _, name := range []string{"generic-local", "claude-local"} {
 		if !found[name] {
-			t.Fatalf("init 未发现 %s: %+v", name, m.Skills)
+			t.Fatalf("init did not discover %s: %+v", name, m.Skills)
 		}
 	}
 }
@@ -747,10 +892,10 @@ func TestUpdate(t *testing.T) {
 	}
 	lk := loadLockSkill(t, root, "hello")
 	if lk.Version != "v1.1.0" {
-		t.Errorf("update 后版本 = %s, want v1.1.0", lk.Version)
+		t.Errorf("version after update = %s, want v1.1.0", lk.Version)
 	}
 	if _, err := os.Stat(filepath.Join(installedDir(root, "hello"), "v1.md")); err != nil {
-		t.Error("新版本内容未安装")
+		t.Error("new version content was not installed")
 	}
 	_ = rep
 
@@ -759,8 +904,8 @@ func TestUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.Entries[0].Note != "已是最新" {
-		t.Errorf("二次 update = %+v, want 已是最新", rep.Entries[0])
+	if rep.Entries[0].Note != i18n.Text("already up to date") {
+		t.Errorf("second update = %+v, want already up to date", rep.Entries[0])
 	}
 }
 
@@ -777,7 +922,7 @@ func TestUpdate_PseudoVersion(t *testing.T) {
 	}
 	lk1 := loadLockSkill(t, root, "edge")
 	if !resolve.IsPseudoVersion(lk1.Version) {
-		t.Fatalf("版本 %q 非伪版本", lk1.Version)
+		t.Fatalf("version %q is not a pseudo-version", lk1.Version)
 	}
 
 	r.Write("more.md", "x\n")
@@ -789,10 +934,10 @@ func TestUpdate_PseudoVersion(t *testing.T) {
 	}
 	lk2 := loadLockSkill(t, root, "edge")
 	if lk2.Version == lk1.Version || lk2.Commit == lk1.Commit {
-		t.Error("伪版本条目 update 未升到新 HEAD")
+		t.Error("updating a pseudo-version entry did not advance to the new HEAD")
 	}
 	if !resolve.IsPseudoVersion(lk2.Version) {
-		t.Errorf("升级后版本 %q 仍应为伪版本", lk2.Version)
+		t.Errorf("updated version %q should remain a pseudo-version", lk2.Version)
 	}
 }
 
@@ -840,10 +985,10 @@ func TestPrune(t *testing.T) {
 		}
 	}
 	if !staleFound {
-		t.Error("sync 未提示过期条目")
+		t.Error("sync did not report the stale entry")
 	}
 	if _, err := os.Stat(installedDir(root, "bb")); err != nil {
-		t.Error("sync 删除了文件（违反永不自动删除）")
+		t.Error("sync deleted files despite the never-delete contract")
 	}
 
 	// prune removes it.
@@ -851,12 +996,12 @@ func TestPrune(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(installedDir(root, "bb")); !os.IsNotExist(err) {
-		t.Error("prune 未删除残留目录")
+		t.Error("prune did not delete the stale directory")
 	}
 	l, _ := modfile.LoadLock(root)
 	for _, lk := range l.Skills {
 		if lk.Name == "bb" {
-			t.Error("lock 仍含过期条目")
+			t.Error("lock still contains the stale entry")
 		}
 	}
 }
@@ -878,13 +1023,13 @@ func TestGet_OfflineSnapshotHit(t *testing.T) {
 	eng2 := newEngine(t, root2, sharedStore)
 	rep, err := eng2.Get(ctx, r.URL, "", testIO())
 	if err != nil {
-		t.Fatalf("离线 get 应命中版本快照: %v", err)
+		t.Fatalf("offline get should hit the version snapshot: %v", err)
 	}
-	if rep.Entries[0].Note != "来自本地版本快照，未联网校验" {
+	if rep.Entries[0].Note != i18n.Text("from a local version snapshot; not verified online") {
 		t.Errorf("Note = %q", rep.Entries[0].Note)
 	}
 	if _, err := os.Stat(installedDir(root2, "hello")); err != nil {
-		t.Error("离线安装未落盘")
+		t.Error("offline installation was not written to disk")
 	}
 }
 
@@ -907,7 +1052,7 @@ func TestGet_SymlinkRejected(t *testing.T) {
 		t.Fatalf("err = %v (%T), want SymlinkError", err, err)
 	}
 	if _, err := os.Stat(filepath.Join(root, modfile.ModFileName)); !os.IsNotExist(err) {
-		t.Error("拒绝后仍写入了 SKILL.mod")
+		t.Error("SKILL.mod was written after the request was rejected")
 	}
 }
 
@@ -925,7 +1070,7 @@ func TestGet_SymlinkOutsideSelectedSkillDoesNotBlockRepoSnapshot(t *testing.T) {
 	root := t.TempDir()
 	eng := newEngine(t, root, t.TempDir())
 	if _, err := eng.Get(ctx, r.URL+"//good@v1.0.0", "", testIO()); err != nil {
-		t.Fatalf("目标 skill 外的 symlink 不应阻塞整仓快照: %v", err)
+		t.Fatalf("a symlink outside the target skill should not block the repository snapshot: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(installedDir(root, "good"), "good.txt")); err != nil {
 		t.Fatal(err)
@@ -944,7 +1089,7 @@ func TestList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rep.Entries) != 1 || rep.Entries[0].Action != "已安装" {
+	if len(rep.Entries) != 1 || rep.Entries[0].Action != "installed" {
 		t.Errorf("list = %+v", rep.Entries)
 	}
 	// A new upstream version produces an upgrade notice.
@@ -955,7 +1100,7 @@ func TestList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(rep.Entries[0].Note, "可升级") {
-		t.Errorf("list 未提示可升级: %+v", rep.Entries[0])
+	if !strings.Contains(rep.Entries[0].Note, i18n.Text("upgrade available → ")) {
+		t.Errorf("list did not report an available upgrade: %+v", rep.Entries[0])
 	}
 }

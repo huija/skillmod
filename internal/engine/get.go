@@ -6,11 +6,18 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/huija/skillmod/internal/address"
 	"github.com/huija/skillmod/internal/dirhash"
+	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/modfile"
+	"github.com/huija/skillmod/internal/resolve"
 	"github.com/huija/skillmod/internal/source"
 )
 
@@ -30,14 +37,18 @@ func resolveConflicts(io IO, conflicts []conflict) (skip map[string]bool, err er
 	if io.Confirm != nil {
 		for _, c := range conflicts {
 			choice := io.Confirm.Choose(
-				fmt.Sprintf("冲突: %s 已存在且内容与锁定不符（本地可能被修改过）", c.dir),
-				[]string{"覆盖", "保留并跳过", "中止"})
+				i18n.Format("Conflict: %s exists and its contents do not match the lock (it may have local changes)", c.dir),
+				[]string{
+					i18n.Text("overwrite"),
+					i18n.Text("keep and skip"),
+					i18n.Text("abort"),
+				})
 			switch choice {
 			case 0: // Overwrite.
 			case 1:
 				skip[c.dir] = true
 			default:
-				return nil, fmt.Errorf("用户中止")
+				return nil, fmt.Errorf("%s", i18n.Text("aborted by user"))
 			}
 		}
 		return skip, nil
@@ -45,15 +56,15 @@ func resolveConflicts(io IO, conflicts []conflict) (skip map[string]bool, err er
 	if io.Yes {
 		for _, c := range conflicts {
 			skip[c.dir] = true
-			io.printf("冲突（--yes 自动保留并跳过）: %s", c.dir)
+			io.printf(i18n.Text("conflict (--yes automatically kept and skipped): %s"), c.dir)
 		}
 		return skip, nil
 	}
-	msg := "检测到冲突（目标已存在且内容与锁定不符）："
+	msg := i18n.Text("Conflicts detected (targets exist and their contents do not match the lock):")
 	for _, c := range conflicts {
 		msg += "\n  " + c.dir
 	}
-	return nil, fmt.Errorf("%s\n建议人工确认后重试（交互模式逐条选择），或 --yes 自动保留并跳过", msg)
+	return nil, fmt.Errorf("%s\n%s", msg, i18n.Text("Review the conflicts and retry interactively, or use --yes to keep and skip them automatically"))
 }
 
 // Get implements skillmod get: resolve, download, validate, install, then write SKILL.mod and SKILL.lock.
@@ -69,28 +80,40 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 	}
 	lock := e.loadLock()
 
-	mat, err := e.resolveAndFetch(ctx, addr.Repo, addr.Subdir, addr.Ref, refsMemo{})
-	if err != nil {
-		return nil, err
-	}
-	name, err := source.SkillNameFromDir(mat.contentDir)
+	resolved, err := e.resolveGetSkills(ctx, addr, io)
 	if err != nil {
 		return nil, err
 	}
 	if alias != "" && !validDirName(alias) {
-		return nil, fmt.Errorf("别名 %q 含非法字符（仅允许字母数字 . _ -）", alias)
+		return nil, fmt.Errorf(i18n.Text("alias %q contains invalid characters (only letters, digits, '.', '_', and '-' are allowed)"), alias)
 	}
-	dir := name
-	if alias != "" {
-		dir = alias
+	if alias != "" && len(resolved) != 1 {
+		return nil, fmt.Errorf("%s", i18n.Text("--alias can only be used when exactly one skill is selected"))
 	}
-	srcStr := addr.Repo + subdirSuffix(addr.Subdir)
 
-	// Reject a local-name conflict where the same directory name refers to different sources (AC-8).
-	for _, sk := range m.Skills {
-		if sk.DirName() == dir && !sameRemoteSource(sk.Source, srcStr) {
-			return nil, &NameConflictError{Name: sk.Name, Existing: sk.Source, Incoming: srcStr}
+	entries := make([]getEntry, 0, len(resolved))
+	byDir := make(map[string]int, len(resolved))
+	for _, result := range resolved {
+		name, err := source.SkillNameFromDir(result.mat.contentDir)
+		if err != nil {
+			return nil, err
 		}
+		dir := name
+		if alias != "" {
+			dir = alias
+		}
+		src := addr.Repo + subdirSuffix(result.subdir)
+		for _, skill := range m.Skills {
+			if skill.DirName() == dir && !sameRemoteSource(skill.Source, src) {
+				return nil, &NameConflictError{Name: skill.Name, Existing: skill.Source, Incoming: src}
+			}
+		}
+		if previous, exists := byDir[dir]; exists && !sameRemoteSource(entries[previous].source, src) {
+			return nil, &NameConflictError{Name: name, Existing: entries[previous].source, Incoming: src}
+		}
+		entry := getEntry{mat: result.mat, name: name, dir: dir, source: src}
+		entries = append(entries, entry)
+		byDir[dir] = len(entries) - 1
 	}
 
 	// Classify targets: install absent or clean old versions, skip matching versions, and flag local modifications as conflicts.
@@ -98,19 +121,20 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 	if err != nil {
 		return nil, err
 	}
-	prevHash := ""
-	if old := findLock(lock, name); old != nil {
-		prevHash = old.Dirhash
-	}
-	var targets []string
 	var conflicts []conflict
-	for _, a := range adapters {
-		dst := adapterDir(a, e.Root, dir)
-		switch classifyTarget(dst, mat.dirhash, prevHash) {
-		case "install":
-			targets = append(targets, dst)
-		case "conflict":
-			conflicts = append(conflicts, conflict{name: dir, dir: dst})
+	for i := range entries {
+		prevHash := ""
+		if old := findLock(lock, entries[i].name); old != nil {
+			prevHash = old.Dirhash
+		}
+		for _, adapter := range adapters {
+			dst := adapterDir(adapter, e.Root, entries[i].dir)
+			switch classifyTarget(dst, entries[i].mat.dirhash, prevHash) {
+			case "install":
+				entries[i].targets = append(entries[i].targets, dst)
+			case "conflict":
+				conflicts = append(conflicts, conflict{name: entries[i].dir, dir: dst})
+			}
 		}
 	}
 	skip, err := resolveConflicts(io, conflicts)
@@ -119,31 +143,46 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 	}
 	for _, c := range conflicts {
 		if !skip[c.dir] {
-			targets = append(targets, c.dir) // Overwrite was selected.
+			index := byDir[c.name]
+			entries[index].targets = append(entries[index].targets, c.dir) // Overwrite was selected.
 		}
 	}
 
 	rep := &Report{Action: "get"}
-	entry := EntryReport{Name: name, Source: srcStr, Version: mat.version, Action: "install", Targets: targets}
-	entry.Note = mat.note
-	rep.Entries = append(rep.Entries, entry)
+	for _, entry := range entries {
+		rep.Entries = append(rep.Entries, EntryReport{
+			Name: entry.name, Source: entry.source, Version: entry.mat.version,
+			Action: "install", Note: entry.mat.note, Targets: entry.targets,
+		})
+	}
 
 	if io.DryRun {
-		rep.Notes = append(rep.Notes, "dry-run：未写任何文件")
+		rep.Notes = append(rep.Notes, i18n.Text("dry-run: no files were written"))
 		return rep, nil
 	}
 
+	plans := make([]plannedInstall, 0, len(entries))
+	for _, entry := range entries {
+		plans = append(plans, plannedInstall{name: entry.dir, contentDir: entry.mat.contentDir, targets: entry.targets})
+	}
 	// Phase 2 installs first and writes mod and lock only on success; restore old directories if writing fails.
-	finalize, err := applyInstalls([]plannedInstall{{name: dir, contentDir: mat.contentDir, targets: targets}})
+	finalize, err := applyInstalls(plans)
 	if err != nil {
 		return nil, err
 	}
-	upsertMod(m, modfile.ModSkill{
-		Name: name, Source: srcStr, Version: mat.version, Alias: alias,
-	})
-	upsertLock(lock, modfile.LockSkill{
-		Name: name, Source: srcStr, Version: mat.version, Commit: mat.commit, Dirhash: mat.dirhash,
-	})
+	for _, entry := range entries {
+		entryAlias := ""
+		if alias != "" {
+			entryAlias = alias
+		}
+		upsertMod(m, modfile.ModSkill{
+			Name: entry.name, Source: entry.source, Version: entry.mat.version, Alias: entryAlias,
+		})
+		upsertLock(lock, modfile.LockSkill{
+			Name: entry.name, Source: entry.source, Version: entry.mat.version,
+			Commit: entry.mat.commit, Dirhash: entry.mat.dirhash,
+		})
+	}
 	if err := modfile.SaveMod(e.Root, m); err != nil {
 		finalize(false)
 		return nil, err
@@ -155,8 +194,209 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 	if err := finalize(true); err != nil {
 		return nil, err
 	}
-	io.printf("已安装 %s %s，SKILL.mod 与 SKILL.lock 已更新", name, mat.version)
+	for _, entry := range entries {
+		io.printf(i18n.Text("installed %s %s; SKILL.mod and SKILL.lock were updated"), entry.name, entry.mat.version)
+	}
 	return rep, nil
+}
+
+type getEntry struct {
+	mat     *materialized
+	name    string
+	dir     string
+	source  string
+	targets []string
+}
+
+type resolvedGetSkill struct {
+	mat    *materialized
+	subdir string
+}
+
+// resolveGetSkills supports standalone skills at a repository root and skill
+// collections beneath skills/. An explicit subdirectory always wins.
+func (e *Engine) resolveGetSkills(ctx context.Context, addr *address.Address, io IO) ([]resolvedGetSkill, error) {
+	memo := refsMemo{}
+	if addr.Subdir != "" {
+		mat, err := e.resolveAndFetch(ctx, addr.Repo, addr.Subdir, addr.Ref, memo)
+		if err != nil {
+			return nil, err
+		}
+		return []resolvedGetSkill{{mat: mat, subdir: addr.Subdir}}, nil
+	}
+
+	root, err := e.resolveAndFetch(ctx, addr.Repo, "", addr.Ref, memo)
+	probedDefault := false
+	var missing *resolve.NotFoundError
+	if err != nil && addr.Ref != "" && errors.As(err, &missing) {
+		// A collection may publish only skills/<name>/vX.Y.Z tags. Resolve the
+		// default branch solely to discover the directory, then resolve the
+		// requested version against the selected subdirectory below.
+		root, err = e.resolveAndFetch(ctx, addr.Repo, "", "", memo)
+		probedDefault = true
+	}
+	if err != nil {
+		return nil, err
+	}
+	candidates, err := chooseSkillCandidates(root.contentDir, addr.Repo, io)
+	if err != nil {
+		return nil, err
+	}
+	resolved := make([]resolvedGetSkill, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.subdir == "" && !probedDefault {
+			resolved = append(resolved, resolvedGetSkill{mat: root})
+			continue
+		}
+		mat, err := e.resolveAndFetch(ctx, addr.Repo, candidate.subdir, addr.Ref, memo)
+		if err != nil {
+			return nil, err
+		}
+		resolved = append(resolved, resolvedGetSkill{mat: mat, subdir: candidate.subdir})
+	}
+	return resolved, nil
+}
+
+// skillCandidate is one discoverable SKILL.md, with the root represented by
+// an empty subdirectory.
+type skillCandidate struct {
+	subdir      string
+	name        string
+	description string
+}
+
+// chooseSkillCandidates lets an interactive caller choose one or more skills.
+// --yes explicitly accepts the full discovered collection.
+func chooseSkillCandidates(root, repo string, io IO) ([]skillCandidate, error) {
+	candidates, err := skillCandidates(root)
+	if err != nil {
+		return nil, err
+	}
+	if len(candidates) == 0 {
+		return nil, &source.NoSkillMDError{Detail: i18n.Text("SKILL.md is missing from the repository root and every descendant of skills/")}
+	}
+	if len(candidates) == 1 || io.Yes {
+		return candidates, nil
+	}
+
+	options := make([]string, len(candidates))
+	for i, candidate := range candidates {
+		options[i] = candidate.option(repo)
+	}
+	if selector, ok := io.Confirm.(interface {
+		ChooseMany(prompt string, options []string) []int
+	}); ok {
+		return selectedCandidates(candidates, selector.ChooseMany(i18n.Format("multiple skills found in %s; select one or more", repo), options))
+	}
+	if io.Confirm == nil {
+		return nil, &skillCandidatesError{Repo: repo, Candidates: options}
+	}
+	var selected []skillCandidate
+	for _, candidate := range candidates {
+		prompt := i18n.Format("install %s from %s?\n%s", candidate.name, candidateAddress(repo, candidate.subdir), candidate.description)
+		if io.Confirm.Confirm(prompt) {
+			selected = append(selected, candidate)
+		}
+	}
+	if len(selected) == 0 {
+		return nil, fmt.Errorf("%s", i18n.Text("no skills selected"))
+	}
+	return selected, nil
+}
+
+func selectedCandidates(candidates []skillCandidate, indices []int) ([]skillCandidate, error) {
+	seen := make(map[int]bool, len(indices))
+	selected := make([]skillCandidate, 0, len(indices))
+	for _, index := range indices {
+		if index < 0 || index >= len(candidates) || seen[index] {
+			return nil, fmt.Errorf("%s", i18n.Text("no skills selected"))
+		}
+		seen[index] = true
+		selected = append(selected, candidates[index])
+	}
+	if len(selected) == 0 {
+		return nil, fmt.Errorf("%s", i18n.Text("no skills selected"))
+	}
+	return selected, nil
+}
+
+func (c skillCandidate) option(repo string) string {
+	description := c.description
+	if description == "" {
+		description = i18n.Text("no description")
+	}
+	return i18n.Format("%s — %s\n  %s", c.name, description, candidateAddress(repo, c.subdir))
+}
+
+func skillCandidates(root string) ([]skillCandidate, error) {
+	var candidates []skillCandidate
+	addCandidate := func(dir, subdir string) error {
+		if !hasSkillManifest(dir) {
+			return nil
+		}
+		metadata, err := source.SkillMetadataFromDir(dir)
+		if err != nil {
+			return err
+		}
+		candidates = append(candidates, skillCandidate{subdir: subdir, name: metadata.Name, description: metadata.Description})
+		return nil
+	}
+	if err := addCandidate(root, ""); err != nil {
+		return nil, err
+	}
+
+	skillsRoot := filepath.Join(root, "skills")
+	_, err := os.Stat(skillsRoot)
+	if os.IsNotExist(err) {
+		return candidates, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	err = filepath.WalkDir(skillsRoot, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !d.IsDir() || path == skillsRoot {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if err := addCandidate(path, filepath.ToSlash(rel)); err != nil {
+			return err
+		}
+		if hasSkillManifest(path) {
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return candidates, nil
+}
+
+func hasSkillManifest(dir string) bool {
+	st, err := os.Stat(filepath.Join(dir, "SKILL.md"))
+	return err == nil && st.Mode().IsRegular()
+}
+
+type skillCandidatesError struct {
+	Repo       string
+	Candidates []string
+}
+
+func (e *skillCandidatesError) Error() string {
+	return i18n.Format("multiple skills found in %s; rerun interactively to select one or more, use --yes to install all, or specify one of:\n  %s", e.Repo, strings.Join(e.Candidates, "\n  "))
+}
+
+func candidateAddress(repo, subdir string) string {
+	if subdir == "" {
+		return "skillmod get " + repo
+	}
+	return "skillmod get " + repo + "//" + subdir
 }
 
 func sameRemoteSource(a, b string) bool {

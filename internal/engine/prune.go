@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/huija/skillmod/internal/dirhash"
+	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/modfile"
 )
 
@@ -24,8 +25,8 @@ func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
 	stale := staleEntries(m, lock)
 	rep := &Report{Action: "prune"}
 	if len(stale) == 0 {
-		rep.Notes = append(rep.Notes, "无过期条目")
-		io.printf("无过期条目")
+		rep.Notes = append(rep.Notes, i18n.Text("no stale entries"))
+		io.printf(i18n.Text("no stale entries"))
 		return rep, nil
 	}
 
@@ -56,7 +57,7 @@ func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
 				deletable = append(deletable, dst)
 				entry.Targets = append(entry.Targets, dst)
 			} else {
-				entry.Note = "本地被修改过，保留文件、仅清 lock 记录: " + dst
+				entry.Note = i18n.Text("locally modified; kept files and removed only the lock record: ") + dst
 			}
 		}
 		entry.Action = "prune"
@@ -64,35 +65,35 @@ func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
 	}
 
 	if len(deletable) > 0 {
-		io.printf("将删除以下目录：")
+		io.printf(i18n.Text("the following directories will be deleted:"))
 		for _, d := range deletable {
 			io.printf("  %s", d)
 		}
 		ok := io.Yes
 		if !ok && io.Confirm != nil {
-			ok = io.Confirm.Confirm(fmt.Sprintf("确认删除以上 %d 个目录？", len(deletable)))
+			ok = io.Confirm.Confirm(i18n.Format("delete the %d directories listed above?", len(deletable)))
 		}
 		if !ok && io.Confirm == nil && !io.Yes {
-			return nil, fmt.Errorf("需要确认删除清单：交互模式重试，或 --yes 跳过确认；--dry-run 只列清单")
+			return nil, fmt.Errorf("%s", i18n.Text("the deletion list requires confirmation: retry interactively, use --yes to skip confirmation, or use --dry-run to list only"))
 		}
 		if !ok {
-			return nil, fmt.Errorf("用户取消，未删除任何文件")
+			return nil, fmt.Errorf("%s", i18n.Text("cancelled by user; no files were deleted"))
 		}
 	}
 
 	if io.DryRun {
-		rep.Notes = append(rep.Notes, "dry-run：未删除任何文件")
+		rep.Notes = append(rep.Notes, i18n.Text("dry-run: no files were deleted"))
 		return rep, nil
 	}
 
 	for _, d := range deletable {
 		if err := os.RemoveAll(d); err != nil {
-			return nil, fmt.Errorf("删除 %s: %w", d, err)
+			return nil, fmt.Errorf(i18n.Text("delete %s: %w"), d, err)
 		}
 	}
 	if err := modfile.SaveLock(e.Root, newLock); err != nil {
 		return nil, err
 	}
-	io.printf("已清理 %d 个过期条目", len(stale))
+	io.printf(i18n.Text("pruned %d stale entries"), len(stale))
 	return rep, nil
 }

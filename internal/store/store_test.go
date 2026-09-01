@@ -6,6 +6,7 @@ package store
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -18,7 +19,10 @@ import (
 	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/resolve"
 	"github.com/huija/skillmod/internal/source"
+	"github.com/huija/skillmod/internal/testutil"
 )
+
+func TestMain(m *testing.M) { testutil.RunMain(m) }
 
 func testFiles() []source.File {
 	return []source.File{
@@ -70,7 +74,7 @@ func TestOpen_DefaultAndOverride(t *testing.T) {
 	}
 
 	t.Setenv(HomeEnv, "relative/path")
-	if _, err := Open(); err == nil || !strings.Contains(err.Error(), "绝对路径") {
+	if _, err := Open(); err == nil || !strings.Contains(err.Error(), "absolute path") {
 		t.Fatalf("relative %s err = %v", HomeEnv, err)
 	}
 }
@@ -94,7 +98,7 @@ func TestSnapshot_RoundTripAndConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	if rootTagPath == snap.ContentDir {
-		t.Fatal("根 tag 与子目录前缀 tag 映射到了同一版本快照")
+		t.Fatal("root tag and subdirectory-prefixed tag mapped to the same snapshot")
 	}
 	sshPath, err := s.SnapshotPath("git@example.com:acme/skills.git", info.Version)
 	if err != nil {
@@ -105,7 +109,7 @@ func TestSnapshot_RoundTripAndConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	if sshPath != httpsPath {
-		t.Fatalf("同一逻辑 repo 的快照路径不同: ssh=%s https=%s", sshPath, httpsPath)
+		t.Fatalf("snapshot paths differ for the same logical repository: ssh=%s https=%s", sshPath, httpsPath)
 	}
 	got, err := s.GetSnapshot(info.Repo, info.Version)
 	if err != nil {
@@ -122,10 +126,10 @@ func TestSnapshot_RoundTripAndConflict(t *testing.T) {
 	}
 	aliasSnapshot, err := s.GetSnapshot("git@example.com:acme/skills.git", info.Version)
 	if err != nil {
-		t.Fatalf("通过等价 SSH URL 读取 HTTPS 快照: %v", err)
+		t.Fatalf("read HTTPS snapshot through equivalent SSH URL: %v", err)
 	}
 	if aliasSnapshot.ContentDir != got.ContentDir {
-		t.Fatalf("等价 URL 未复用快照: %s != %s", aliasSnapshot.ContentDir, got.ContentDir)
+		t.Fatalf("equivalent URLs did not reuse the snapshot: %s != %s", aliasSnapshot.ContentDir, got.ContentDir)
 	}
 
 	changed := info
@@ -192,7 +196,7 @@ func TestOpen_CreatesReadOnlySnapshots(t *testing.T) {
 			t.Fatal(err)
 		}
 		if st.Mode().Perm()&0o222 != 0 {
-			t.Fatalf("版本快照仍可写: %s mode=%o", path, st.Mode().Perm())
+			t.Fatalf("version snapshot remains writable: %s mode=%o", path, st.Mode().Perm())
 		}
 	}
 	infoPath, err := s.snapshotInfoPath(info.Repo, info.Version)
@@ -202,7 +206,7 @@ func TestOpen_CreatesReadOnlySnapshots(t *testing.T) {
 	if st, err := os.Stat(infoPath); err != nil {
 		t.Fatal(err)
 	} else if st.Mode().Perm()&0o222 != 0 {
-		t.Fatalf("版本元数据仍可写: %s mode=%o", infoPath, st.Mode().Perm())
+		t.Fatalf("version metadata remains writable: %s mode=%o", infoPath, st.Mode().Perm())
 	}
 }
 
@@ -237,7 +241,7 @@ func TestResolveIndex_PerEntryRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, _, err := s.GetResolved("https://example.com/a/b", "skills/demo", "v1.0.0"); err == nil {
-		t.Fatal("损坏索引未报错")
+		t.Fatal("corrupt index did not return an error")
 	}
 }
 
@@ -263,7 +267,7 @@ func TestRepoRefs_RoundTripAndCanonicalIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	if gotPath, aliasPath := s.repoRefsPath("https://example.com/acme/skills"), s.repoRefsPath("git@example.com:acme/skills.git"); gotPath != aliasPath {
-		t.Fatalf("等价 URL 的 refs 路径不同: %s != %s", gotPath, aliasPath)
+		t.Fatalf("refs paths differ for equivalent URLs: %s != %s", gotPath, aliasPath)
 	} else if _, err := os.Stat(gotPath); err != nil {
 		t.Fatal(err)
 	}
@@ -275,4 +279,212 @@ func TestGetSnapshot_Missing(t *testing.T) {
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("err = %v, want fs.ErrNotExist", err)
 	}
+}
+
+func TestSnapshotPathValidationAndEscaping(t *testing.T) {
+	s := New(t.TempDir())
+	if _, err := s.SnapshotPath("https://example.com", "v1.0.0"); err == nil {
+		t.Fatal("repository without a project path was accepted")
+	}
+	if _, err := s.SnapshotPath("https://example.com/acme/skills", "latest"); err == nil {
+		t.Fatal("non-semver version was accepted")
+	}
+
+	got, err := s.SnapshotPath("https://example.com/Acme/skill set", "tools/demo/v1.2.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSuffix := filepath.Join("example.com", "!acme", "skill%20set@tools%2Fdemo%2Fv1.2.3")
+	if !strings.HasSuffix(got, wantSuffix) {
+		t.Fatalf("escaped snapshot path = %q, want suffix %q", got, wantSuffix)
+	}
+}
+
+func TestGetSnapshotDetectsBrokenComponents(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*testing.T, *Store, SnapshotInfo, *Snapshot, string)
+		want   string
+	}{
+		{
+			name: "missing metadata",
+			mutate: func(t *testing.T, _ *Store, _ SnapshotInfo, _ *Snapshot, infoPath string) {
+				if err := os.Remove(infoPath); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "metadata is unreadable",
+		},
+		{
+			name: "missing content directory",
+			mutate: func(t *testing.T, _ *Store, _ SnapshotInfo, snap *Snapshot, _ string) {
+				if err := os.RemoveAll(snap.ContentDir); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "directory is unreadable",
+		},
+		{
+			name: "invalid metadata JSON",
+			mutate: func(t *testing.T, _ *Store, _ SnapshotInfo, _ *Snapshot, infoPath string) {
+				if err := os.WriteFile(infoPath, []byte("{"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "cannot parse version metadata",
+		},
+		{
+			name: "metadata identity mismatch",
+			mutate: func(t *testing.T, _ *Store, info SnapshotInfo, _ *Snapshot, infoPath string) {
+				info.Repo = "https://example.com/other/repository"
+				data, err := json.Marshal(info)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(infoPath, data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: "does not match",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, info, snap, infoPath := newTestSnapshot(t)
+			tt.mutate(t, s, info, snap, infoPath)
+			_, err := s.GetSnapshot(info.Repo, info.Version)
+			var corrupt *CorruptError
+			if !errors.As(err, &corrupt) || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v (%T), want CorruptError containing %q", err, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestFindSnapshotVersionRejectsInvalidMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(SnapshotInfo) SnapshotInfo
+		data   []byte
+		want   string
+	}{
+		{name: "invalid JSON", data: []byte("{"), want: "cannot parse version metadata"},
+		{name: "repository mismatch", mutate: func(info SnapshotInfo) SnapshotInfo {
+			info.Repo = "https://example.com/other/repository"
+			return info
+		}, want: "repository identity mismatch"},
+		{name: "version mismatch", mutate: func(info SnapshotInfo) SnapshotInfo {
+			info.Version = "v2.0.0"
+			return info
+		}, want: "version does not match"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, info, _, infoPath := newTestSnapshot(t)
+			data := tc.data
+			if data == nil {
+				changed := tc.mutate(info)
+				var err error
+				data, err = json.Marshal(changed)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(infoPath, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := s.FindSnapshotVersionByCommit(info.Repo, info.Commit); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want substring %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestPutSnapshotRejectsInvalidTrees(t *testing.T) {
+	s := New(t.TempDir())
+	info := SnapshotInfo{
+		Repo: "https://example.com/acme/skills", Version: "v1.0.0",
+		Commit: strings.Repeat("a", 40), Treehash: "h1:incorrect",
+	}
+	if _, err := s.PutSnapshot(info, testFiles()); err == nil || !strings.Contains(err.Error(), "treehash verification failed") {
+		t.Fatalf("wrong treehash error = %v", err)
+	}
+
+	files := []source.File{{Path: "../escape", Data: []byte("unsafe")}}
+	info.Treehash = hashFiles(t, files)
+	if _, err := s.PutSnapshot(info, files); err == nil || !strings.Contains(err.Error(), "unsafe skill file path") {
+		t.Fatalf("unsafe path error = %v", err)
+	}
+}
+
+func TestRepoRefsCacheValidation(t *testing.T) {
+	repo := "https://example.com/acme/skills"
+	s := New(t.TempDir())
+	if refs, ok, err := s.GetRepoRefs(repo); err != nil || ok || refs != nil {
+		t.Fatalf("missing refs = %+v, %v, %v", refs, ok, err)
+	}
+	if err := s.PutRepoRefs(repo, nil); err == nil {
+		t.Fatal("nil refs cache was accepted")
+	}
+	if err := s.PutRepoRefs(repo, &resolve.Refs{}); err != nil {
+		t.Fatal(err)
+	}
+	refs, ok, err := s.GetRepoRefs(repo)
+	if err != nil || !ok || refs.Tags == nil || refs.Heads == nil {
+		t.Fatalf("normalized refs = %+v, %v, %v", refs, ok, err)
+	}
+
+	path := s.repoRefsPath(repo)
+	if err := os.WriteFile(path, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.GetRepoRefs(repo); err == nil || !strings.Contains(err.Error(), "corrupt") {
+		t.Fatalf("corrupt refs error = %v", err)
+	}
+
+	rec := repoRefsRecord{Repo: "https://example.com/other/repository", Refs: resolve.Refs{}}
+	data, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.GetRepoRefs(repo); err == nil || !strings.Contains(err.Error(), "identity mismatch") {
+		t.Fatalf("mismatched refs error = %v", err)
+	}
+}
+
+func TestStoreErrorDiagnostics(t *testing.T) {
+	conflict := (&SnapshotConflictError{
+		Path: "/store/repo@v1.0.0",
+		Have: SnapshotInfo{Version: "v1.0.0"},
+		Want: SnapshotInfo{Version: "v1.0.0", Commit: strings.Repeat("a", 40), Treehash: "h1:new"},
+	}).Error()
+	for _, want := range []string{"version snapshot conflict", "commit pending resolution", "hash pending verification", "aaaaaaaaaaaa", "h1:new"} {
+		if !strings.Contains(conflict, want) {
+			t.Errorf("conflict message %q is missing %q", conflict, want)
+		}
+	}
+	if got := (&CorruptError{Path: "/store/repo", Detail: "bad metadata"}).Error(); !strings.Contains(got, "/store/repo") || !strings.Contains(got, "bad metadata") {
+		t.Errorf("corruption message = %q", got)
+	}
+}
+
+func newTestSnapshot(t *testing.T) (*Store, SnapshotInfo, *Snapshot, string) {
+	t.Helper()
+	s := New(t.TempDir())
+	files := testFiles()
+	info := SnapshotInfo{
+		Repo: "https://example.com/acme/skills", Version: "v1.0.0",
+		Commit: strings.Repeat("f", 40), Treehash: hashFiles(t, files),
+	}
+	snap, err := s.PutSnapshot(info, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	infoPath, err := s.snapshotInfoPath(info.Repo, info.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, info, snap, infoPath
 }

@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/modfile"
 	"github.com/huija/skillmod/internal/resolve"
 	"github.com/huija/skillmod/internal/store"
@@ -41,7 +42,7 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 			}
 		}
 		if !found {
-			return nil, fmt.Errorf("条目 %q 不在 SKILL.mod 中", n)
+			return nil, fmt.Errorf(i18n.Text("entry %q is not in SKILL.mod"), n)
 		}
 	}
 
@@ -62,7 +63,7 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 		}
 		refs, err := e.refs(ctx, repo, memo)
 		if err != nil {
-			return nil, fmt.Errorf("update 需要联网解析最新版本: %w", err)
+			return nil, fmt.Errorf(i18n.Text("update requires network access to resolve the latest version: %w"), err)
 		}
 		if err := e.Store.PutRepoRefs(repo, refs); err != nil {
 			return nil, err
@@ -74,10 +75,10 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 		if resolve.IsPseudoVersion(cur) || resolve.IsSHA(cur) {
 			// Advance a commit-pinned entry to default-branch HEAD (PRD §3.6).
 			if refs.DefaultHead == "" {
-				return nil, fmt.Errorf("条目 %s: 远端无默认分支", sk.Name)
+				return nil, fmt.Errorf(i18n.Text("entry %s: remote has no default branch"), sk.Name)
 			}
 			if lk != nil && refs.DefaultHead == lk.Commit {
-				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "keep", Version: cur, Note: "已是最新"})
+				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "keep", Version: cur, Note: i18n.Text("already up to date")})
 				continue
 			}
 			fetchRef := "HEAD"
@@ -92,7 +93,7 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 			}
 			if r.Version == cur && lk != nil && lk.Commit != "" {
 				if r.Commit == lk.Commit {
-					rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "keep", Version: cur, Note: "已是最新"})
+					rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "keep", Version: cur, Note: i18n.Text("already up to date")})
 					continue
 				}
 				path, _ := e.Store.SnapshotPath(repo, cur)
@@ -163,7 +164,7 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 	}
 
 	if io.DryRun {
-		rep.Notes = append(rep.Notes, "dry-run：未写任何文件")
+		rep.Notes = append(rep.Notes, i18n.Text("dry-run: no files were written"))
 		return rep, nil
 	}
 
@@ -185,7 +186,7 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 	for _, en := range rep.Entries {
 		switch en.Action {
 		case "keep":
-			io.printf("%s: %s（%s）", en.Name, en.Version, en.Note)
+			io.printf(i18n.Text("%s: %s (%s)"), en.Name, en.Version, en.Note)
 		case "update":
 			io.printf("%s: %s", en.Name, en.Note)
 		}

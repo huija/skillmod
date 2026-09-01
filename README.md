@@ -56,6 +56,22 @@ skillmod sync                                          # Reconcile with the lock
 skillmod verify                                        # Validate in CI; drift produces a non-zero exit code
 ```
 
+### Command output language
+
+Command help, summaries, prompts, errors, and human-readable JSON notes follow `SKILLMOD_LANG` when it is explicitly set. Otherwise, skillmod reads the first non-empty system locale in `LC_ALL` → `LC_MESSAGES` → `LANG`. English and Chinese locale values are recognized; missing or unsupported locales fall back to English. Use `SKILLMOD_LANG=zh` to select Chinese explicitly. Locale-style values such as `en_US.UTF-8` and `zh_CN.UTF-8` are also accepted.
+
+```bash
+SKILLMOD_LANG=zh skillmod sync
+```
+
+Machine-readable JSON field names and action identifiers are not translated.
+
+Translations are maintained centrally as symmetric gettext/POSIX locale catalogs under [`locales/`](locales/): `en_US.po` and `zh_CN.po` contain the same msgid set. The CLI embeds both files, and future website or documentation tooling can select the corresponding `{{locale}}.po` through the same path. `SKILLMOD_LANG=en` and `SKILLMOD_LANG=zh` remain convenient aliases. After changing user-facing source messages, run:
+
+```bash
+go generate ./internal/i18n
+```
+
 The first request for a given `repo@version` materializes a complete repository snapshot. Adding another skill from the same version later validates and installs it directly from the local subdirectory, without invoking Git or accessing the remote. An explicit `@commit` can likewise reuse an existing snapshot of that repository commit. Omitting the version to request latest, or running `skillmod update`, retains online refresh semantics.
 
 ```text

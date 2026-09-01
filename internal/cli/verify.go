@@ -4,13 +4,16 @@
 
 package cli
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/huija/skillmod/internal/i18n"
+	"github.com/spf13/cobra"
+)
 
 func newVerifyCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "verify",
-		Short: "全量校验安装状态与 SKILL.lock 是否一致（只读，CI 消费退出码）",
-		Long:  "检出漂移时退出码为 2；与 sync --check 为同一实现。",
+		Short: i18n.Text("verify every installation against SKILL.lock (read-only, with CI-friendly exit codes)"),
+		Long:  i18n.Text("Exit with status 2 when drift is detected. Uses the same implementation as sync --check."),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			eng, err := newEngine()

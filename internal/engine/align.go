@@ -6,8 +6,8 @@ package engine
 
 import (
 	"context"
-	"fmt"
 
+	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/modfile"
 )
 
@@ -54,7 +54,7 @@ func (e *Engine) align(ctx context.Context, m *modfile.Mod, lock *modfile.Lock) 
 		}
 		note := ""
 		if lk != nil {
-			note = fmt.Sprintf("版本变化 %s → %s（mod 手改触发重解析）", lk.Version, mat.version)
+			note = i18n.Format("version changed %s → %s (manual mod edit triggered re-resolution)", lk.Version, mat.version)
 		}
 		upsertLock(newLock, modfile.LockSkill{
 			Name: sk.Name, Source: sk.Source, Version: mat.version,

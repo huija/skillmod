@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/huija/skillmod/internal/dirhash"
+	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/install"
 )
 
@@ -82,7 +83,7 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 		lk := findLock(lock, sk.Name)
 		if lk == nil {
 			rep.Entries = append(rep.Entries, EntryReport{
-				Name: sk.Name, Action: "local", Note: "lock 中无基线记录，跳过校验（重新 init 可建立基线）"})
+				Name: sk.Name, Action: "local", Note: i18n.Text("no baseline in the lock; verification skipped (run init again to establish one)")})
 			continue
 		}
 		for _, a := range adapters {
@@ -90,11 +91,11 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 			h, err := dirhash.HashDir(dst)
 			switch {
 			case err != nil:
-				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local", Note: "缺失: " + dst})
+				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local", Note: i18n.Text("missing: ") + dst})
 			case h != lk.Dirhash:
-				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local-drift", Note: "内容与基线不符（本地改动）", Targets: []string{dst}})
+				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local-drift", Note: i18n.Text("contents do not match the baseline (local changes)"), Targets: []string{dst}})
 			default:
-				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local", Note: "一致"})
+				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local", Note: i18n.Text("consistent")})
 			}
 		}
 	}
@@ -103,7 +104,7 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 	for _, lk := range staleEntries(m, lock) {
 		rep.Entries = append(rep.Entries, EntryReport{
 			Name: lk.Name, Source: lk.Source, Version: lk.Version,
-			Action: "stale", Note: "已从 mod 移除，文件保留；运行 skillmod prune 清理",
+			Action: "stale", Note: i18n.Text("removed from the mod; files were kept—run skillmod prune to clean them"),
 		})
 	}
 
@@ -126,7 +127,7 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 	}
 
 	if io.DryRun {
-		rep.Notes = append(rep.Notes, "dry-run：未写任何文件")
+		rep.Notes = append(rep.Notes, i18n.Text("dry-run: no files were written"))
 		return rep, nil
 	}
 
@@ -149,9 +150,9 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 		}
 	}
 	if changed == 0 {
-		io.printf("无变更") // Idempotency required by AC-2.
+		io.printf(i18n.Text("no changes")) // Idempotency required by AC-2.
 	} else {
-		io.printf("已同步 %d 项，校验通过", changed)
+		io.printf(i18n.Text("synchronized %d entries; verification passed"), changed)
 	}
 	return rep, nil
 }

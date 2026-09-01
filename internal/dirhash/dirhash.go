@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-// Package dirhash wraps the official x/mod dirhash.Hash1 implementation without rewriting it (dev-design §1).
+// Package dirhash wraps the official x/mod dirhash.Hash1 implementation without rewriting it.
 // Fetching hashes Git blob bytes while verification hashes installed files through the same implementation,
 // ensuring that downloaded and recomputed installation hashes match for AC-1.
 package dirhash
@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/huija/skillmod/internal/i18n"
 	"golang.org/x/mod/sumdb/dirhash"
 )
 
@@ -27,7 +28,7 @@ func HashBlobs(files []string, open func(string) (io.ReadCloser, error)) (string
 }
 
 // HashDir recomputes an h1: hash for a directory by walking regular files and slash-normalizing paths.
-// Installation directories must not contain symlinks because v0.1 rejects skills that contain them.
+// Installation directories must not contain symlinks because v0.0.1 rejects skills that contain them.
 func HashDir(dir string) (string, error) {
 	var files []string
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
@@ -38,7 +39,7 @@ func HashDir(dir string) (string, error) {
 			return nil
 		}
 		if d.Type()&fs.ModeSymlink != 0 {
-			return fmt.Errorf("安装目录含 symlink，无法校验: %s", p)
+			return fmt.Errorf(i18n.Text("installation directory contains a symlink and cannot be verified: %s"), p)
 		}
 		if !d.Type().IsRegular() {
 			return nil // Exclude special files such as FIFOs and sockets from the hash.
@@ -54,7 +55,7 @@ func HashDir(dir string) (string, error) {
 		return "", err
 	}
 	if len(files) == 0 {
-		return "", fmt.Errorf("目录为空或不存在: %s", dir)
+		return "", fmt.Errorf(i18n.Text("directory is empty or does not exist: %s"), dir)
 	}
 	return HashBlobs(files, func(name string) (io.ReadCloser, error) {
 		return os.Open(filepath.Join(dir, filepath.FromSlash(name)))
@@ -64,7 +65,7 @@ func HashDir(dir string) (string, error) {
 // Validate checks the h1: prefix format at lock-file boundaries.
 func Validate(h string) error {
 	if !strings.HasPrefix(h, "h1:") {
-		return fmt.Errorf("dirhash 缺少 h1: 前缀: %q", h)
+		return fmt.Errorf(i18n.Text("dirhash is missing the h1: prefix: %q"), h)
 	}
 	return nil
 }

@@ -4,15 +4,19 @@
 
 package cli
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/huija/skillmod/internal/i18n"
+	"github.com/spf13/cobra"
+)
 
 func newGetCmd() *cobra.Command {
 	var alias string
 	cmd := &cobra.Command{
-		Use:   "get <仓库>[//<子目录>][@<版本>]",
-		Short: "按不可变引用拉取 skill，写入 SKILL.mod / SKILL.lock 并安装",
-		Long: `版本只接受 semver tag 或 40 位 commit SHA；分支名拒绝（可变引用不可锁定）。
-省略版本时按优先级解析：<子目录>/v<最新> → v<最新> → 默认分支 HEAD（记伪版本）。`,
+		Use:   i18n.Text("get <repository>[//<subdirectory>][@<version>]"),
+		Short: i18n.Text("fetch a skill by immutable reference, update SKILL.mod / SKILL.lock, and install it"),
+		Long: i18n.Text(`Versions must be semver tags or 40-character commit SHAs; branch names are rejected because they are mutable.
+When omitted, the version is resolved in this order: <subdirectory>/v<latest> → v<latest> → default-branch HEAD (recorded as a pseudo-version).
+When a subdirectory is omitted, get discovers SKILL.md at the repository root and recursively below skills/. It shows every candidate's name, description, and exact address, then accepts one or more selections. --yes installs every discovered skill.`),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			eng, err := newEngine()
@@ -26,6 +30,6 @@ func newGetCmd() *cobra.Command {
 			return output(cmd, rep)
 		},
 	}
-	cmd.Flags().StringVar(&alias, "alias", "", "安装目录别名（解决同名冲突）")
+	cmd.Flags().StringVar(&alias, "alias", "", i18n.Text("installation directory alias (resolves name conflicts)"))
 	return cmd
 }

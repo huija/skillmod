@@ -21,6 +21,7 @@ import (
 	"github.com/huija/skillmod/internal/address"
 	"github.com/huija/skillmod/internal/config"
 	"github.com/huija/skillmod/internal/dirhash"
+	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/install"
 	"github.com/huija/skillmod/internal/modfile"
 	"github.com/huija/skillmod/internal/resolve"
@@ -72,7 +73,7 @@ type Report struct {
 // DriftError reports drift detected by verify and maps to CLI exit code 2 for AC-12.
 type DriftError struct{ Report *Report }
 
-func (e *DriftError) Error() string { return "检测到漂移" }
+func (e *DriftError) Error() string { return i18n.Text("drift detected") }
 
 // TamperError reports downloaded content whose dirhash differs from the lock (AC-3).
 type TamperError struct {
@@ -80,7 +81,7 @@ type TamperError struct {
 }
 
 func (e *TamperError) Error() string {
-	return fmt.Sprintf("远程内容与锁定不符，可能被改动: %s\nlock 记录: %s\n实算:     %s\n建议核对来源是否被篡改；确认无误后用 skillmod get 重新锁定", e.Name, e.Want, e.Got)
+	return i18n.Format("remote contents do not match the lock and may have been modified: %s\nlock:     %s\ncomputed: %s\nVerify that the source has not been tampered with; if it is valid, use skillmod get to lock it again", e.Name, e.Want, e.Got)
 }
 
 // NameConflictError reports the same name referring to different sources (AC-8).
@@ -89,7 +90,7 @@ type NameConflictError struct {
 }
 
 func (e *NameConflictError) Error() string {
-	return fmt.Sprintf("本地名冲突: %q 已存在（来源 %s），新来源为 %s\n建议用别名区分: skillmod get --alias <新名字> %s", e.Name, e.Existing, e.Incoming, e.Incoming)
+	return i18n.Format("local name conflict: %q already exists (source %s); the new source is %s\nUse an alias to distinguish them: skillmod get --alias <new-name> %s", e.Name, e.Existing, e.Incoming, e.Incoming)
 }
 
 func (e *Engine) adapters() ([]install.Adapter, error) {
@@ -99,7 +100,7 @@ func (e *Engine) adapters() ([]install.Adapter, error) {
 func (e *Engine) loadMod() (*modfile.Mod, error) {
 	m, err := modfile.LoadMod(e.Root)
 	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("未找到 SKILL.mod\n建议先执行 skillmod init 或 skillmod get")
+		return nil, fmt.Errorf("%s", i18n.Text("SKILL.mod not found\nAdvice: run skillmod init or skillmod get first"))
 	}
 	return m, err
 }
@@ -155,10 +156,10 @@ func upsertLock(l *modfile.Lock, e modfile.LockSkill) {
 func splitSource(src string) (repo, subdir string, err error) {
 	a, err := address.Parse(src)
 	if err != nil {
-		return "", "", fmt.Errorf("SKILL.mod 中 source 非法: %w", err)
+		return "", "", fmt.Errorf(i18n.Text("invalid source in SKILL.mod: %w"), err)
 	}
 	if a.Ref != "" {
-		return "", "", fmt.Errorf("source 字段不应含版本引用: %q", src)
+		return "", "", fmt.Errorf(i18n.Text("the source field must not contain a version reference: %q"), src)
 	}
 	return a.Repo, a.Subdir, nil
 }
@@ -174,7 +175,7 @@ func hashTree(t *source.Tree) (string, error) {
 	return dirhash.HashBlobs(paths, func(name string) (io.ReadCloser, error) {
 		b, ok := data[name]
 		if !ok {
-			return nil, fmt.Errorf("内部错误：缺少 blob %s", name)
+			return nil, fmt.Errorf(i18n.Text("internal error: missing blob %s"), name)
 		}
 		return io.NopCloser(bytes.NewReader(b)), nil
 	})
@@ -211,7 +212,7 @@ type skillSubdirError struct {
 }
 
 func (e *skillSubdirError) Error() string {
-	return fmt.Sprintf("skill 子目录 %q 在本地 repo 版本 %s 中不存在", e.Subdir, e.Version)
+	return i18n.Format("skill subdirectory %q does not exist in local repository version %s", e.Subdir, e.Version)
 }
 
 func pathWithinSubdir(name, subdir string) bool {
@@ -345,7 +346,7 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 			if mat, found, snapErr := e.snapshotMaterialized(repo, subdir, ent.Version, ent.Commit, ent.Dirhash); snapErr != nil {
 				return nil, snapErr
 			} else if found {
-				mat.note = "来自本地版本快照，未联网校验"
+				mat.note = i18n.Text("from a local version snapshot; not verified online")
 				return mat, nil
 			}
 		}
@@ -363,7 +364,7 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 						return nil, snapErr
 					}
 				} else if found {
-					mat.note = "来自本地 repo commit 快照，未联网校验"
+					mat.note = i18n.Text("from a local repository commit snapshot; not verified online")
 					if indexErr := e.Store.PutResolved(repo, subdir, ref, store.ResolveEntry{Version: mat.version, Commit: mat.commit, Dirhash: mat.dirhash}); indexErr != nil {
 						return nil, indexErr
 					}
@@ -382,7 +383,7 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 					return nil, snapErr
 				}
 			} else if found {
-				mat.note = "来自本地 repo 版本快照，未联网校验"
+				mat.note = i18n.Text("from a local repository version snapshot; not verified online")
 				if indexErr := e.Store.PutResolved(repo, subdir, ref, store.ResolveEntry{Version: mat.version, Commit: mat.commit, Dirhash: mat.dirhash}); indexErr != nil {
 					return nil, indexErr
 				}
@@ -407,7 +408,7 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 					if indexErr := e.Store.PutResolved(repo, subdir, ref, store.ResolveEntry{Version: mat.version, Commit: mat.commit, Dirhash: mat.dirhash}); indexErr != nil {
 						return nil, indexErr
 					}
-					mat.note = "使用同仓引用缓存解析，未刷新远端"
+					mat.note = i18n.Text("resolved using the same-repository reference cache; remote was not refreshed")
 					return mat, nil
 				}
 			}
@@ -423,11 +424,11 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 			if mat, found, snapErr := e.snapshotMaterialized(repo, subdir, ent.Version, ent.Commit, ent.Dirhash); snapErr != nil {
 				return nil, snapErr
 			} else if found {
-				mat.note = "来自本地版本快照，未联网校验"
+				mat.note = i18n.Text("from a local version snapshot; not verified online")
 				return mat, nil
 			}
 		}
-		return nil, fmt.Errorf("网络不可达且无本地版本快照: %w", err)
+		return nil, fmt.Errorf(i18n.Text("network unavailable and no local version snapshot exists: %w"), err)
 	}
 	if err := e.Store.PutRepoRefs(repo, refs); err != nil {
 		return nil, err
@@ -443,7 +444,7 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 				return mat, nil
 			}
 		}
-		return nil, fmt.Errorf("伪版本 %s 不在本机解析索引中（伪版本条目的跨机同步依赖 SKILL.lock 的 commit 字段）", ref)
+		return nil, fmt.Errorf(i18n.Text("pseudo-version %s is not in the local resolution index (cross-machine synchronization of pseudo-version entries relies on the commit field in SKILL.lock)"), ref)
 	}
 	res, err := resolve.Resolve(resolve.Request{Repo: repo, Subdir: subdir, Ref: ref}, refs)
 	if err != nil {
@@ -478,7 +479,7 @@ func (e *Engine) materializeLocked(ctx context.Context, repo, subdir string, lk 
 		} else {
 			refs, err := e.refs(ctx, repo, memo)
 			if err != nil {
-				return "", fmt.Errorf("条目 %s 内容不在本地版本快照且网络不可达: %w", lk.Name, err)
+				return "", fmt.Errorf(i18n.Text("entry %s is not in a local version snapshot and the network is unavailable: %w"), lk.Name, err)
 			}
 			res, err := resolve.Resolve(resolve.Request{Repo: repo, Subdir: subdir, Ref: lk.Version}, refs)
 			if err != nil {
@@ -550,7 +551,7 @@ func applyInstalls(plans []plannedInstall) (finalize func(ok bool) error, err er
 			restore, commit, err := install.Install(p.contentDir, tgt)
 			if err != nil {
 				rollback()
-				return nil, fmt.Errorf("安装 %s 到 %s（已回滚全部变更）: %w", p.name, tgt, err)
+				return nil, fmt.Errorf(i18n.Text("install %s to %s (all changes were rolled back): %w"), p.name, tgt, err)
 			}
 			dones = append(dones, applied{restore, commit})
 		}

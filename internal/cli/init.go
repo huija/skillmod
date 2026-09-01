@@ -4,14 +4,17 @@
 
 package cli
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/huija/skillmod/internal/i18n"
+	"github.com/spf13/cobra"
+)
 
 func newInitCmd() *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "init",
-		Short: "扫描仓库现有 skill，生成 SKILL.mod 草案",
-		Long:  "扫描各平台 skill 目录，经 git ls-remote 匹配来源，逐项确认后生成 SKILL.mod；已有 SKILL.mod 时拒绝执行，--force 可重建（备份为 SKILL.mod.bak）。",
+		Short: i18n.Text("scan existing skills and draft SKILL.mod"),
+		Long:  i18n.Text("Scan each platform's skill directory, match sources using git ls-remote, confirm each entry, and generate SKILL.mod. An existing SKILL.mod is rejected unless --force rebuilds it after backing it up as SKILL.mod.bak."),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			eng, err := newEngine()
@@ -25,6 +28,6 @@ func newInitCmd() *cobra.Command {
 			return output(cmd, rep)
 		},
 	}
-	cmd.Flags().BoolVar(&force, "force", false, "已存在 SKILL.mod 时重新生成，原文件备份为 SKILL.mod.bak")
+	cmd.Flags().BoolVar(&force, "force", false, i18n.Text("regenerate an existing SKILL.mod after backing it up as SKILL.mod.bak"))
 	return cmd
 }

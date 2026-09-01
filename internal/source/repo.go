@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/huija/skillmod/internal/filelock"
+	"github.com/huija/skillmod/internal/i18n"
 )
 
 func vcsKey(repo string) string {
@@ -63,7 +64,7 @@ func (s *Source) openRepo(ctx context.Context, repo string) (dir string, cleanup
 		haveRepo := strings.TrimPrefix(strings.TrimSpace(string(info)), "git:")
 		if RepoIdentity(haveRepo) != RepoIdentity(repo) {
 			cleanup()
-			return "", nil, fmt.Errorf("VCS 缓存身份冲突: %s", dir)
+			return "", nil, fmt.Errorf(i18n.Text("VCS cache identity conflict: %s"), dir)
 		}
 		if err := s.ensureOrigin(ctx, dir, repo); err != nil {
 			cleanup()
@@ -169,11 +170,11 @@ func (s *Source) fetchTarget(ctx context.Context, dir, commit, fetchRef string) 
 	if _, err := s.run(ctx, dir, allRefs...); err != nil {
 		plain := []string{"fetch", "-f", "--quiet", "origin", "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"}
 		if _, plainErr := s.run(ctx, dir, plain...); plainErr != nil {
-			return fmt.Errorf("抓取 %s@%s 失败: %w", repoOrigin(dir), shortSHA(commit), plainErr)
+			return fmt.Errorf(i18n.Text("failed to fetch %s@%s: %w"), repoOrigin(dir), shortSHA(commit), plainErr)
 		}
 	}
 	if !s.hasCommit(ctx, dir, commit) {
-		return fmt.Errorf("commit %s 不在远端公开 heads/tags 历史中", commit)
+		return fmt.Errorf(i18n.Text("commit %s is not in the history of the remote's public heads or tags"), commit)
 	}
 	return nil
 }

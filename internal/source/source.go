@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-// Package source wraps subprocess calls to the system Git executable (dev-design §6).
+// Package source wraps subprocess calls to the system Git executable.
 // It avoids go-git so SSH keys, credential helpers, and proxies are inherited from the user's environment.
 package source
 
@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/resolve"
 )
 
@@ -40,11 +41,11 @@ type RepoError struct {
 func (e *RepoError) Error() string {
 	switch e.Kind {
 	case RepoNotFound:
-		return fmt.Sprintf("仓库不存在: %s（确认地址拼写）", e.Repo)
+		return i18n.Format("repository not found: %s (check the address)", e.Repo)
 	case RepoAuth:
-		return fmt.Sprintf("仓库鉴权失败: %s（配置 git 凭证：gh auth login 或 SSH key）", e.Repo)
+		return i18n.Format("repository authentication failed: %s (configure Git credentials with gh auth login or an SSH key)", e.Repo)
 	default:
-		return fmt.Sprintf("访问仓库失败: %s: %s", e.Repo, e.Stderr)
+		return i18n.Format("failed to access repository: %s: %s", e.Repo, e.Stderr)
 	}
 }
 
@@ -56,7 +57,7 @@ type Source struct {
 	VCSRoot string
 }
 
-// run executes a Git subprocess with a consistent environment (dev-design §6):
+// run executes a Git subprocess with a consistent environment:
 // GIT_TERMINAL_PROMPT=0 prevents password prompts from hanging an agent session, and LC_ALL=C makes errors parseable.
 // An empty dir means the current directory.
 func (s *Source) run(ctx context.Context, dir string, args ...string) (string, error) {
@@ -89,7 +90,7 @@ func repoArg(args []string) string {
 func mapGitError(err error, stderr, repo string) error {
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 128 {
-		return fmt.Errorf("git 执行失败: %w", err)
+		return fmt.Errorf(i18n.Text("git execution failed: %w"), err)
 	}
 	kind := RepoOther
 	switch {

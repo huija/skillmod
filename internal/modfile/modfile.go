@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/huija/skillmod/internal/i18n"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -41,10 +42,10 @@ type ModSkill struct {
 	Version string `toml:"version,omitempty"` // exact tag, 40-character SHA, or pseudo-version
 	Alias   string `toml:"alias,omitempty"`
 	Local   bool   `toml:"local,omitempty"`
-	// Requires is reserved; v0.1 uses flat 1:1 dependencies and does not parse it.
+	// Requires is reserved; v0.0.1 uses flat 1:1 dependencies and does not parse it.
 }
 
-// DirName returns the installation directory name: alias ?? name (dev-design §12).
+// DirName returns the installation directory name: alias ?? name.
 func (s ModSkill) DirName() string {
 	if s.Alias != "" {
 		return s.Alias
@@ -71,10 +72,10 @@ type LockSkill struct {
 func ParseMod(data []byte) (*Mod, error) {
 	var m Mod
 	if err := toml.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("解析 SKILL.mod: %w", err)
+		return nil, fmt.Errorf(i18n.Text("parse SKILL.mod: %w"), err)
 	}
 	if m.SchemaVersion > SchemaVersion {
-		return nil, fmt.Errorf("SKILL.mod 的 schemaversion=%d 高于本工具支持的 %d，请升级 skillmod", m.SchemaVersion, SchemaVersion)
+		return nil, fmt.Errorf(i18n.Text("SKILL.mod schemaversion=%d is newer than the supported version %d; upgrade skillmod"), m.SchemaVersion, SchemaVersion)
 	}
 	return &m, nil
 }
@@ -83,7 +84,7 @@ func ParseMod(data []byte) (*Mod, error) {
 func ParseLock(data []byte) (*Lock, error) {
 	var l Lock
 	if err := toml.Unmarshal(data, &l); err != nil {
-		return nil, fmt.Errorf("解析 SKILL.lock: %w", err)
+		return nil, fmt.Errorf(i18n.Text("parse SKILL.lock: %w"), err)
 	}
 	return &l, nil
 }
@@ -167,7 +168,7 @@ func SaveMod(dir string, m *Mod) error {
 	return atomicWrite(filepath.Join(dir, ModFileName), data)
 }
 
-// SaveLock writes SKILL.lock atomically; the engine calls it only after a successful transaction (dev-design §5).
+// SaveLock writes SKILL.lock atomically; the engine calls it only after a successful transaction.
 func SaveLock(dir string, l *Lock) error {
 	data, err := MarshalLock(l)
 	if err != nil {
@@ -179,11 +180,11 @@ func SaveLock(dir string, l *Lock) error {
 func atomicWrite(path string, data []byte) error {
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return fmt.Errorf("写 %s: %w", filepath.Base(path), err)
+		return fmt.Errorf(i18n.Text("write %s: %w"), filepath.Base(path), err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		os.Remove(tmp)
-		return fmt.Errorf("落盘 %s: %w", filepath.Base(path), err)
+		return fmt.Errorf(i18n.Text("commit %s to disk: %w"), filepath.Base(path), err)
 	}
 	return nil
 }
