@@ -13,7 +13,17 @@ skill（指令 + 脚本的打包单元）决定 agent 行为，但当前管理�
 
 skillmod 用 go mod 的同构方案解决：`SKILL.mod` 声明 + `SKILL.lock` 锁定（dirhash 内容寻址）+ `skillmod sync` 幂等对齐，任何机器得到完全一致的 skill 集合。
 
-## v0.1 范围
+## 安装
+
+使用 Go 1.26.1 或更高版本：
+
+```bash
+go install github.com/huija/skillmod@v0.0.1
+```
+
+不使用 Go 时，从 [GitHub Releases](https://github.com/huija/skillmod/releases) 下载对应平台的压缩包，解压后将 `skillmod` 放入 `PATH`。
+
+## 功能
 
 - **CLI 七个命令**：`init` / `get` / `sync` / `list` / `update` / `prune` / `verify`
 - **源直接走 git**（对应 go 的 direct 模式）：skill = 带 tag 的 repo 或 monorepo 子目录（`<repo>//<subdir>`），打 tag 即发布；无服务端、无 registry
@@ -56,6 +66,8 @@ skillmod sync                                          # 按 lock 对齐，幂�
 skillmod verify                                        # CI 校验，漂移退出码非零
 ```
 
+省略 `//<子目录>` 时，`get` 会同时发现仓库根目录的 `SKILL.md` 和 `skills/` 下全部层级的 `SKILL.md`。它会展示每个候选的名称、description 与精确地址，并支持选择一个或多个；`--yes` 会安装发现的全部 skill。
+
 ### 命令输出语言
 
 命令帮助、执行摘要、交互提示、错误信息及 JSON 中的人类可读说明优先采用显式设置的 `SKILLMOD_LANG`。未设置时，skillmod 按 `LC_ALL` → `LC_MESSAGES` → `LANG` 读取第一个非空的系统 locale。目前识别英文和中文 locale；未设置或无法识别时回退到英文。可用 `SKILLMOD_LANG=zh` 显式选择中文；也支持 `en_US.UTF-8`、`zh_CN.UTF-8` 这类 locale 值。
@@ -66,7 +78,7 @@ SKILLMOD_LANG=zh skillmod sync
 
 JSON 的字段名和供程序消费的 action 标识不会翻译。
 
-翻译统一维护在 [`locales/`](locales/) 下对等的 gettext/POSIX locale catalog：`en_US.po` 和 `zh_CN.po` 拥有完全相同的 msgid 集合。CLI 构建时会同时嵌入两份文件，后续官网和文档工具也能通过统一的 `{{locale}}.po` 路径选择语言；`SKILLMOD_LANG=en` 与 `SKILLMOD_LANG=zh` 仍作为便捷别名。修改用户可见文案后运行：
+翻译统一维护在 [`locales/`](locales/) 下对等的 gettext/POSIX locale catalog：`en_US.po` 和 `zh_CN.po` 拥有完全相同的 msgid 集合。CLI 构建时会同时嵌入两份文件；`SKILLMOD_LANG=en` 与 `SKILLMOD_LANG=zh` 仍作为便捷别名。修改用户可见文案后运行：
 
 ```bash
 go generate ./internal/i18n
@@ -95,28 +107,11 @@ agents = ["agents", "claude-code"]
 安装目录是由 lock 重建的产物，建议项目 `.gitignore` 忽略 `.agents/skills/`
 （启用 Claude 适配器时也忽略 `.claude/skills/`），只提交 `SKILL.mod` 与 `SKILL.lock`。
 
-## 非目标（v0.1）
+## 当前限制
 
-- 无站点、无 registry 服务（留给未来的 skill-hub 项目）
+- 无 registry 服务
 - 无传递依赖、无版本约束求解
-- 无遥测、无 skill 内容安全扫描（另属后续产品线）
-
-## 文档
-
-| 文档 | 内容 |
-|---|---|
-| [docs/prd-v0.1.md](docs/prd-v0.1.md) | 产品规格（已定稿）：命令、字段、异常、验收标准 |
-| [docs/dev-design.md](docs/dev-design.md) | 研发方案：选型、模块、流程、测试、里程碑 |
-| [docs/design.md](docs/design.md) | 流转图、实现注记、设计决策史 |
-| [docs/prd-feedback.md](docs/prd-feedback.md) | 三轮评审往返存档 |
-
-## 后续路线（不在 v0.1）
-
-- v0.2 候选：meta-skill（agent 经确认门自助拉取）、SessionStart hook 自动 sync
-- 供应链安全扫描、企业策略门禁、中心注册中心（生态成熟后再议）
-
-> 供应链安全原则（meta-skill 时代适用）：**agent 可发起，变更必过人**。
-> 硬门 = 宿主 Bash 权限确认；软门 = meta-skill 红线。安全靠确认门而非藏工具。
+- 无遥测、无 skill 内容安全扫描
 
 ## 许可证
 
