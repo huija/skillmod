@@ -46,6 +46,13 @@ func TestParseLsRemote(t *testing.T) {
 	}
 }
 
+func TestRepoArgForFilteredLsRemote(t *testing.T) {
+	args := []string{"ls-remote", "--symref", "https://example.com/acme/skills", "HEAD", "refs/heads/*", "refs/tags/*"}
+	if got := repoArg(args); got != "https://example.com/acme/skills" {
+		t.Errorf("repoArg(%q) = %q, want %q", args, got, "https://example.com/acme/skills")
+	}
+}
+
 func TestParseLsTree(t *testing.T) {
 	out := "100644 blob aaaa\troot.txt\x00" +
 		"100755 blob bbbb\tskills/demo/run.sh\x00" +
@@ -360,6 +367,38 @@ func TestRefs_Integration(t *testing.T) {
 	}
 	if _, ok := refs.Heads["dev"]; !ok {
 		t.Error("dev branch is missing")
+	}
+}
+
+func TestRefsFiltersUnrelatedNamespaces(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses a POSIX shell wrapper")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	url, _ := newFixtureRepo(t)
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is unavailable")
+	}
+	marker := filepath.Join(t.TempDir(), "args")
+	wrapper := filepath.Join(t.TempDir(), "git")
+	body := "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$SKILLMOD_REFS_ARGS\"\nexec \"$SKILLMOD_REAL_GIT\" \"$@\"\n"
+	if err := os.WriteFile(wrapper, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SKILLMOD_REFS_ARGS", marker)
+	t.Setenv("SKILLMOD_REAL_GIT", realGit)
+	if _, err := (&Source{Git: wrapper}).Refs(ctx, url); err != nil {
+		t.Fatalf("Refs(%q) error = %v, want nil", url, err)
+	}
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "ls-remote\n--symref\n" + url + "\nHEAD\nrefs/heads/*\nrefs/tags/*\n"
+	if got := string(data); got != want {
+		t.Errorf("Refs(%q) git arguments = %q, want %q", url, got, want)
 	}
 }
 

@@ -21,6 +21,14 @@ With Go 1.26.1 or later:
 go install github.com/huija/skillmod@v0.0.1
 ```
 
+For local development from a repository checkout:
+
+```bash
+make install
+```
+
+This installs `skillmod` into `go env GOBIN`, or the first `GOPATH/bin` when `GOBIN` is unset, and embeds the current Git revision as the development version. Override the destination when needed, for example with `make install INSTALL_DIR=/usr/local/bin`. The selected directory must be on `PATH`.
+
 Without Go, download the archive for your platform from [GitHub Releases](https://github.com/huija/skillmod/releases), extract it, and put `skillmod` on your `PATH`.
 
 ## Capabilities
@@ -62,11 +70,14 @@ dirhash = "h1:4wYq0b..."
 ```bash
 skillmod init                                          # Scan existing skills and create declarations
 skillmod get github.com/anthropics/skills//skills/pdf  # Add a skill; use a pseudo-version when no tag exists
+skillmod get github.com/openai/skills//gh-fix-ci       # A unique skill name can abbreviate a nested path
 skillmod sync                                          # Reconcile with the lock file, idempotently
 skillmod verify                                        # Validate in CI; drift produces a non-zero exit code
 ```
 
-When a repository address omits `//<subdir>`, `get` discovers a root `SKILL.md` and every `SKILL.md` below `skills/`. It displays each candidate's name, description, and exact address, and accepts one or more selections. `--yes` installs every discovered skill.
+A single segment after `//` first addresses an exact root subdirectory, then falls back to a unique skill name anywhere below `skills/`; ambiguous names require the full path. When `//<subdir>` is omitted, `get` discovers a root `SKILL.md` and every `SKILL.md` below `skills/`. Interactive terminals show a compact, colored one-line list; displayed commands omit the redundant `https://` prefix and prefer a unique skill-name shorthand when safe. Use ↑/← for the previous item, ↓/→ for the next item, Space to toggle selections, D to show or hide the current description and command, and Enter to confirm. `--yes` installs every discovered skill.
+
+Long-running `get` and `update` operations show a compact animated status block on interactive terminals: the primary stage appears beside the spinner, with simultaneous detail states on a muted second line. Remote version checks request only HEAD, branch, and tag refs; `update` deduplicates equivalent repository URLs and checks up to four distinct repositories concurrently. Cached repository snapshots are integrity-checked once per command and reused across skill-name discovery and batch selection.
 
 ### Command output language
 

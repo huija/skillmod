@@ -51,6 +51,9 @@ msgstr "Conflict: %s exists and its contents do not match the lock (it may have 
 msgid "Conflicts detected (targets exist and their contents do not match the lock):"
 msgstr "Conflicts detected (targets exist and their contents do not match the lock):"
 
+msgid "Description"
+msgstr "Description"
+
 msgid "Error: "
 msgstr "Error: "
 
@@ -59,6 +62,9 @@ msgstr "Exit with status 2 when drift is detected. Uses the same implementation 
 
 msgid "Idempotent and verifiable, with rollback on failure. Installed files are never deleted automatically; use prune to clean them. --check only verifies and is an alias for verify."
 msgstr "Idempotent and verifiable, with rollback on failure. Installed files are never deleted automatically; use prune to clean them. --check only verifies and is an alias for verify."
+
+msgid "Install command"
+msgstr "Install command"
 
 msgid "Review the conflicts and retry interactively, or use --yes to keep and skip them automatically"
 msgstr "Review the conflicts and retry interactively, or use --yes to keep and skip them automatically"
@@ -86,8 +92,8 @@ msgstr "Scan each platform's skill directory, match sources using git ls-remote,
 msgid "VCS cache identity conflict: %s"
 msgstr "VCS cache identity conflict: %s"
 
-msgid "Versions must be semver tags or 40-character commit SHAs; branch names are rejected because they are mutable.\nWhen omitted, the version is resolved in this order: <subdirectory>/v<latest> → v<latest> → default-branch HEAD (recorded as a pseudo-version).\nWhen a subdirectory is omitted, get discovers SKILL.md at the repository root and recursively below skills/. It shows every candidate's name, description, and exact address, then accepts one or more selections. --yes installs every discovered skill."
-msgstr "Versions must be semver tags or 40-character commit SHAs; branch names are rejected because they are mutable.\nWhen omitted, the version is resolved in this order: <subdirectory>/v<latest> → v<latest> → default-branch HEAD (recorded as a pseudo-version).\nWhen a subdirectory is omitted, get discovers SKILL.md at the repository root and recursively below skills/. It shows every candidate's name, description, and exact address, then accepts one or more selections. --yes installs every discovered skill."
+msgid "Versions must be semver tags or 40-character commit SHAs; branch names are rejected because they are mutable.\nWhen omitted, the version is resolved in this order: <subdirectory>/v<latest> → v<latest> → default-branch HEAD (recorded as a pseudo-version).\nA single segment after // first addresses an exact root subdirectory, then falls back to a unique skill name anywhere below skills/. When a subdirectory is omitted, get discovers SKILL.md at the repository root and recursively below skills/. Interactive terminals show a compact, colored one-line list; displayed commands omit the redundant https:// prefix and prefer a unique skill-name shorthand when safe. Use ↑/← for the previous item, ↓/→ for the next item, space to toggle selections, d to show or hide the current description and command, and enter to confirm. --yes installs every discovered skill."
+msgstr "Versions must be semver tags or 40-character commit SHAs; branch names are rejected because they are mutable.\nWhen omitted, the version is resolved in this order: <subdirectory>/v<latest> → v<latest> → default-branch HEAD (recorded as a pseudo-version).\nA single segment after // first addresses an exact root subdirectory, then falls back to a unique skill name anywhere below skills/. When a subdirectory is omitted, get discovers SKILL.md at the repository root and recursively below skills/. Interactive terminals show a compact, colored one-line list; displayed commands omit the redundant https:// prefix and prefer a unique skill-name shorthand when safe. Use ↑/← for the previous item, ↓/→ for the next item, space to toggle selections, d to show or hide the current description and command, and enter to confirm. --yes installs every discovered skill."
 
 msgid "With no names, update every entry. Commit-pinned entries, including pseudo-versions, advance to a new pseudo-version at default-branch HEAD."
 msgstr "With no names, update every entry. Commit-pinned entries, including pseudo-versions, advance to a new pseudo-version at default-branch HEAD."
@@ -153,6 +159,17 @@ msgid "cat-file --batch-check returned %d lines; expected %d"
 msgstr "cat-file --batch-check returned %d lines; expected %d"
 
 #, go-format
+msgid "checking %d source repositories concurrently"
+msgstr "checking %d source repositories concurrently"
+
+msgid "checking cached content integrity"
+msgstr "checking cached content integrity"
+
+#, go-format
+msgid "checking remote versions for %s"
+msgstr "checking remote versions for %s"
+
+#, go-format
 msgid "choose [1-%d]: "
 msgstr "choose [1-%d]: "
 
@@ -167,12 +184,21 @@ msgstr "commit %s to disk: %w"
 msgid "commit pending resolution"
 msgstr "commit pending resolution"
 
+msgid "comparing available versions"
+msgstr "comparing available versions"
+
 #, go-format
 msgid "conflict (--yes automatically kept and skipped): %s"
 msgstr "conflict (--yes automatically kept and skipped): %s"
 
 msgid "consistent"
 msgstr "consistent"
+
+msgid "contacting Git servers"
+msgstr "contacting Git servers"
+
+msgid "contacting the Git server"
+msgstr "contacting the Git server"
 
 msgid "contents do not match the baseline (local changes)"
 msgstr "contents do not match the baseline (local changes)"
@@ -203,6 +229,13 @@ msgstr "directory is empty or does not exist: %s"
 #, go-format
 msgid "dirhash is missing the h1: prefix: %q"
 msgstr "dirhash is missing the h1: prefix: %q"
+
+msgid "discovering skills in the repository"
+msgstr "discovering skills in the repository"
+
+#, go-format
+msgid "downloading repository snapshot from %s"
+msgstr "downloading repository snapshot from %s"
 
 msgid "drift"
 msgstr "drift"
@@ -270,6 +303,9 @@ msgstr "failed to read blob %s header: %w"
 msgid "fetch a skill by immutable reference, update SKILL.mod / SKILL.lock, and install it"
 msgstr "fetch a skill by immutable reference, update SKILL.mod / SKILL.lock, and install it"
 
+msgid "fetching Git objects"
+msgstr "fetching Git objects"
+
 msgid "from a local repository commit snapshot; not verified online"
 msgstr "from a local repository commit snapshot; not verified online"
 
@@ -286,8 +322,8 @@ msgstr "frontmatter has no name field"
 msgid "generated %s (%d entries) without changing the original files"
 msgstr "generated %s (%d entries) without changing the original files"
 
-msgid "get <repository>[//<subdirectory>][@<version>]"
-msgstr "get <repository>[//<subdirectory>][@<version>]"
+msgid "get <repository>[//<subdirectory-or-skill-name>][@<version>]"
+msgstr "get <repository>[//<subdirectory-or-skill-name>][@<version>]"
 
 #, go-format
 msgid "git execution failed: %w"
@@ -302,6 +338,12 @@ msgstr "go mod for Agent Skills: SKILL.mod declarations + SKILL.lock pinning + s
 
 msgid "hash pending verification"
 msgstr "hash pending verification"
+
+msgid "hashing the selected skill"
+msgstr "hashing the selected skill"
+
+msgid "hide details"
+msgstr "hide details"
 
 msgid "init requires confirmation: select each entry interactively or use --yes to accept all"
 msgstr "init requires confirmation: select each entry interactively or use --yes to accept all"
@@ -365,6 +407,9 @@ msgstr "malformed cat-file --batch-check output: %q"
 #, go-format
 msgid "malformed ls-tree output: %q"
 msgstr "malformed ls-tree output: %q"
+
+msgid "matching the requested skill name"
+msgstr "matching the requested skill name"
 
 msgid "missing"
 msgstr "missing"
@@ -474,6 +519,15 @@ msgstr "pruned %d stale entries"
 msgid "pseudo-version %s is not in the local resolution index (cross-machine synchronization of pseudo-version entries relies on the commit field in SKILL.lock)"
 msgstr "pseudo-version %s is not in the local resolution index (cross-machine synchronization of pseudo-version entries relies on the commit field in SKILL.lock)"
 
+msgid "reading repository contents"
+msgstr "reading repository contents"
+
+msgid "reading skill metadata"
+msgstr "reading skill metadata"
+
+msgid "reading the local repository cache"
+msgstr "reading the local repository cache"
+
 msgid "regenerate an existing SKILL.mod after backing it up as SKILL.mod.bak"
 msgstr "regenerate an existing SKILL.mod after backing it up as SKILL.mod.bak"
 
@@ -549,6 +603,9 @@ msgstr "scan existing skills and draft SKILL.mod"
 msgid "select one or more [1-%d, comma-separated; empty to abort]: "
 msgstr "select one or more [1-%d, comma-separated; empty to abort]: "
 
+msgid "show details"
+msgstr "show details"
+
 #, go-format
 msgid "skill contains a submodule (%s), which skillmod does not support"
 msgstr "skill contains a submodule (%s), which skillmod does not support"
@@ -556,6 +613,10 @@ msgstr "skill contains a submodule (%s), which skillmod does not support"
 #, go-format
 msgid "skill contains a symlink (%s); skillmod does not support skills containing symlinks"
 msgstr "skill contains a symlink (%s); skillmod does not support skills containing symlinks"
+
+#, go-format
+msgid "skill name %q matches multiple subdirectories: %s; use an exact subdirectory"
+msgstr "skill name %q matches multiple subdirectories: %s; use an exact subdirectory"
 
 msgid "skill package is missing SKILL.md or has an invalid frontmatter name (contact the author to fix it): "
 msgstr "skill package is missing SKILL.md or has an invalid frontmatter name (contact the author to fix it): "
@@ -634,6 +695,14 @@ msgid "verify without modifying anything (alias for skillmod verify)"
 msgstr "verify without modifying anything (alias for skillmod verify)"
 
 #, go-format
+msgid "verifying cached snapshot for %s"
+msgstr "verifying cached snapshot for %s"
+
+#, go-format
+msgid "verifying skill content in %s"
+msgstr "verifying skill content in %s"
+
+#, go-format
 msgid "version %q does not exist. Available tags (descending semver order, up to 10): %s"
 msgstr "version %q does not exist. Available tags (descending semver order, up to 10): %s"
 
@@ -677,6 +746,9 @@ msgstr "version snapshot conflict; refusing to overwrite %s\nexisting:  %s @ %s 
 #, go-format
 msgid "version snapshot contains an irregular file: %s"
 msgstr "version snapshot contains an irregular file: %s"
+
+msgid "waiting for remote references"
+msgstr "waiting for remote references"
 
 #, go-format
 msgid "write %s: %w"

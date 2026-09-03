@@ -29,7 +29,7 @@ func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 	// Call ls-remote once per unique repository on a best-effort basis.
 	type latestKey struct{ repo, subdir string }
 	latestCache := map[latestKey]string{}
-	memo := refsMemo{}
+	memo := newOperationMemo(nil)
 
 	rep := &Report{Action: "list"}
 	for _, sk := range m.Skills {

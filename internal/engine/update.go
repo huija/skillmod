@@ -7,16 +7,21 @@ package engine
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/modfile"
 	"github.com/huija/skillmod/internal/resolve"
+	"github.com/huija/skillmod/internal/source"
 	"github.com/huija/skillmod/internal/store"
 )
+
+const maxConcurrentRefQueries = 4
 
 // Update implements skillmod update [names...]: resolve the latest versions, update the lock, and install.
 // With no names it updates all remote entries; commit-pinned entries, including pseudo-versions, advance to a new pseudo-version at default-branch HEAD (PRD §3.6).
 func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, error) {
+	defer io.stopProgress()
 	m, err := e.loadMod()
 	if err != nil {
 		return nil, err
@@ -50,10 +55,24 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 	var plans []plannedInstall
 	var conflicts []conflict
 	contentByDir := map[string]string{}
-	memo := refsMemo{}
+	memo := newOperationMemo(io.Progress)
 	adapters, err := e.adapters()
 	if err != nil {
 		return nil, err
+	}
+	repositories, err := updateRepositories(targets)
+	if err != nil {
+		return nil, err
+	}
+	if len(repositories) > 0 {
+		io.setProgress(
+			i18n.Format("checking %d source repositories concurrently", len(repositories)),
+			i18n.Text("contacting Git servers"),
+			i18n.Text("comparing available versions"),
+		)
+		if err := e.loadRefsConcurrently(ctx, repositories, memo); err != nil {
+			return nil, fmt.Errorf(i18n.Text("update requires network access to resolve the latest version: %w"), err)
+		}
 	}
 
 	for _, sk := range targets {
@@ -64,9 +83,6 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 		refs, err := e.refs(ctx, repo, memo)
 		if err != nil {
 			return nil, fmt.Errorf(i18n.Text("update requires network access to resolve the latest version: %w"), err)
-		}
-		if err := e.Store.PutRepoRefs(repo, refs); err != nil {
-			return nil, err
 		}
 		lk := findLock(lock, sk.Name)
 		cur := sk.Version
@@ -106,7 +122,7 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 			res = *r
 		}
 
-		mat, err := e.materialize(ctx, repo, subdir, res, "")
+		mat, err := e.materialize(ctx, repo, subdir, res, "", memo)
 		if err != nil {
 			return nil, err
 		}
@@ -144,6 +160,7 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 		})
 	}
 
+	io.stopProgress()
 	skip, err := resolveConflicts(io, conflicts)
 	if err != nil {
 		return nil, err
@@ -192,4 +209,67 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 		}
 	}
 	return rep, nil
+}
+
+func updateRepositories(targets []modfile.ModSkill) ([]string, error) {
+	seen := make(map[string]bool, len(targets))
+	repositories := make([]string, 0, len(targets))
+	for _, skill := range targets {
+		repo, _, err := splitSource(skill.Source)
+		if err != nil {
+			return nil, err
+		}
+		identity := source.RepoIdentity(repo)
+		if seen[identity] {
+			continue
+		}
+		seen[identity] = true
+		repositories = append(repositories, repo)
+	}
+	return repositories, nil
+}
+
+func (e *Engine) loadRefsConcurrently(ctx context.Context, repositories []string, memo *operationMemo) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	results := make([]refsResult, len(repositories))
+	limit := min(maxConcurrentRefQueries, len(repositories))
+	semaphore := make(chan struct{}, limit)
+	var wait sync.WaitGroup
+	var errorOnce sync.Once
+	var firstErr error
+
+	for i, repo := range repositories {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			select {
+			case semaphore <- struct{}{}:
+				defer func() { <-semaphore }()
+			case <-ctx.Done():
+				return
+			}
+
+			refs, err := e.Source.Refs(ctx, repo)
+			if err == nil {
+				err = e.Store.PutRepoRefs(repo, refs)
+			}
+			results[i] = refsResult{refs: refs, err: err}
+			if err != nil {
+				errorOnce.Do(func() {
+					firstErr = err
+					cancel()
+				})
+			}
+		}()
+	}
+	wait.Wait()
+	if firstErr != nil {
+		return firstErr
+	}
+	for i, repo := range repositories {
+		memo.refs[source.RepoIdentity(repo)] = results[i]
+	}
+	return nil
 }

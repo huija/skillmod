@@ -28,7 +28,7 @@ type alignEntry struct {
 func (e *Engine) align(ctx context.Context, m *modfile.Mod, lock *modfile.Lock) ([]alignEntry, *modfile.Lock, error) {
 	newLock := &modfile.Lock{Skills: append([]modfile.LockSkill(nil), lock.Skills...)}
 	var out []alignEntry
-	memo := refsMemo{}
+	memo := newOperationMemo(nil)
 	for _, sk := range m.Skills {
 		if sk.Local {
 			continue // Callers validate local entries without modifying them.

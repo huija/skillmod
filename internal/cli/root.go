@@ -133,6 +133,9 @@ func newIO(cmd *cobra.Command) engine.IO {
 	if isTerminal(os.Stdin) {
 		io.Confirm = ui.Interactive(os.Stdin, cmd.ErrOrStderr())
 	}
+	if isTerminal(os.Stderr) {
+		io.Progress = ui.AnimatedProgress(cmd.ErrOrStderr())
+	}
 	return io
 }
 

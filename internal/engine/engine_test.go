@@ -10,10 +10,12 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/huija/skillmod/internal/config"
 	"github.com/huija/skillmod/internal/dirhash"
@@ -24,6 +26,7 @@ import (
 	"github.com/huija/skillmod/internal/source"
 	"github.com/huija/skillmod/internal/store"
 	"github.com/huija/skillmod/internal/testutil"
+	"github.com/huija/skillmod/internal/ui"
 )
 
 var ctx = context.Background()
@@ -180,8 +183,11 @@ func TestGet_SelectsFromRootAndSkillsDirectory(t *testing.T) {
 	if chooser.calls != 1 {
 		t.Fatalf("candidate selector calls = %d, want 1", chooser.calls)
 	}
-	if len(chooser.options) != 2 || !strings.Contains(chooser.options[1], "test skill") || !strings.Contains(chooser.options[1], "//skills/nested") {
-		t.Fatalf("candidate options = %q", chooser.options)
+	if len(chooser.options) != 2 || chooser.options[1].Label != "nested-skill" ||
+		!strings.Contains(chooser.options[1].Description, "test skill") ||
+		!strings.Contains(chooser.options[1].Detail, "//nested-skill") ||
+		strings.Contains(chooser.options[1].Detail, "//skills/nested") {
+		t.Fatalf("candidate options = %+v", chooser.options)
 	}
 	mod, err := modfile.LoadMod(root)
 	if err != nil {
@@ -189,6 +195,49 @@ func TestGet_SelectsFromRootAndSkillsDirectory(t *testing.T) {
 	}
 	if len(mod.Skills) != 1 || mod.Skills[0].Name != "nested-skill" || mod.Skills[0].Source != r.URL+"//skills/nested" {
 		t.Fatalf("selected mod entry = %+v", mod.Skills)
+	}
+}
+
+func TestGet_ResolvesSingleSegmentSubdirectoryAsSkillName(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.Write("README.md", "skill collection\n")
+	r.WriteSkill("skills/.curated/gh-fix-ci", "gh-fix-ci", "check.go")
+	r.CommitAll("add curated skill")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"//gh-fix-ci@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get(skill-name shorthand) error = %v, want nil", err)
+	}
+	mod, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mod.Skills) != 1 || mod.Skills[0].Source != r.URL+"//skills/.curated/gh-fix-ci" {
+		t.Errorf("Get(skill-name shorthand) source = %+v, want full matched subdirectory", mod.Skills)
+	}
+	if _, err := os.Stat(filepath.Join(installedDir(root, "gh-fix-ci"), "check.go")); err != nil {
+		t.Errorf("Get(skill-name shorthand) installed file error = %v, want nil", err)
+	}
+}
+
+func TestGet_RejectsAmbiguousSkillNameShorthand(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.Write("README.md", "skill collection\n")
+	r.WriteSkill("skills/.curated/demo", "demo")
+	r.WriteSkill("skills/.system/demo", "demo")
+	r.CommitAll("add duplicate skill names")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	eng := newEngine(t, t.TempDir(), t.TempDir())
+	_, err := eng.Get(ctx, r.URL+"//demo@v1.0.0", "", testIO())
+	if err == nil || !strings.Contains(err.Error(), "multiple subdirectories") ||
+		!strings.Contains(err.Error(), "skills/.curated/demo") ||
+		!strings.Contains(err.Error(), "skills/.system/demo") {
+		t.Errorf("Get(ambiguous skill-name shorthand) error = %v, want both matching subdirectories", err)
 	}
 }
 
@@ -202,7 +251,8 @@ func TestGet_RequiresExplicitSelectionForMultipleSkills(t *testing.T) {
 
 	eng := newEngine(t, t.TempDir(), t.TempDir())
 	_, err := eng.Get(ctx, r.URL+"@v1.0.0", "", engine.IO{Out: io.Discard, Err: io.Discard})
-	if err == nil || !strings.Contains(err.Error(), "select one or more") || !strings.Contains(err.Error(), "//skills/nested") {
+	if err == nil || !strings.Contains(err.Error(), "select one or more") ||
+		!strings.Contains(err.Error(), "//nested-skill") || strings.Contains(err.Error(), "//skills/nested") {
 		t.Fatalf("Get multiple candidates error = %v", err)
 	}
 }
@@ -240,7 +290,7 @@ func TestGet_YesInstallsAllDiscoveredNestedSkills(t *testing.T) {
 type getSkillChooser struct {
 	choices []int
 	calls   int
-	options []string
+	options []ui.Option
 }
 
 func (*getSkillChooser) Confirm(string) bool { return false }
@@ -250,9 +300,9 @@ func (c *getSkillChooser) Choose(string, []string) int {
 	return 0
 }
 
-func (c *getSkillChooser) ChooseMany(_ string, options []string) []int {
+func (c *getSkillChooser) ChooseMany(_ string, options []ui.Option) []int {
 	c.calls++
-	c.options = append([]string(nil), options...)
+	c.options = append([]ui.Option(nil), options...)
 	return c.choices
 }
 
@@ -906,6 +956,72 @@ func TestUpdate(t *testing.T) {
 	}
 	if rep.Entries[0].Note != i18n.Text("already up to date") {
 		t.Errorf("second update = %+v, want already up to date", rep.Entries[0])
+	}
+}
+
+func TestUpdateQueriesDistinctRepositoriesConcurrently(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses a POSIX shell wrapper")
+	}
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is unavailable")
+	}
+
+	newRepo := func(name string) *testutil.Repo {
+		t.Helper()
+		r := testutil.NewRepo(t)
+		r.WriteSkill("", name)
+		r.CommitAll("init " + name)
+		r.Tag("v1.0.0")
+		r.FinishNamed(name)
+		return r
+	}
+	firstRepo, secondRepo := newRepo("first"), newRepo("second")
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	for _, repo := range []*testutil.Repo{firstRepo, secondRepo} {
+		if _, err := eng.Get(ctx, repo.URL+"@v1.0.0", "", testIO()); err != nil {
+			t.Fatalf("Get(%q) error = %v, want nil", repo.URL, err)
+		}
+	}
+
+	markerDir := t.TempDir()
+	wrapper := filepath.Join(t.TempDir(), "git")
+	body := `#!/bin/sh
+if [ "$1" = "ls-remote" ]; then
+  touch "$SKILLMOD_REF_MARKERS/$$"
+  attempts=0
+  while [ "$(find "$SKILLMOD_REF_MARKERS" -type f | wc -l)" -lt "$SKILLMOD_EXPECTED_REPOS" ]; do
+    attempts=$((attempts + 1))
+    if [ "$attempts" -ge 200 ]; then
+      echo "refs queries did not overlap" >&2
+      exit 97
+    fi
+    sleep 0.01
+  done
+fi
+exec "$SKILLMOD_REAL_GIT" "$@"
+`
+	if err := os.WriteFile(wrapper, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SKILLMOD_REF_MARKERS", markerDir)
+	t.Setenv("SKILLMOD_EXPECTED_REPOS", "2")
+	t.Setenv("SKILLMOD_REAL_GIT", realGit)
+	eng.Source.Git = wrapper
+
+	updateCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if _, err := eng.Update(updateCtx, nil, testIO()); err != nil {
+		t.Fatalf("Update(two repositories) error = %v, want concurrent refs queries", err)
+	}
+	markers, err := os.ReadDir(markerDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(markers) != 2 {
+		t.Errorf("Update(two repositories) ls-remote calls = %d, want 2", len(markers))
 	}
 }
 

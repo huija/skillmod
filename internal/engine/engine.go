@@ -43,6 +43,7 @@ type Engine struct {
 type IO struct {
 	Out, Err io.Writer
 	Confirm  ui.Confirmer // nil means non-interactive and applies safe conflict defaults
+	Progress ui.Progress  // nil disables interactive activity updates
 	Yes      bool         // skip confirmation in CI
 	DryRun   bool         // report the plan without writing files
 }
@@ -50,6 +51,18 @@ type IO struct {
 func (io IO) printf(format string, args ...any) {
 	if io.Out != nil {
 		fmt.Fprintf(io.Out, format+"\n", args...)
+	}
+}
+
+func (io IO) setProgress(messages ...string) {
+	if io.Progress != nil {
+		io.Progress.Set(messages...)
+	}
+}
+
+func (io IO) stopProgress() {
+	if io.Progress != nil {
+		io.Progress.Stop()
 	}
 }
 
@@ -197,12 +210,43 @@ type refsResult struct {
 
 type refsMemo map[string]refsResult
 
-func (e *Engine) refs(ctx context.Context, repo string, memo refsMemo) (*resolve.Refs, error) {
-	if result, ok := memo[repo]; ok {
+type snapshotKey struct {
+	repo    string
+	version string
+}
+
+type operationMemo struct {
+	refs      refsMemo
+	snapshots map[snapshotKey]*store.Snapshot
+	progress  ui.Progress
+}
+
+func newOperationMemo(progress ui.Progress) *operationMemo {
+	return &operationMemo{
+		refs:      refsMemo{},
+		snapshots: map[snapshotKey]*store.Snapshot{},
+		progress:  progress,
+	}
+}
+
+func (m *operationMemo) setProgress(messages ...string) {
+	if m != nil && m.progress != nil {
+		m.progress.Set(messages...)
+	}
+}
+
+func (e *Engine) refs(ctx context.Context, repo string, memo *operationMemo) (*resolve.Refs, error) {
+	key := source.RepoIdentity(repo)
+	if result, ok := memo.refs[key]; ok {
 		return result.refs, result.err
 	}
+	memo.setProgress(
+		i18n.Format("checking remote versions for %s", key),
+		i18n.Text("contacting the Git server"),
+		i18n.Text("waiting for remote references"),
+	)
 	refs, err := e.Source.Refs(ctx, repo)
-	memo[repo] = refsResult{refs: refs, err: err}
+	memo.refs[key] = refsResult{refs: refs, err: err}
 	return refs, err
 }
 
@@ -241,8 +285,25 @@ func snapshotSkillDir(snap *store.Snapshot, subdir string) (string, error) {
 	return dir, nil
 }
 
-func (e *Engine) snapshotMaterialized(repo, subdir, version, commit, wantHash string) (*materialized, bool, error) {
+func (e *Engine) snapshot(repo, version string, memo *operationMemo) (*store.Snapshot, error) {
+	key := snapshotKey{repo: source.RepoIdentity(repo), version: version}
+	if snap, ok := memo.snapshots[key]; ok {
+		return snap, nil
+	}
+	memo.setProgress(
+		i18n.Format("verifying cached snapshot for %s", key.repo),
+		i18n.Text("checking cached content integrity"),
+		i18n.Text("reading the local repository cache"),
+	)
 	snap, err := e.Store.GetSnapshot(repo, version)
+	if err == nil {
+		memo.snapshots[key] = snap
+	}
+	return snap, err
+}
+
+func (e *Engine) snapshotMaterialized(repo, subdir, version, commit, wantHash string, memo *operationMemo) (*materialized, bool, error) {
+	snap, err := e.snapshot(repo, version, memo)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, false, nil
 	}
@@ -257,9 +318,17 @@ func (e *Engine) snapshotMaterialized(repo, subdir, version, commit, wantHash st
 	if err != nil {
 		return nil, false, err
 	}
-	h, err := dirhash.HashDir(skillDir)
-	if err != nil {
-		return nil, false, err
+	h := snap.Info.Treehash
+	if subdir != "" {
+		memo.setProgress(
+			i18n.Format("verifying skill content in %s", source.RepoIdentity(repo)),
+			i18n.Text("hashing the selected skill"),
+			i18n.Text("checking cached content integrity"),
+		)
+		h, err = dirhash.HashDir(skillDir)
+		if err != nil {
+			return nil, false, err
+		}
 	}
 	if wantHash != "" && h != wantHash {
 		return nil, false, &TamperError{Name: subdir, Want: wantHash, Got: h}
@@ -272,10 +341,10 @@ func (e *Engine) snapshotMaterialized(repo, subdir, version, commit, wantHash st
 
 // materialize ensures resolved content is stored in a persistent version snapshot and returns its location.
 // A non-empty wantHash requires an exact match and reports tampering on mismatch (AC-3).
-func (e *Engine) materialize(ctx context.Context, repo, subdir string, res resolve.Resolution, wantHash string) (*materialized, error) {
+func (e *Engine) materialize(ctx context.Context, repo, subdir string, res resolve.Resolution, wantHash string, memo *operationMemo) (*materialized, error) {
 	// A resolved tag can directly address an immutable snapshot by source and version.
 	if res.Version != "" {
-		if mat, ok, err := e.snapshotMaterialized(repo, subdir, res.Version, res.Commit, wantHash); err != nil || ok {
+		if mat, ok, err := e.snapshotMaterialized(repo, subdir, res.Version, res.Commit, wantHash, memo); err != nil || ok {
 			return mat, err
 		}
 	}
@@ -289,12 +358,17 @@ func (e *Engine) materialize(ctx context.Context, repo, subdir string, res resol
 		return nil, err
 	} else if ok {
 		if ent.Commit == res.Commit {
-			if mat, found, err := e.snapshotMaterialized(repo, subdir, ent.Version, ent.Commit, wantHash); err != nil || found {
+			if mat, found, err := e.snapshotMaterialized(repo, subdir, ent.Version, ent.Commit, wantHash, memo); err != nil || found {
 				return mat, err
 			}
 		}
 	}
 
+	memo.setProgress(
+		i18n.Format("downloading repository snapshot from %s", source.RepoIdentity(repo)),
+		i18n.Text("fetching Git objects"),
+		i18n.Text("reading repository contents"),
+	)
 	tree, err := e.Source.FetchRef(ctx, repo, res.Commit, res.FetchRef)
 	if err != nil {
 		return nil, err
@@ -314,13 +388,17 @@ func (e *Engine) materialize(ctx context.Context, repo, subdir string, res resol
 	if err != nil {
 		return nil, err
 	}
+	memo.snapshots[snapshotKey{repo: source.RepoIdentity(repo), version: version}] = snap
 	skillDir, err := snapshotSkillDir(snap, subdir)
 	if err != nil {
 		return nil, err
 	}
-	h, err := dirhash.HashDir(skillDir)
-	if err != nil {
-		return nil, err
+	h := snap.Info.Treehash
+	if subdir != "" {
+		h, err = dirhash.HashDir(skillDir)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if wantHash != "" && h != wantHash {
 		return nil, &TamperError{Name: subdir, Want: wantHash, Got: h}
@@ -336,14 +414,14 @@ func (e *Engine) materialize(ctx context.Context, repo, subdir string, res resol
 }
 
 // resolveAndFetch resolves a ref and materializes its content, falling back to the resolution index on network failure (PRD offline hit).
-func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, memo refsMemo) (*materialized, error) {
+func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, memo *operationMemo) (*materialized, error) {
 	// Prefer persistent resolution records and immutable snapshots for exact versions and commits.
 	// update owns remote refreshes, so repeated get operations avoid the network like the Go module cache.
 	if ref != "" {
 		if ent, ok, indexErr := e.Store.GetResolved(repo, subdir, ref); indexErr != nil {
 			return nil, indexErr
 		} else if ok {
-			if mat, found, snapErr := e.snapshotMaterialized(repo, subdir, ent.Version, ent.Commit, ent.Dirhash); snapErr != nil {
+			if mat, found, snapErr := e.snapshotMaterialized(repo, subdir, ent.Version, ent.Commit, ent.Dirhash, memo); snapErr != nil {
 				return nil, snapErr
 			} else if found {
 				mat.note = i18n.Text("from a local version snapshot; not verified online")
@@ -357,7 +435,7 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 				return nil, lookupErr
 			}
 			if ok {
-				mat, found, snapErr := e.snapshotMaterialized(repo, subdir, version, ref, "")
+				mat, found, snapErr := e.snapshotMaterialized(repo, subdir, version, ref, "", memo)
 				if snapErr != nil {
 					var missing *skillSubdirError
 					if !errors.As(snapErr, &missing) {
@@ -377,7 +455,7 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 		// Like the Go module cache, do not access the remote when the version is already local; other skills
 		// at the same repo@version can then be derived directly from snapshot subdirectories.
 		if semver.IsValid(ref) {
-			if mat, found, snapErr := e.snapshotMaterialized(repo, subdir, ref, "", ""); snapErr != nil {
+			if mat, found, snapErr := e.snapshotMaterialized(repo, subdir, ref, "", "", memo); snapErr != nil {
 				var missing *skillSubdirError
 				if !errors.As(snapErr, &missing) {
 					return nil, snapErr
@@ -401,7 +479,7 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 				cacheHit := resolveErr == nil && cachedRes.Kind == resolve.KindTag &&
 					(subdir == "" || cachedRes.Version == subdir+"/"+ref)
 				if cacheHit {
-					mat, materializeErr := e.materialize(ctx, repo, subdir, *cachedRes, "")
+					mat, materializeErr := e.materialize(ctx, repo, subdir, *cachedRes, "", memo)
 					if materializeErr != nil {
 						return nil, materializeErr
 					}
@@ -421,7 +499,7 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 		if ent, ok, indexErr := e.Store.GetResolved(repo, subdir, ref); indexErr != nil {
 			return nil, indexErr
 		} else if ok {
-			if mat, found, snapErr := e.snapshotMaterialized(repo, subdir, ent.Version, ent.Commit, ent.Dirhash); snapErr != nil {
+			if mat, found, snapErr := e.snapshotMaterialized(repo, subdir, ent.Version, ent.Commit, ent.Dirhash, memo); snapErr != nil {
 				return nil, snapErr
 			} else if found {
 				mat.note = i18n.Text("from a local version snapshot; not verified online")
@@ -438,7 +516,7 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 		if ent, ok, indexErr := e.Store.GetResolved(repo, subdir, ref); indexErr != nil {
 			return nil, indexErr
 		} else if ok {
-			if mat, found, snapErr := e.snapshotMaterialized(repo, subdir, ent.Version, ent.Commit, ent.Dirhash); snapErr != nil {
+			if mat, found, snapErr := e.snapshotMaterialized(repo, subdir, ent.Version, ent.Commit, ent.Dirhash, memo); snapErr != nil {
 				return nil, snapErr
 			} else if found {
 				return mat, nil
@@ -450,7 +528,7 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 	if err != nil {
 		return nil, err
 	}
-	mat, err := e.materialize(ctx, repo, subdir, *res, "")
+	mat, err := e.materialize(ctx, repo, subdir, *res, "", memo)
 	if err != nil {
 		return nil, err
 	}
@@ -463,8 +541,8 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 
 // materializeLocked materializes content from an existing authoritative lock entry (AC-10):
 // it skips ls-remote and uses the lock's commit and dirhash, requiring the computed hash to match (AC-3).
-func (e *Engine) materializeLocked(ctx context.Context, repo, subdir string, lk modfile.LockSkill, memo refsMemo) (string, error) {
-	if mat, ok, err := e.snapshotMaterialized(repo, subdir, lk.Version, lk.Commit, lk.Dirhash); err != nil {
+func (e *Engine) materializeLocked(ctx context.Context, repo, subdir string, lk modfile.LockSkill, memo *operationMemo) (string, error) {
+	if mat, ok, err := e.snapshotMaterialized(repo, subdir, lk.Version, lk.Commit, lk.Dirhash, memo); err != nil {
 		return "", err
 	} else if ok {
 		return mat.contentDir, nil
@@ -492,6 +570,11 @@ func (e *Engine) materializeLocked(ctx context.Context, repo, subdir string, lk 
 	if !resolve.IsPseudoVersion(lk.Version) && !resolve.IsSHA(lk.Version) {
 		fetchRef = "refs/tags/" + lk.Version
 	}
+	memo.setProgress(
+		i18n.Format("downloading repository snapshot from %s", source.RepoIdentity(repo)),
+		i18n.Text("fetching Git objects"),
+		i18n.Text("reading repository contents"),
+	)
 	tree, err := e.Source.FetchRef(ctx, repo, commit, fetchRef)
 	if err != nil {
 		return "", err
@@ -507,13 +590,17 @@ func (e *Engine) materializeLocked(ctx context.Context, repo, subdir string, lk 
 	if err != nil {
 		return "", err
 	}
+	memo.snapshots[snapshotKey{repo: source.RepoIdentity(repo), version: lk.Version}] = snap
 	skillDir, err := snapshotSkillDir(snap, subdir)
 	if err != nil {
 		return "", err
 	}
-	h, err := dirhash.HashDir(skillDir)
-	if err != nil {
-		return "", err
+	h := snap.Info.Treehash
+	if subdir != "" {
+		h, err = dirhash.HashDir(skillDir)
+		if err != nil {
+			return "", err
+		}
 	}
 	if h != lk.Dirhash {
 		return "", &TamperError{Name: lk.Name, Want: lk.Dirhash, Got: h}

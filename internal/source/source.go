@@ -79,6 +79,13 @@ func (s *Source) run(ctx context.Context, dir string, args ...string) (string, e
 
 // repoArg makes a best effort to find a repository address in the arguments for error reporting.
 func repoArg(args []string) string {
+	if len(args) > 0 && args[0] == "ls-remote" {
+		for _, arg := range args[1:] {
+			if !strings.HasPrefix(arg, "-") {
+				return arg
+			}
+		}
+	}
 	for i := len(args) - 1; i >= 0; i-- {
 		if !strings.HasPrefix(args[i], "-") {
 			return args[i]
@@ -108,11 +115,11 @@ func mapGitError(err error, stderr, repo string) error {
 	return &RepoError{Kind: kind, Repo: repo, Stderr: stderr}
 }
 
-// Refs obtains a remote-reference snapshot with one ls-remote call.
-// It intentionally omits --heads and --tags filters so one call returns tags, heads, and the HEAD symref.
-// Filters would require two calls, while GitHub does not advertise hidden refs such as refs/pull/*, so they add no noise.
+// Refs obtains a remote-reference snapshot with one ls-remote call. Explicit
+// patterns retain HEAD, branches, and tags while excluding unrelated namespaces
+// such as GitHub pull-request refs.
 func (s *Source) Refs(ctx context.Context, repo string) (*resolve.Refs, error) {
-	out, err := s.run(ctx, "", "ls-remote", "--symref", repo)
+	out, err := s.run(ctx, "", "ls-remote", "--symref", repo, "HEAD", "refs/heads/*", "refs/tags/*")
 	if err != nil {
 		return nil, err
 	}

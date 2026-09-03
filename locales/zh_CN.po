@@ -51,6 +51,9 @@ msgstr "冲突: %s 已存在且内容与锁定不符（本地可能被修改过�
 msgid "Conflicts detected (targets exist and their contents do not match the lock):"
 msgstr "检测到冲突（目标已存在且内容与锁定不符）："
 
+msgid "Description"
+msgstr "描述"
+
 msgid "Error: "
 msgstr "错误: "
 
@@ -59,6 +62,9 @@ msgstr "检出漂移时退出码为 2；与 sync --check 为同一实现。"
 
 msgid "Idempotent and verifiable, with rollback on failure. Installed files are never deleted automatically; use prune to clean them. --check only verifies and is an alias for verify."
 msgstr "幂等、可校验、失败回滚；永不自动删除已安装文件（清理走 prune）。--check 只校验不写文件，是 verify 的别名。"
+
+msgid "Install command"
+msgstr "安装命令"
 
 msgid "Review the conflicts and retry interactively, or use --yes to keep and skip them automatically"
 msgstr "建议人工确认后重试（交互模式逐条选择），或 --yes 自动保留并跳过"
@@ -86,8 +92,8 @@ msgstr "扫描各平台 skill 目录，经 git ls-remote 匹配来源，逐项�
 msgid "VCS cache identity conflict: %s"
 msgstr "VCS 缓存身份冲突: %s"
 
-msgid "Versions must be semver tags or 40-character commit SHAs; branch names are rejected because they are mutable.\nWhen omitted, the version is resolved in this order: <subdirectory>/v<latest> → v<latest> → default-branch HEAD (recorded as a pseudo-version).\nWhen a subdirectory is omitted, get discovers SKILL.md at the repository root and recursively below skills/. It shows every candidate's name, description, and exact address, then accepts one or more selections. --yes installs every discovered skill."
-msgstr "版本必须是 semver tag 或 40 位 commit SHA；分支名为可变引用，已拒绝。\n未指定版本时，按以下顺序解析：<子目录>/v<最新> → v<最新> → 默认分支 HEAD（记录为伪版本）。\n省略子目录时，get 会发现仓库根目录和 skills/ 下全部层级的 SKILL.md。它展示每个候选的名称、description 与精确地址，并支持选择一个或多个；--yes 会安装发现的全部 skill。"
+msgid "Versions must be semver tags or 40-character commit SHAs; branch names are rejected because they are mutable.\nWhen omitted, the version is resolved in this order: <subdirectory>/v<latest> → v<latest> → default-branch HEAD (recorded as a pseudo-version).\nA single segment after // first addresses an exact root subdirectory, then falls back to a unique skill name anywhere below skills/. When a subdirectory is omitted, get discovers SKILL.md at the repository root and recursively below skills/. Interactive terminals show a compact, colored one-line list; displayed commands omit the redundant https:// prefix and prefer a unique skill-name shorthand when safe. Use ↑/← for the previous item, ↓/→ for the next item, space to toggle selections, d to show or hide the current description and command, and enter to confirm. --yes installs every discovered skill."
+msgstr "版本必须是 semver tag 或 40 位 commit SHA；分支名为可变引用，已拒绝。\n未指定版本时，按以下顺序解析：<子目录>/v<最新> → v<最新> → 默认分支 HEAD（记录为伪版本）。\n// 后只有一段时，先按仓库根目录的精确子目录解析，再回退到 skills/ 下的唯一 skill 名匹配。省略子目录时，get 会发现仓库根目录和 skills/ 下全部层级的 SKILL.md。交互式终端会以紧凑的彩色单行列表展示候选；展示命令会省略冗余的 https:// 前缀，并在安全时优先使用唯一 skill 名简写。使用 ↑/← 移到上一项，↓/→ 移到下一项，空格键勾选或取消勾选，d 键展开或收起当前项的描述与命令，回车键确认。--yes 会安装发现的全部 skill。"
 
 msgid "With no names, update every entry. Commit-pinned entries, including pseudo-versions, advance to a new pseudo-version at default-branch HEAD."
 msgstr "不带名称时作用于全部条目；commit 钉住的条目（含伪版本）升到默认分支 HEAD 的新伪版本。"
@@ -153,6 +159,17 @@ msgid "cat-file --batch-check returned %d lines; expected %d"
 msgstr "cat-file --batch-check 返回 %d 行，期望 %d 行"
 
 #, go-format
+msgid "checking %d source repositories concurrently"
+msgstr "正在并发检查 %d 个源仓库"
+
+msgid "checking cached content integrity"
+msgstr "正在检查缓存内容完整性"
+
+#, go-format
+msgid "checking remote versions for %s"
+msgstr "正在检查 %s 的远程版本"
+
+#, go-format
 msgid "choose [1-%d]: "
 msgstr "请选择 [1-%d]: "
 
@@ -167,12 +184,21 @@ msgstr "落盘 %s: %w"
 msgid "commit pending resolution"
 msgstr "commit 待解析"
 
+msgid "comparing available versions"
+msgstr "正在比较可用版本"
+
 #, go-format
 msgid "conflict (--yes automatically kept and skipped): %s"
 msgstr "冲突（--yes 自动保留并跳过）: %s"
 
 msgid "consistent"
 msgstr "一致"
+
+msgid "contacting Git servers"
+msgstr "正在连接 Git 服务器"
+
+msgid "contacting the Git server"
+msgstr "正在连接 Git 服务器"
 
 msgid "contents do not match the baseline (local changes)"
 msgstr "内容与基线不符（本地改动）"
@@ -203,6 +229,13 @@ msgstr "目录为空或不存在: %s"
 #, go-format
 msgid "dirhash is missing the h1: prefix: %q"
 msgstr "dirhash 缺少 h1: 前缀: %q"
+
+msgid "discovering skills in the repository"
+msgstr "正在发现仓库中的 skills"
+
+#, go-format
+msgid "downloading repository snapshot from %s"
+msgstr "正在从 %s 下载仓库快照"
 
 msgid "drift"
 msgstr "漂移"
@@ -270,6 +303,9 @@ msgstr "读 blob %s 头失败: %w"
 msgid "fetch a skill by immutable reference, update SKILL.mod / SKILL.lock, and install it"
 msgstr "按不可变引用拉取 skill，写入 SKILL.mod / SKILL.lock 并安装"
 
+msgid "fetching Git objects"
+msgstr "正在获取 Git 对象"
+
 msgid "from a local repository commit snapshot; not verified online"
 msgstr "来自本地 repo commit 快照，未联网校验"
 
@@ -286,8 +322,8 @@ msgstr "frontmatter 中无 name 字段"
 msgid "generated %s (%d entries) without changing the original files"
 msgstr "已生成 %s（%d 个条目），原文件零改动"
 
-msgid "get <repository>[//<subdirectory>][@<version>]"
-msgstr "get <仓库>[//<子目录>][@<版本>]"
+msgid "get <repository>[//<subdirectory-or-skill-name>][@<version>]"
+msgstr "get <仓库>[//<子目录或 skill 名>][@<版本>]"
 
 #, go-format
 msgid "git execution failed: %w"
@@ -302,6 +338,12 @@ msgstr "go mod for Agent Skills：SKILL.mod 声明 + SKILL.lock 锁定 + sync �
 
 msgid "hash pending verification"
 msgstr "哈希待校验"
+
+msgid "hashing the selected skill"
+msgstr "正在计算所选 skill 的哈希"
+
+msgid "hide details"
+msgstr "收起详情"
 
 msgid "init requires confirmation: select each entry interactively or use --yes to accept all"
 msgstr "init 需要确认：交互模式逐项选择，或 --yes 全部采纳"
@@ -365,6 +407,9 @@ msgstr "cat-file --batch-check 输出畸形: %q"
 #, go-format
 msgid "malformed ls-tree output: %q"
 msgstr "ls-tree 输出畸形: %q"
+
+msgid "matching the requested skill name"
+msgstr "正在匹配请求的 skill 名称"
 
 msgid "missing"
 msgstr "缺失"
@@ -474,6 +519,15 @@ msgstr "已清理 %d 个过期条目"
 msgid "pseudo-version %s is not in the local resolution index (cross-machine synchronization of pseudo-version entries relies on the commit field in SKILL.lock)"
 msgstr "伪版本 %s 不在本机解析索引中（伪版本条目的跨机同步依赖 SKILL.lock 的 commit 字段）"
 
+msgid "reading repository contents"
+msgstr "正在读取仓库内容"
+
+msgid "reading skill metadata"
+msgstr "正在读取 skill 元数据"
+
+msgid "reading the local repository cache"
+msgstr "正在读取本地仓库缓存"
+
 msgid "regenerate an existing SKILL.mod after backing it up as SKILL.mod.bak"
 msgstr "已存在 SKILL.mod 时重新生成，原文件备份为 SKILL.mod.bak"
 
@@ -549,6 +603,9 @@ msgstr "扫描仓库现有 skill，生成 SKILL.mod 草案"
 msgid "select one or more [1-%d, comma-separated; empty to abort]: "
 msgstr "请选择一个或多个 [1-%d，使用逗号分隔；留空取消]："
 
+msgid "show details"
+msgstr "展开详情"
+
 #, go-format
 msgid "skill contains a submodule (%s), which skillmod does not support"
 msgstr "skill 包含 submodule（%s），v0.1 不支持"
@@ -556,6 +613,10 @@ msgstr "skill 包含 submodule（%s），v0.1 不支持"
 #, go-format
 msgid "skill contains a symlink (%s); skillmod does not support skills containing symlinks"
 msgstr "skill 包含 symlink（%s），v0.1 不支持含 symlink 的 skill"
+
+#, go-format
+msgid "skill name %q matches multiple subdirectories: %s; use an exact subdirectory"
+msgstr "skill 名 %q 匹配了多个子目录：%s；请使用精确子目录"
 
 msgid "skill package is missing SKILL.md or has an invalid frontmatter name (contact the author to fix it): "
 msgstr "skill 包 SKILL.md 缺失或 frontmatter name 非法（联系作者修复）: "
@@ -634,6 +695,14 @@ msgid "verify without modifying anything (alias for skillmod verify)"
 msgstr "只校验不修改（skillmod verify 的别名）"
 
 #, go-format
+msgid "verifying cached snapshot for %s"
+msgstr "正在校验 %s 的缓存快照"
+
+#, go-format
+msgid "verifying skill content in %s"
+msgstr "正在校验 %s 中的 skill 内容"
+
+#, go-format
 msgid "version %q does not exist. Available tags (descending semver order, up to 10): %s"
 msgstr "版本 %q 不存在。可用 tag（semver 降序，最多 10 个）: %s"
 
@@ -677,6 +746,9 @@ msgstr "版本快照冲突，拒绝覆盖 %s\n已有: %s @ %s (%s)\n请求: %s @
 #, go-format
 msgid "version snapshot contains an irregular file: %s"
 msgstr "版本快照含非常规文件: %s"
+
+msgid "waiting for remote references"
+msgstr "正在等待远程 refs"
 
 #, go-format
 msgid "write %s: %w"

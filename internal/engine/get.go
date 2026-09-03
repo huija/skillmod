@@ -19,6 +19,7 @@ import (
 	"github.com/huija/skillmod/internal/modfile"
 	"github.com/huija/skillmod/internal/resolve"
 	"github.com/huija/skillmod/internal/source"
+	"github.com/huija/skillmod/internal/ui"
 )
 
 // conflict represents an existing installation target whose content does not match (PRD §3.3 rule 5).
@@ -70,6 +71,7 @@ func resolveConflicts(io IO, conflicts []conflict) (skip map[string]bool, err er
 // Get implements skillmod get: resolve, download, validate, install, then write SKILL.mod and SKILL.lock.
 // A failure at any step leaves no partially updated state (PRD §3.2 rule 6).
 func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report, error) {
+	defer io.stopProgress()
 	addr, err := address.Parse(rawAddr)
 	if err != nil {
 		return nil, err
@@ -137,6 +139,7 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 			}
 		}
 	}
+	io.stopProgress()
 	skip, err := resolveConflicts(io, conflicts)
 	if err != nil {
 		return nil, err
@@ -216,13 +219,28 @@ type resolvedGetSkill struct {
 // resolveGetSkills supports standalone skills at a repository root and skill
 // collections beneath skills/. An explicit subdirectory always wins.
 func (e *Engine) resolveGetSkills(ctx context.Context, addr *address.Address, io IO) ([]resolvedGetSkill, error) {
-	memo := refsMemo{}
+	memo := newOperationMemo(io.Progress)
 	if addr.Subdir != "" {
 		mat, err := e.resolveAndFetch(ctx, addr.Repo, addr.Subdir, addr.Ref, memo)
-		if err != nil {
-			return nil, err
+		if err == nil {
+			return []resolvedGetSkill{{mat: mat, subdir: addr.Subdir}}, nil
 		}
-		return []resolvedGetSkill{{mat: mat, subdir: addr.Subdir}}, nil
+		// A single segment is also accepted as a skill-name shorthand when it
+		// is not an exact repository subdirectory. Exact paths always win.
+		if !strings.Contains(addr.Subdir, "/") {
+			candidate, found, lookupErr := e.findSkillByName(ctx, addr.Repo, addr.Subdir, addr.Ref, memo)
+			if lookupErr != nil {
+				return nil, lookupErr
+			}
+			if found {
+				mat, lookupErr = e.resolveAndFetch(ctx, addr.Repo, candidate.subdir, addr.Ref, memo)
+				if lookupErr != nil {
+					return nil, lookupErr
+				}
+				return []resolvedGetSkill{{mat: mat, subdir: candidate.subdir}}, nil
+			}
+		}
+		return nil, err
 	}
 
 	root, err := e.resolveAndFetch(ctx, addr.Repo, "", addr.Ref, memo)
@@ -238,6 +256,7 @@ func (e *Engine) resolveGetSkills(ctx context.Context, addr *address.Address, io
 	if err != nil {
 		return nil, err
 	}
+	io.stopProgress()
 	candidates, err := chooseSkillCandidates(root.contentDir, addr.Repo, io)
 	if err != nil {
 		return nil, err
@@ -255,6 +274,46 @@ func (e *Engine) resolveGetSkills(ctx context.Context, addr *address.Address, io
 		resolved = append(resolved, resolvedGetSkill{mat: mat, subdir: candidate.subdir})
 	}
 	return resolved, nil
+}
+
+func (e *Engine) findSkillByName(ctx context.Context, repo, name, ref string, memo *operationMemo) (skillCandidate, bool, error) {
+	root, err := e.resolveAndFetch(ctx, repo, "", ref, memo)
+	var missing *resolve.NotFoundError
+	if err != nil && ref != "" && errors.As(err, &missing) {
+		// A collection may only tag individual skill subdirectories. Use the
+		// default branch for discovery, then resolve the matched path at ref.
+		root, err = e.resolveAndFetch(ctx, repo, "", "", memo)
+	}
+	if err != nil {
+		return skillCandidate{}, false, nil
+	}
+	memo.setProgress(
+		i18n.Text("discovering skills in the repository"),
+		i18n.Text("reading skill metadata"),
+		i18n.Text("matching the requested skill name"),
+	)
+	candidates, err := skillCandidates(root.contentDir)
+	if err != nil {
+		return skillCandidate{}, false, err
+	}
+	var matches []skillCandidate
+	for _, candidate := range candidates {
+		if candidate.name == name {
+			matches = append(matches, candidate)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return skillCandidate{}, false, nil
+	case 1:
+		return matches[0], true, nil
+	default:
+		paths := make([]string, len(matches))
+		for i, match := range matches {
+			paths[i] = match.subdir
+		}
+		return skillCandidate{}, false, fmt.Errorf(i18n.Text("skill name %q matches multiple subdirectories: %s; use an exact subdirectory"), name, strings.Join(paths, ", "))
+	}
 }
 
 // skillCandidate is one discoverable SKILL.md, with the root represented by
@@ -279,21 +338,26 @@ func chooseSkillCandidates(root, repo string, io IO) ([]skillCandidate, error) {
 		return candidates, nil
 	}
 
-	options := make([]string, len(candidates))
+	displaySubdirs := candidateDisplaySubdirs(root, candidates)
+	options := make([]ui.Option, len(candidates))
 	for i, candidate := range candidates {
-		options[i] = candidate.option(repo)
+		options[i] = candidate.option(repo, displaySubdirs[i])
 	}
 	if selector, ok := io.Confirm.(interface {
-		ChooseMany(prompt string, options []string) []int
+		ChooseMany(prompt string, options []ui.Option) []int
 	}); ok {
 		return selectedCandidates(candidates, selector.ChooseMany(i18n.Format("multiple skills found in %s; select one or more", repo), options))
 	}
 	if io.Confirm == nil {
-		return nil, &skillCandidatesError{Repo: repo, Candidates: options}
+		displayOptions := make([]string, len(candidates))
+		for i, candidate := range candidates {
+			displayOptions[i] = candidate.displayOption(repo, displaySubdirs[i])
+		}
+		return nil, &skillCandidatesError{Repo: repo, Candidates: displayOptions}
 	}
 	var selected []skillCandidate
-	for _, candidate := range candidates {
-		prompt := i18n.Format("install %s from %s?\n%s", candidate.name, candidateAddress(repo, candidate.subdir), candidate.description)
+	for i, candidate := range candidates {
+		prompt := i18n.Format("install %s from %s?\n%s", candidate.name, candidateAddress(repo, displaySubdirs[i]), candidate.description)
 		if io.Confirm.Confirm(prompt) {
 			selected = append(selected, candidate)
 		}
@@ -320,12 +384,44 @@ func selectedCandidates(candidates []skillCandidate, indices []int) ([]skillCand
 	return selected, nil
 }
 
-func (c skillCandidate) option(repo string) string {
+func (c skillCandidate) option(repo, displaySubdir string) ui.Option {
 	description := c.description
 	if description == "" {
 		description = i18n.Text("no description")
 	}
-	return i18n.Format("%s — %s\n  %s", c.name, description, candidateAddress(repo, c.subdir))
+	return ui.Option{
+		Label:       c.name,
+		Description: description,
+		Detail:      candidateAddress(repo, displaySubdir),
+	}
+}
+
+func (c skillCandidate) displayOption(repo, displaySubdir string) string {
+	option := c.option(repo, displaySubdir)
+	return i18n.Format("%s — %s\n  %s", option.Label, option.Description, option.Detail)
+}
+
+func candidateDisplaySubdirs(root string, candidates []skillCandidate) []string {
+	nameCounts := make(map[string]int, len(candidates))
+	for _, candidate := range candidates {
+		nameCounts[candidate.name]++
+	}
+	displaySubdirs := make([]string, len(candidates))
+	for i, candidate := range candidates {
+		displaySubdirs[i] = candidate.subdir
+		if candidate.subdir == candidate.name {
+			continue // Already the shortest exact path, even if names repeat.
+		}
+		if nameCounts[candidate.name] != 1 || !validDirName(candidate.name) {
+			continue
+		}
+		// A root-level path with the same name would win exact-path resolution,
+		// so only advertise the shorthand when that path does not exist.
+		if _, err := os.Lstat(filepath.Join(root, candidate.name)); errors.Is(err, fs.ErrNotExist) {
+			displaySubdirs[i] = candidate.name
+		}
+	}
+	return displaySubdirs
 }
 
 func skillCandidates(root string) ([]skillCandidate, error) {
@@ -393,6 +489,10 @@ func (e *skillCandidatesError) Error() string {
 }
 
 func candidateAddress(repo, subdir string) string {
+	// Bare HTTPS addresses are accepted by the CLI, so omit the redundant
+	// transport prefix in commands shown to users. Keep the original repo for
+	// resolution, storage, and identity comparisons.
+	repo = strings.TrimPrefix(repo, "https://")
 	if subdir == "" {
 		return "skillmod get " + repo
 	}

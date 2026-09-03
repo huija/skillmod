@@ -8,10 +8,14 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/huija/skillmod/internal/dirhash"
+	"github.com/huija/skillmod/internal/modfile"
+	"github.com/huija/skillmod/internal/source"
+	"github.com/huija/skillmod/internal/store"
 )
 
 func TestValidDirName(t *testing.T) {
@@ -51,6 +55,107 @@ func TestSourceComparisonAndParsing(t *testing.T) {
 	}
 	if sameRemoteSource("invalid source//", "https://example.com/acme/skills") {
 		t.Error("an invalid source was considered equivalent to a valid source")
+	}
+}
+
+func TestCandidateAddress(t *testing.T) {
+	tests := []struct {
+		name   string
+		repo   string
+		subdir string
+		want   string
+	}{
+		{
+			name:   "HTTPS omits scheme",
+			repo:   "https://github.com/acme/skills",
+			subdir: "skills/demo",
+			want:   "skillmod get github.com/acme/skills//skills/demo",
+		},
+		{
+			name: "SSH remains unchanged",
+			repo: "ssh://git@example.com/acme/skills",
+			want: "skillmod get ssh://git@example.com/acme/skills",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := candidateAddress(tt.repo, tt.subdir); got != tt.want {
+				t.Errorf("candidateAddress(%q, %q) = %q, want %q", tt.repo, tt.subdir, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCandidateDisplaySubdirs(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "occupied"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	candidates := []skillCandidate{
+		{subdir: "skills/.curated/unique", name: "unique"},
+		{subdir: "exact", name: "exact"},
+		{subdir: "skills/.curated/duplicate", name: "duplicate"},
+		{subdir: "skills/.system/duplicate", name: "duplicate"},
+		{subdir: "skills/.curated/occupied", name: "occupied"},
+		{subdir: "skills/.curated/invalid", name: "invalid/name"},
+	}
+	want := []string{
+		"unique",
+		"exact",
+		"skills/.curated/duplicate",
+		"skills/.system/duplicate",
+		"skills/.curated/occupied",
+		"skills/.curated/invalid",
+	}
+	if got := candidateDisplaySubdirs(root, candidates); !slices.Equal(got, want) {
+		t.Errorf("candidateDisplaySubdirs(%q, %+v) = %v, want %v", root, candidates, got, want)
+	}
+}
+
+func TestUpdateRepositoriesCanonicalizesAndDeduplicates(t *testing.T) {
+	targets := []modfile.ModSkill{
+		{Source: "https://github.com/acme/skills//one"},
+		{Source: "git@github.com:acme/skills.git//two"},
+		{Source: "https://github.com/other/skills//three"},
+	}
+	want := []string{
+		"https://github.com/acme/skills",
+		"https://github.com/other/skills",
+	}
+	got, err := updateRepositories(targets)
+	if err != nil {
+		t.Fatalf("updateRepositories(%+v) error = %v, want nil", targets, err)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("updateRepositories(%+v) = %v, want %v", targets, got, want)
+	}
+}
+
+func TestSnapshotMemoReusesVerifiedRepository(t *testing.T) {
+	repo, version, commit := "https://example.com/acme/skills", "v1.0.0", strings.Repeat("a", 40)
+	files := []source.File{{Path: "SKILL.md", Data: []byte("---\nname: demo\n---\n")}}
+	treeHash, err := hashTree(&source.Tree{Files: files})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := store.New(t.TempDir())
+	if _, err := s.PutSnapshot(store.SnapshotInfo{
+		Repo: repo, Version: version, Commit: commit, Treehash: treeHash,
+	}, files); err != nil {
+		t.Fatal(err)
+	}
+	eng := &Engine{Store: s}
+	memo := newOperationMemo(nil)
+	first, err := eng.snapshot(repo, version, memo)
+	if err != nil {
+		t.Fatalf("Engine.snapshot(%q, %q, first call) error = %v, want nil", repo, version, err)
+	}
+	second, err := eng.snapshot("git@example.com:acme/skills.git", version, memo)
+	if err != nil {
+		t.Fatalf("Engine.snapshot(%q, %q, equivalent repo) error = %v, want nil", repo, version, err)
+	}
+	if second != first {
+		t.Errorf("Engine.snapshot(%q, %q) returned distinct snapshots %p and %p, want one memoized verification", repo, version, first, second)
 	}
 }
 
