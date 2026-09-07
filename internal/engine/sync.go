@@ -11,6 +11,7 @@ import (
 	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/install"
+	"github.com/huija/skillmod/internal/modfile"
 )
 
 // adapterDir returns an entry's installation directory for a platform.
@@ -28,7 +29,10 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 	if err != nil {
 		return nil, err
 	}
-	lock := e.loadLock()
+	lock, err := e.loadLock()
+	if err != nil {
+		return nil, err
+	}
 
 	entries, newLock, err := e.align(ctx, m, lock)
 	if err != nil {
@@ -45,7 +49,7 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 
 	for _, en := range entries {
 		prevHash := ""
-		if old := findLock(lock, en.skill.Name); old != nil {
+		if old := findLock(lock, en.skill); old != nil {
 			prevHash = old.Dirhash // The pre-alignment lock hash allows a clean old version to be overwritten.
 		}
 		var targets []string
@@ -76,12 +80,20 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 	}
 
 	// Validate local entries without modifying them; warn about drift but do not repair it.
+	// A remote lock record left behind when a mod entry was hand-edited from
+	// remote to local still occupies the installation-directory slot; the
+	// baseline is re-established from the installed files (only the lock is
+	// updated, never the files).
 	for _, sk := range m.Skills {
 		if !sk.Local {
 			continue
 		}
-		lk := findLock(lock, sk.Name)
+		lk := findLock(lock, sk)
 		if lk == nil {
+			if findLockByDir(lock, sk.DirName()) != nil {
+				e.reestablishLocalBaseline(newLock, sk, adapters, rep)
+				continue
+			}
 			rep.Entries = append(rep.Entries, EntryReport{
 				Name: sk.Name, Action: "local", Note: i18n.Text("no baseline in the lock; verification skipped (run init again to establish one)")})
 			continue
@@ -115,7 +127,7 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 	}
 	for _, en := range entries {
 		prevHash := ""
-		if old := findLock(lock, en.skill.Name); old != nil {
+		if old := findLock(lock, en.skill); old != nil {
 			prevHash = old.Dirhash
 		}
 		for _, a := range adapters {
@@ -127,6 +139,19 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 	}
 
 	if io.DryRun {
+		// The flag promises to print the execution plan, so summarize it here
+		// before returning; nothing is written in dry-run mode.
+		planned := 0
+		for _, en := range rep.Entries {
+			if en.Action == "install" {
+				planned++
+			}
+		}
+		if planned == 0 {
+			io.printf(i18n.Text("dry-run: everything is already consistent"))
+		} else {
+			io.printf(i18n.Format("dry-run: %d entries would be installed or updated", planned))
+		}
 		rep.Notes = append(rep.Notes, i18n.Text("dry-run: no files were written"))
 		return rep, nil
 	}
@@ -155,4 +180,30 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 		io.printf(i18n.Text("synchronized %d entries; verification passed"), changed)
 	}
 	return rep, nil
+}
+
+// reestablishLocalBaseline replaces a stale remote lock record occupying a
+// now-local entry's directory slot with a fresh local baseline hashed from the
+// installed files. Installed files are never written or modified; only the
+// in-memory lock is updated, and it is persisted together with the other
+// sync changes.
+func (e *Engine) reestablishLocalBaseline(newLock *modfile.Lock, sk modfile.ModSkill, adapters []install.Adapter, rep *Report) {
+	baseline := ""
+	for _, a := range adapters {
+		dst := adapterDir(a, e.Root, sk.DirName())
+		h, err := dirhash.HashDir(dst)
+		if err != nil {
+			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local", Note: i18n.Text("missing: ") + dst})
+			continue
+		}
+		if baseline == "" {
+			baseline = h
+			upsertLock(newLock, modfile.LockSkill{Name: sk.Name, Dir: sk.Alias, Dirhash: h})
+			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local", Note: i18n.Text("baseline re-established from the installed files (the previous remote lock record was removed)")})
+			continue
+		}
+		if h != baseline {
+			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local-drift", Note: i18n.Text("contents do not match the baseline (local changes)"), Targets: []string{dst}})
+		}
+	}
 }

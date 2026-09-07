@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/huija/skillmod/internal/dirhash"
+	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/install"
 	"github.com/huija/skillmod/internal/modfile"
@@ -45,7 +46,11 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 		srcDir  string
 		note    string
 	}
+	// The installation directory, not frontmatter name, identifies an entry.
+	// The same directory is intentionally merged across platform adapters,
+	// while two aliases carrying the same published name remain independent.
 	seen := map[string]*scanned{}
+	var skipped []string
 	for _, a := range adapters {
 		base := a.SkillsDir(e.Root)
 		dents, err := os.ReadDir(base)
@@ -63,17 +68,39 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 			s := &scanned{dirName: d.Name(), srcDir: dir}
 			name, err := source.SkillNameFromDir(dir)
 			if err != nil {
-				s.name = d.Name() // Use the directory name as specified by the PRD §3.1 error table.
+				// Use the directory name as specified by the PRD §3.1 error table,
+				// but only when it can actually serve as an installation directory.
+				if nameErr := fsutil.ValidName(d.Name()); nameErr != nil {
+					skipped = append(skipped, i18n.Format("%s (%v)", dir, nameErr))
+					continue
+				}
+				s.name = d.Name()
 				s.note = i18n.Text("failed to parse the SKILL.md name; using the directory name as a placeholder—please correct it manually")
 			} else {
 				s.name = name
+				if s.dirName != s.name {
+					if aliasErr := fsutil.ValidAlias(s.dirName); aliasErr != nil {
+						skipped = append(skipped, i18n.Format("%s (%v)", dir, aliasErr))
+						continue
+					}
+				}
 			}
-			if prev, ok := seen[s.name]; ok {
+			if prev, ok := seen[s.dirName]; ok {
 				prev.note = i18n.Text("a skill with the same name appears in multiple platform directories; merged into one entry")
-				continue // Treat matching names as the same skill.
+				continue // Treat the same installation directory as one skill.
 			}
-			seen[s.name] = s
+			seen[s.dirName] = s
 		}
+	}
+	// Spellings that differ only in letter case map to one installation
+	// directory on Windows and macOS; report them instead of silently merging.
+	folded := map[string]string{}
+	for _, s := range seen {
+		key := fsutil.FoldKey(s.dirName)
+		if prev, ok := folded[key]; ok {
+			return nil, fmt.Errorf(i18n.Text("init found skills %q (in %s) and %q (in %s) that differ only in letter case and would map to the same installation directory; rename one of them"), prev, seen[prev].srcDir, s.dirName, s.srcDir)
+		}
+		folded[key] = s.dirName
 	}
 
 	// Match sources with one batched ls-remote per known source rather than one network request per skill.
@@ -100,22 +127,36 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 	sort.Strings(names)
 
 	m := &modfile.Mod{SchemaVersion: modfile.SchemaVersion}
-	lock := e.loadLock()
+	lock, err := e.loadLock()
+	if err != nil {
+		return nil, err
+	}
 	rep := &Report{Action: "init"}
-	for _, name := range names {
-		s := seen[name]
+	if len(skipped) > 0 {
+		rep.Notes = append(rep.Notes, i18n.Text("the following directories were skipped because they cannot be represented as valid SKILL.mod entries:"))
+		for _, msg := range skipped {
+			rep.Notes = append(rep.Notes, "  "+msg)
+		}
+	}
+	for _, dirName := range names {
+		s := seen[dirName]
+		name := s.name
+		alias := ""
+		if s.dirName != name {
+			alias = s.dirName
+		}
 		entry := EntryReport{Name: name}
 		var matched *modfile.ModSkill
 		for _, sr := range sources {
 			// Monorepo convention: match a <directory-name>/v* tag prefix.
 			if r, err := resolve.Resolve(resolve.Request{Repo: sr.repo, Subdir: s.dirName}, sr.refs); err == nil && r.Kind == resolve.KindTag && hasPrefixTag(sr.refs, s.dirName+"/") {
-				matched = &modfile.ModSkill{Name: name, Source: sr.repo + "//" + s.dirName, Version: r.Version}
+				matched = &modfile.ModSkill{Name: name, Source: sr.repo + "//" + s.dirName, Version: r.Version, Alias: alias}
 				break
 			}
 			// Single-repository convention: the repository name equals the directory name and has a root tag.
 			if strings.TrimSuffix(path.Base(sr.repo), ".git") == s.dirName {
 				if r, err := resolve.Resolve(resolve.Request{Repo: sr.repo}, sr.refs); err == nil && r.Kind == resolve.KindTag {
-					matched = &modfile.ModSkill{Name: name, Source: sr.repo, Version: r.Version}
+					matched = &modfile.ModSkill{Name: name, Source: sr.repo, Version: r.Version, Alias: alias}
 					break
 				}
 			}
@@ -131,8 +172,8 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 			if err != nil {
 				return nil, err
 			}
-			m.Skills = append(m.Skills, modfile.ModSkill{Name: name, Local: true})
-			upsertLock(lock, modfile.LockSkill{Name: name, Dirhash: h})
+			m.Skills = append(m.Skills, modfile.ModSkill{Name: name, Alias: alias, Local: true})
+			upsertLock(lock, modfile.LockSkill{Name: name, Dirhash: h, Dir: alias})
 			entry.Action = "local"
 		}
 		if s.note != "" {
@@ -162,13 +203,13 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 		m.Skills = kept
 		rep.Entries = keptEntries
 		// Do not add rejected local entries to the lock.
-		keepNames := map[string]bool{}
+		keepDirs := map[string]bool{}
 		for _, sk := range kept {
-			keepNames[sk.Name] = true
+			keepDirs[fsutil.FoldKey(sk.DirName())] = true
 		}
 		var keptLock []modfile.LockSkill
 		for _, lk := range lock.Skills {
-			if keepNames[lk.Name] {
+			if keepDirs[fsutil.FoldKey(lk.InstallDir())] {
 				keptLock = append(keptLock, lk)
 			}
 		}

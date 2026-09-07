@@ -15,6 +15,7 @@ import (
 
 	"github.com/huija/skillmod/internal/address"
 	"github.com/huija/skillmod/internal/dirhash"
+	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/modfile"
 	"github.com/huija/skillmod/internal/resolve"
@@ -80,14 +81,19 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 	if err != nil {
 		return nil, err
 	}
-	lock := e.loadLock()
+	lock, err := e.loadLock()
+	if err != nil {
+		return nil, err
+	}
 
 	resolved, err := e.resolveGetSkills(ctx, addr, io)
 	if err != nil {
 		return nil, err
 	}
-	if alias != "" && !validDirName(alias) {
-		return nil, fmt.Errorf(i18n.Text("alias %q contains invalid characters (only letters, digits, '.', '_', and '-' are allowed)"), alias)
+	if alias != "" {
+		if err := fsutil.ValidAlias(alias); err != nil {
+			return nil, err
+		}
 	}
 	if alias != "" && len(resolved) != 1 {
 		return nil, fmt.Errorf("%s", i18n.Text("--alias can only be used when exactly one skill is selected"))
@@ -100,22 +106,48 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 		if err != nil {
 			return nil, err
 		}
+		entryAlias := alias
+		if entryAlias == name {
+			entryAlias = ""
+		}
 		dir := name
-		if alias != "" {
-			dir = alias
+		if entryAlias != "" {
+			dir = entryAlias
 		}
 		src := addr.Repo + subdirSuffix(result.subdir)
+		incoming := modfile.ModSkill{Name: name, Source: src, Alias: entryAlias}
+		previousDir := vacatedDir(m, incoming, dir)
 		for _, skill := range m.Skills {
-			if skill.DirName() == dir && !sameRemoteSource(skill.Source, src) {
-				return nil, &NameConflictError{Name: skill.Name, Existing: skill.Source, Incoming: src}
+			dirName := skill.DirName()
+			if dirName == dir && sameRemoteSource(skill.Source, src) {
+				continue // Idempotent re-get of the same skill.
+			}
+			if !sameDir(dirName, dir) {
+				continue // Distinct spellings that cannot share a directory.
+			}
+			// Field convention shared with the byDir branch below:
+			// Name holds the existing directory spelling and OtherName the
+			// incoming one, so the message always reads "existing, incoming".
+			other := ""
+			if dirName != dir {
+				other = dir
+			}
+			return nil, &NameConflictError{Name: dirName, Existing: skill.Source, Incoming: src, OtherName: other}
+		}
+		fold := fsutil.FoldKey(dir)
+		if previous, exists := byDir[fold]; exists {
+			prev := entries[previous]
+			if !sameRemoteSource(prev.source, src) || prev.dir != dir {
+				other := ""
+				if prev.dir != dir {
+					other = dir
+				}
+				return nil, &NameConflictError{Name: prev.dir, Existing: prev.source, Incoming: src, OtherName: other}
 			}
 		}
-		if previous, exists := byDir[dir]; exists && !sameRemoteSource(entries[previous].source, src) {
-			return nil, &NameConflictError{Name: name, Existing: entries[previous].source, Incoming: src}
-		}
-		entry := getEntry{mat: result.mat, name: name, dir: dir, source: src}
+		entry := getEntry{mat: result.mat, name: name, dir: dir, source: src, alias: entryAlias, previousDir: previousDir}
 		entries = append(entries, entry)
-		byDir[dir] = len(entries) - 1
+		byDir[fold] = len(entries) - 1
 	}
 
 	// Classify targets: install absent or clean old versions, skip matching versions, and flag local modifications as conflicts.
@@ -126,7 +158,7 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 	var conflicts []conflict
 	for i := range entries {
 		prevHash := ""
-		if old := findLock(lock, entries[i].name); old != nil {
+		if old := findLock(lock, entries[i].modSkill()); old != nil {
 			prevHash = old.Dirhash
 		}
 		for _, adapter := range adapters {
@@ -146,7 +178,7 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 	}
 	for _, c := range conflicts {
 		if !skip[c.dir] {
-			index := byDir[c.name]
+			index := byDir[fsutil.FoldKey(c.name)]
 			entries[index].targets = append(entries[index].targets, c.dir) // Overwrite was selected.
 		}
 	}
@@ -157,11 +189,30 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 			Name: entry.name, Source: entry.source, Version: entry.mat.version,
 			Action: "install", Note: entry.mat.note, Targets: entry.targets,
 		})
+		if note := entry.directoryChangeNote(); note != "" {
+			rep.Notes = append(rep.Notes, note)
+		}
 	}
 
 	if io.DryRun {
 		rep.Notes = append(rep.Notes, i18n.Text("dry-run: no files were written"))
 		return rep, nil
+	}
+
+	for _, entry := range entries {
+		skill := entry.modSkill()
+		skill.Version = entry.mat.version
+		upsertMod(m, skill)
+		upsertLock(lock, modfile.LockSkill{
+			Name: entry.name, Source: entry.source, Version: entry.mat.version,
+			Commit: entry.mat.commit, Dirhash: entry.mat.dirhash, Dir: entry.alias,
+		})
+	}
+	if err := modfile.ValidateMod(m); err != nil {
+		return nil, err
+	}
+	if err := modfile.ValidateLock(lock); err != nil {
+		return nil, err
 	}
 
 	plans := make([]plannedInstall, 0, len(entries))
@@ -172,19 +223,6 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 	finalize, err := applyInstalls(plans)
 	if err != nil {
 		return nil, err
-	}
-	for _, entry := range entries {
-		entryAlias := ""
-		if alias != "" {
-			entryAlias = alias
-		}
-		upsertMod(m, modfile.ModSkill{
-			Name: entry.name, Source: entry.source, Version: entry.mat.version, Alias: entryAlias,
-		})
-		upsertLock(lock, modfile.LockSkill{
-			Name: entry.name, Source: entry.source, Version: entry.mat.version,
-			Commit: entry.mat.commit, Dirhash: entry.mat.dirhash,
-		})
 	}
 	if err := modfile.SaveMod(e.Root, m); err != nil {
 		finalize(false)
@@ -199,16 +237,34 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 	}
 	for _, entry := range entries {
 		io.printf(i18n.Text("installed %s %s; SKILL.mod and SKILL.lock were updated"), entry.name, entry.mat.version)
+		if note := entry.directoryChangeNote(); note != "" {
+			io.printf("%s", note)
+		}
 	}
 	return rep, nil
 }
 
 type getEntry struct {
-	mat     *materialized
-	name    string
-	dir     string
-	source  string
-	targets []string
+	mat    *materialized
+	name   string
+	dir    string
+	source string
+	alias  string
+	// previousDir is set when get moves an existing source to another
+	// installation directory. The old directory remains managed by prune.
+	previousDir string
+	targets     []string
+}
+
+func (e getEntry) modSkill() modfile.ModSkill {
+	return modfile.ModSkill{Name: e.name, Source: e.source, Alias: e.alias}
+}
+
+func (e getEntry) directoryChangeNote() string {
+	if e.previousDir == "" {
+		return ""
+	}
+	return i18n.Format("notice: changing installation directory from %q to %q keeps the old directory; run skillmod prune afterward to remove it", e.previousDir, e.dir)
 }
 
 type resolvedGetSkill struct {
@@ -516,12 +572,38 @@ func sameRemoteSource(a, b string) bool {
 
 func upsertMod(m *modfile.Mod, e modfile.ModSkill) {
 	for i := range m.Skills {
-		if m.Skills[i].Name == e.Name {
-			m.Skills[i] = e
+		existing := &m.Skills[i]
+		if sameModEntry(*existing, e) {
+			*existing = e
 			return
 		}
 	}
 	m.Skills = append(m.Skills, e)
+}
+
+func sameModEntry(a, b modfile.ModSkill) bool {
+	if a.Source != "" || b.Source != "" {
+		return a.Source != "" && b.Source != "" && sameRemoteSource(a.Source, b.Source)
+	}
+	return a.Local == b.Local && a.Name == b.Name
+}
+
+// vacatedDir returns the installation directory a re-get vacates: the first
+// existing declaration with the same source identity whose directory differs
+// from dir. It mirrors upsertMod, which replaces that same first entry, so the
+// "changing installation directory" notice always names the directory that is
+// actually abandoned. It returns "" when nothing moves.
+func vacatedDir(m *modfile.Mod, incoming modfile.ModSkill, dir string) string {
+	for _, skill := range m.Skills {
+		if !sameModEntry(skill, incoming) {
+			continue
+		}
+		if !sameDir(skill.DirName(), dir) {
+			return skill.DirName()
+		}
+		return "" // An entry already occupies the target directory.
+	}
+	return ""
 }
 
 func subdirSuffix(subdir string) string {
@@ -531,18 +613,14 @@ func subdirSuffix(subdir string) string {
 	return "//" + subdir
 }
 
+// sameDir reports whether two installation-directory spellings denote the
+// same portable directory. It must not be used as a skill identity comparison.
+func sameDir(a, b string) bool {
+	return fsutil.FoldKey(a) == fsutil.FoldKey(b)
+}
+
 func validDirName(s string) bool {
-	if s == "" || s == "." || s == ".." {
-		return false
-	}
-	for _, c := range s {
-		ok := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
-			c == '.' || c == '_' || c == '-'
-		if !ok {
-			return false
-		}
-	}
-	return true
+	return fsutil.ValidAlias(s) == nil
 }
 
 // classifyTarget selects install for absent or clean old content, keep for matching content, or conflict for local modifications.
@@ -550,7 +628,17 @@ func validDirName(s string) bool {
 func classifyTarget(dst, wantHash, prevHash string) string {
 	h, err := dirhash.HashDir(dst)
 	if err != nil {
-		return "install"
+		if errors.Is(err, fs.ErrNotExist) {
+			return "install"
+		}
+		// An existing but empty directory holds nothing to preserve and can
+		// be installed over safely. Any other unhashable content (a symlink,
+		// permission errors) stems from local modifications and must not be
+		// overwritten silently, so it is treated as a conflict.
+		if entries, readErr := os.ReadDir(dst); readErr == nil && len(entries) == 0 {
+			return "install"
+		}
+		return "conflict"
 	}
 	if h == wantHash {
 		return "keep"

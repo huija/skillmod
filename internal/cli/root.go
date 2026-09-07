@@ -106,7 +106,7 @@ func newEngine() (*engine.Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	s, err := store.Open()
+	s, err := store.Open(Version)
 	if err != nil {
 		return nil, err
 	}

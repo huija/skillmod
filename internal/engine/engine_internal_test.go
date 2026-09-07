@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -18,16 +19,106 @@ import (
 	"github.com/huija/skillmod/internal/store"
 )
 
+// loadLock must treat an absent lock as empty but propagate validation errors
+// (for example, a lock whose name is not portable), so sync/prune never act on
+// a silently emptied lock.
+func TestLoadLock_PropagatesValidationErrors(t *testing.T) {
+	e := &Engine{Root: t.TempDir()}
+	l, err := e.loadLock()
+	if err != nil || len(l.Skills) != 0 {
+		t.Fatalf("missing lock = %+v, %v; want empty lock, nil error", l, err)
+	}
+	lockPath := filepath.Join(e.Root, modfile.LockFileName)
+	if err := os.WriteFile(lockPath, []byte("[[skill]]\nname = \"con\"\ndirhash = \"h1:x\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.loadLock()
+	if err == nil {
+		t.Fatal("loadLock swallowed a lock validation error")
+	}
+	if !strings.Contains(err.Error(), "Advice:") {
+		t.Fatalf("loadLock error %q is missing remediation advice", err)
+	}
+}
+
 func TestValidDirName(t *testing.T) {
-	for _, name := range []string{"demo", "Demo-1.2_skill"} {
+	for _, name := range []string{"demo", "Demo-1.2_skill", "com10", "consolidated"} {
 		if !validDirName(name) {
 			t.Errorf("validDirName(%q) = false", name)
 		}
 	}
-	for _, name := range []string{"", ".", "..", "a/b", `a\b`, "with space", "café"} {
+	for _, name := range []string{"", ".", "..", "a/b", `a\b`, "with space", "café", "a:b", "a|b", "CON", "con.txt", "demo."} {
 		if validDirName(name) {
 			t.Errorf("validDirName(%q) = true", name)
 		}
+	}
+}
+
+func TestVacatedDir(t *testing.T) {
+	const src = "https://example.com/acme/skills//pdf"
+	incoming := modfile.ModSkill{Name: "pdf", Source: src}
+
+	tests := []struct {
+		name string
+		mod  *modfile.Mod
+		dir  string
+		want string
+	}{
+		{
+			name: "no existing entry",
+			mod:  &modfile.Mod{},
+			dir:  "pdf",
+			want: "",
+		},
+		{
+			name: "entry already occupies the target directory",
+			mod:  &modfile.Mod{Skills: []modfile.ModSkill{{Name: "pdf", Source: src}}},
+			dir:  "pdf",
+			want: "",
+		},
+		{
+			name: "single aliased entry moves to the target directory",
+			mod:  &modfile.Mod{Skills: []modfile.ModSkill{{Name: "pdf", Source: src, Alias: "a"}}},
+			dir:  "pdf",
+			want: "a",
+		},
+		{
+			// upsertMod replaces the first same-source entry, which already
+			// occupies the target directory, so nothing is vacated even though a
+			// later aliased entry exists.
+			name: "first entry wins over a later aliased entry",
+			mod: &modfile.Mod{Skills: []modfile.ModSkill{
+				{Name: "pdf", Source: src},
+				{Name: "pdf", Source: src, Alias: "b"},
+			}},
+			dir:  "pdf",
+			want: "",
+		},
+		{
+			name: "first same-source entry is the vacated one",
+			mod: &modfile.Mod{Skills: []modfile.ModSkill{
+				{Name: "pdf", Source: src, Alias: "b"},
+				{Name: "pdf", Source: src},
+			}},
+			dir:  "pdf",
+			want: "b",
+		},
+		{
+			name: "other sources do not block",
+			mod: &modfile.Mod{Skills: []modfile.ModSkill{
+				{Name: "other", Source: "https://example.com/acme/skills//other"},
+				{Name: "pdf", Source: src, Alias: "a"},
+			}},
+			dir:  "pdf",
+			want: "a",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := vacatedDir(tt.mod, incoming, tt.dir); got != tt.want {
+				t.Errorf("vacatedDir(%+v, %q) = %q, want %q", tt.mod.Skills, tt.dir, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -159,6 +250,36 @@ func TestSnapshotMemoReusesVerifiedRepository(t *testing.T) {
 	}
 }
 
+func TestSnapshotSkillDirRejectsUnmaterializablePaths(t *testing.T) {
+	material := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(material, "skills", "demo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A legacy snapshot (written before the portability rules) can contain a
+	// Windows reserved name that would only exist because it was created on
+	// Linux; the read path must reject it instead of reinstalling it.
+	if err := os.WriteFile(filepath.Join(material, "skills", "demo", "con.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	snap := &store.Snapshot{Info: store.SnapshotInfo{Version: "v1.0.0", Treehash: "h1:legacy"}, ContentDir: material}
+
+	if _, err := snapshotSkillDir(snap, "skills/demo"); err == nil || !strings.Contains(err.Error(), "con.md") {
+		t.Fatalf("snapshotSkillDir error = %v, want unmaterializable-path rejection", err)
+	}
+
+	// Clean subtrees remain usable.
+	clean := filepath.Join(material, "skills", "clean")
+	if err := os.MkdirAll(clean, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(clean, "SKILL.md"), []byte("---\nname: demo\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := snapshotSkillDir(snap, "skills/clean"); err != nil || got != clean {
+		t.Fatalf("snapshotSkillDir(clean) = %q, %v", got, err)
+	}
+}
+
 func TestResolveConflicts(t *testing.T) {
 	conflicts := []conflict{{name: "a", dir: "/skills/a"}, {name: "b", dir: "/skills/b"}}
 
@@ -213,6 +334,32 @@ func TestClassifyTarget(t *testing.T) {
 	}
 }
 
+func TestClassifyTarget_SymlinkIsLocalModification(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires developer mode on Windows")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("current"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A symlink inside the installation directory can only be user-created;
+	// classifying it as conflict prevents a silent overwrite that would delete
+	// the link (data loss), instead of treating it as clean content.
+	if err := os.Symlink(filepath.Join(dir, "SKILL.md"), filepath.Join(dir, "note.md")); err != nil {
+		t.Fatal(err)
+	}
+	if got := classifyTarget(dir, "h1:new", "h1:other"); got != "conflict" {
+		t.Fatalf("symlink-bearing target = %q, want conflict", got)
+	}
+}
+
+func TestClassifyTarget_EmptyDirIsInstallable(t *testing.T) {
+	dir := t.TempDir()
+	if got := classifyTarget(dir, "h1:new", ""); got != "install" {
+		t.Fatalf("empty existing target = %q, want install", got)
+	}
+}
+
 func TestDisplayListAction(t *testing.T) {
 	for action, want := range map[string]string{
 		"installed": "installed",
@@ -235,6 +382,7 @@ func TestEngineErrorDiagnostics(t *testing.T) {
 		{err: &DriftError{}, want: []string{"drift detected"}},
 		{err: &TamperError{Name: "demo", Want: "h1:want", Got: "h1:got"}, want: []string{"demo", "h1:want", "h1:got"}},
 		{err: &NameConflictError{Name: "demo", Existing: "old", Incoming: "new"}, want: []string{"demo", "old", "new", "--alias"}},
+		{err: &NameConflictError{Name: "Demo", OtherName: "demo", Existing: "old", Incoming: "new"}, want: []string{"Demo", "demo", "differ only in letter case", "--alias"}},
 		{err: &skillSubdirError{Subdir: "tools/demo", Version: "v1.0.0"}, want: []string{"tools/demo", "v1.0.0"}},
 	}
 	for _, tt := range tests {

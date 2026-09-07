@@ -6,9 +6,11 @@
 package testutil
 
 import (
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -96,7 +98,11 @@ func (r *Repo) FinishNamed(name string) string {
 	r.Bare = filepath.Join(r.t.TempDir(), name+".git")
 	r.git("", "clone", "--bare", "--quiet", r.Work, r.Bare)
 	r.git(r.Work, "remote", "add", "origin", r.Bare)
-	r.URL = "file://" + r.Bare
+	urlPath := filepath.ToSlash(r.Bare)
+	if !strings.HasPrefix(urlPath, "/") {
+		urlPath = "/" + urlPath
+	}
+	r.URL = (&url.URL{Scheme: "file", Path: urlPath}).String()
 	return r.URL
 }
 
@@ -119,11 +125,14 @@ func (r *Repo) Evolve(tag string, force bool) {
 
 func (r *Repo) git(dir string, args ...string) string {
 	r.t.Helper()
+	if runtime.GOOS == "windows" {
+		args = append([]string{"-c", "core.longpaths=true"}, args...)
+	}
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0", "LC_ALL=C",
-		"GIT_CONFIG_NOSYSTEM=1", "HOME="+r.t.TempDir(), // Isolate the user's global configuration.
+		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull,
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

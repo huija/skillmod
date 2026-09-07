@@ -19,14 +19,20 @@ import (
 const maxConcurrentRefQueries = 4
 
 // Update implements skillmod update [names...]: resolve the latest versions, update the lock, and install.
-// With no names it updates all remote entries; commit-pinned entries, including pseudo-versions, advance to a new pseudo-version at default-branch HEAD (PRD §3.6).
+// A selector may be either the published skill name or its installation alias;
+// a published name selects every declaration with that name. With no selectors
+// it updates all remote entries. Commit-pinned entries, including pseudo-versions,
+// advance to a new pseudo-version at default-branch HEAD (PRD §3.6).
 func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, error) {
 	defer io.stopProgress()
 	m, err := e.loadMod()
 	if err != nil {
 		return nil, err
 	}
-	lock := e.loadLock()
+	lock, err := e.loadLock()
+	if err != nil {
+		return nil, err
+	}
 
 	want := map[string]bool{}
 	for _, n := range names {
@@ -34,7 +40,7 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 	}
 	var targets []modfile.ModSkill
 	for _, sk := range m.Skills {
-		if sk.Local || (len(want) > 0 && !want[sk.Name]) {
+		if sk.Local || (len(want) > 0 && !want[sk.Name] && !want[sk.DirName()]) {
 			continue
 		}
 		targets = append(targets, sk)
@@ -42,7 +48,7 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 	for n := range want {
 		found := false
 		for _, sk := range m.Skills {
-			if sk.Name == n {
+			if sk.Name == n || sk.DirName() == n {
 				found = true
 			}
 		}
@@ -84,7 +90,7 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 		if err != nil {
 			return nil, fmt.Errorf(i18n.Text("update requires network access to resolve the latest version: %w"), err)
 		}
-		lk := findLock(lock, sk.Name)
+		lk := findLock(lock, sk)
 		cur := sk.Version
 
 		var res resolve.Resolution
@@ -151,12 +157,13 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 		})
 		// Update the in-memory mod and lock; write them only after success.
 		for i := range m.Skills {
-			if m.Skills[i].Name == sk.Name {
+			if sameDir(m.Skills[i].DirName(), sk.DirName()) {
 				m.Skills[i].Version = mat.version
+				break
 			}
 		}
 		upsertLock(lock, modfile.LockSkill{
-			Name: sk.Name, Source: sk.Source, Version: mat.version, Commit: mat.commit, Dirhash: mat.dirhash,
+			Name: sk.Name, Source: sk.Source, Version: mat.version, Commit: mat.commit, Dirhash: mat.dirhash, Dir: sk.Alias,
 		})
 	}
 

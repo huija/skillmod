@@ -26,6 +26,10 @@ msgid "%d blobs are still missing after batch fetch (stdout=%q stderr=%q)"
 msgstr "批量 fetch 后仍缺少 %d 个 blob（stdout=%q stderr=%q）"
 
 #, go-format
+msgid "%s (%v)"
+msgstr "%s (%v)"
+
+#, go-format
 msgid "%s already exists\nAdvice: review it, then use --force to regenerate it (the original is backed up as SKILL.mod.bak)"
 msgstr "已存在 %s\n建议：确认后再用 --force 重新生成（原文件备份为 SKILL.mod.bak）"
 
@@ -69,6 +73,41 @@ msgstr "安装命令"
 msgid "Review the conflicts and retry interactively, or use --yes to keep and skip them automatically"
 msgstr "建议人工确认后重试（交互模式逐条选择），或 --yes 自动保留并跳过"
 
+#, go-format
+msgid "SKILL.lock declares local skill %q with remote-only version or commit fields"
+msgstr "SKILL.lock 中的本地 skill %q 包含仅供远程条目使用的 version 或 commit 字段"
+
+#, go-format
+msgid "SKILL.lock declares remote skill %q without a valid 40-character commit SHA"
+msgstr "SKILL.lock 中的远程 skill %q 缺少有效的 40 位 commit SHA"
+
+#, go-format
+msgid "SKILL.lock declares remote skill %q without a version"
+msgstr "SKILL.lock 中的远程 skill %q 缺少 version"
+
+#, go-format
+msgid "SKILL.lock declares skill %q more than once"
+msgstr "SKILL.lock 中重复声明了 skill %q"
+
+#, go-format
+msgid "SKILL.lock declares skill %q with an invalid installation directory: %w"
+msgstr "SKILL.lock 中 skill %q 的安装目录名不合法: %w"
+
+#, go-format
+msgid "SKILL.lock declares skill %q with an invalid name: %w"
+msgstr "SKILL.lock 中 skill %q 的名称不合法: %w"
+
+#, go-format
+msgid "SKILL.lock declares skill %q without a dirhash"
+msgstr "SKILL.lock 中的 skill %q 缺少 dirhash"
+
+#, go-format
+msgid "SKILL.lock entries %q and %q differ only in letter case and map to the same installation directory"
+msgstr "SKILL.lock 中 %q 与 %q 仅大小写不同，会映射到同一个安装目录"
+
+msgid "SKILL.lock is tool-maintained; repair the listed entry by hand, or back up and delete the file, then re-run skillmod sync to regenerate it"
+msgstr "SKILL.lock 由工具维护；请手工修复出错的条目，或备份并删除该文件后重新运行 skillmod sync 重新生成"
+
 msgid "SKILL.lock not found\nAdvice: run skillmod sync first to generate the lock file"
 msgstr "未找到 SKILL.lock\n建议先执行 skillmod sync 生成锁定文件"
 
@@ -78,12 +117,28 @@ msgstr "仓库根目录及 skills/ 下所有子目录中均未找到 SKILL.md"
 msgid "SKILL.md is missing from the subtree root"
 msgstr "子树根缺少 SKILL.md"
 
+#, go-format
+msgid "SKILL.mod declares skill %q more than once"
+msgstr "SKILL.mod 中重复声明了 skill %q"
+
+#, go-format
+msgid "SKILL.mod declares skill %q with an invalid alias: %w"
+msgstr "SKILL.mod 中 skill %q 的别名不合法: %w"
+
+#, go-format
+msgid "SKILL.mod declares skill %q with an invalid name: %w"
+msgstr "SKILL.mod 中 skill %q 的名称不合法: %w"
+
+#, go-format
+msgid "SKILL.mod entries %q and %q differ only in letter case and map to the same installation directory; rename one or set an alias"
+msgstr "SKILL.mod 中 %q 与 %q 仅大小写不同，会映射到同一个安装目录；请重命名其中一个或设置别名"
+
 msgid "SKILL.mod not found\nAdvice: run skillmod init or skillmod get first"
 msgstr "未找到 SKILL.mod\n建议先执行 skillmod init 或 skillmod get"
 
 #, go-format
-msgid "SKILL.mod schemaversion=%d is newer than the supported version %d; upgrade skillmod"
-msgstr "SKILL.mod 的 schemaversion=%d 高于本工具支持的 %d，请升级 skillmod"
+msgid "SKILL.mod schemaversion=%d is unsupported; expected %d"
+msgstr "SKILL.mod schemaversion=%d 不受支持；应为 %d"
 
 msgid "Scan each platform's skill directory, match sources using git ls-remote, confirm each entry, and generate SKILL.mod. An existing SKILL.mod is rejected unless --force rebuilds it after backing it up as SKILL.mod.bak."
 msgstr "扫描各平台 skill 目录，经 git ls-remote 匹配来源，逐项确认后生成 SKILL.mod；已有 SKILL.mod 时拒绝执行，--force 可重建（备份为 SKILL.mod.bak）。"
@@ -91,6 +146,10 @@ msgstr "扫描各平台 skill 目录，经 git ls-remote 匹配来源，逐项�
 #, go-format
 msgid "VCS cache identity conflict: %s"
 msgstr "VCS 缓存身份冲突: %s"
+
+#, go-format
+msgid "VCS cache metadata is invalid: %s"
+msgstr "VCS 缓存元数据无效: %s"
 
 msgid "Versions must be semver tags or 40-character commit SHAs; branch names are rejected because they are mutable.\nWhen omitted, the version is resolved in this order: <subdirectory>/v<latest> → v<latest> → default-branch HEAD (recorded as a pseudo-version).\nA single segment after // first addresses an exact root subdirectory, then falls back to a unique skill name anywhere below skills/. When a subdirectory is omitted, get discovers SKILL.md at the repository root and recursively below skills/. Interactive terminals show a compact, colored one-line list; displayed commands omit the redundant https:// prefix and prefer a unique skill-name shorthand when safe. Use ↑/← for the previous item, ↓/→ for the next item, space to toggle selections, d to show or hide the current description and command, and enter to confirm. --yes installs every discovered skill."
 msgstr "版本必须是 semver tag 或 40 位 commit SHA；分支名为可变引用，已拒绝。\n未指定版本时，按以下顺序解析：<子目录>/v<最新> → v<最新> → 默认分支 HEAD（记录为伪版本）。\n// 后只有一段时，先按仓库根目录的精确子目录解析，再回退到 skills/ 下的唯一 skill 名匹配。省略子目录时，get 会发现仓库根目录和 skills/ 下全部层级的 SKILL.md。交互式终端会以紧凑的彩色单行列表展示候选；展示命令会省略冗余的 https:// 前缀，并在安全时优先使用唯一 skill 名简写。使用 ↑/← 移到上一项，↓/→ 移到下一项，空格键勾选或取消勾选，d 键展开或收起当前项的描述与命令，回车键确认。--yes 会安装发现的全部 skill。"
@@ -131,6 +190,9 @@ msgstr "备份既有目录失败: %w"
 #, go-format
 msgid "backup failed: %w"
 msgstr "备份失败: %w"
+
+msgid "baseline re-established from the installed files (the previous remote lock record was removed)"
+msgstr "已从已安装文件重建本地基线（此前的 remote lock 记录已移除）"
 
 #, go-format
 msgid "batch repository blob fetch failed (lazy-fetch fallback also failed): %v: %w"
@@ -243,6 +305,13 @@ msgstr "漂移"
 msgid "drift detected"
 msgstr "检测到漂移"
 
+#, go-format
+msgid "dry-run: %d entries would be installed or updated"
+msgstr "dry-run: %d 个条目将被安装或更新"
+
+msgid "dry-run: everything is already consistent"
+msgstr "dry-run: 所有条目已一致"
+
 msgid "dry-run: no files were deleted"
 msgstr "dry-run：未删除任何文件"
 
@@ -252,10 +321,6 @@ msgstr "dry-run：未写任何文件"
 #, go-format
 msgid "entry %q is not in SKILL.mod"
 msgstr "条目 %q 不在 SKILL.mod 中"
-
-#, go-format
-msgid "entry %s is not in a local version snapshot and the network is unavailable: %w"
-msgstr "条目 %s 内容不在本地版本快照且网络不可达: %w"
 
 #, go-format
 msgid "entry %s: remote has no default branch"
@@ -345,6 +410,10 @@ msgstr "正在计算所选 skill 的哈希"
 msgid "hide details"
 msgstr "收起详情"
 
+#, go-format
+msgid "init found skills %q (in %s) and %q (in %s) that differ only in letter case and would map to the same installation directory; rename one of them"
+msgstr "init 发现 %q（位于 %s）与 %q（位于 %s）仅大小写不同，会映射到同一个安装目录；请重命名其中一个"
+
 msgid "init requires confirmation: select each entry interactively or use --yes to accept all"
 msgstr "init 需要确认：交互模式逐项选择，或 --yes 全部采纳"
 
@@ -397,6 +466,10 @@ msgstr "local 条目内容与基线不符（本地改动）"
 msgid "local name conflict: %q already exists (source %s); the new source is %s\nUse an alias to distinguish them: skillmod get --alias <new-name> %s"
 msgstr "本地名冲突: %q 已存在（来源 %s），新来源为 %s\n建议用别名区分: skillmod get --alias <新名字> %s"
 
+#, go-format
+msgid "local name conflict: %q and %q differ only in letter case and map to the same installation directory (sources %s and %s)\nUse an alias to distinguish them: skillmod get --alias <new-name> %s"
+msgstr "本地名称冲突: %q 与 %q 仅大小写不同，会映射到同一个安装目录（来源 %s 与 %s）\n请用别名区分: skillmod get --alias <新名称> %s"
+
 msgid "locally modified; kept files and removed only the lock record: "
 msgstr "本地被修改过，保留文件、仅清 lock 记录: "
 
@@ -444,8 +517,32 @@ msgid "multiple skills found in %s; select one or more"
 msgstr "在 %s 中发现多个 skill；请选择一个或多个"
 
 #, go-format
-msgid "name %q contains invalid characters"
-msgstr "name %q 含非法字符"
+msgid "name contains a character that is illegal on Windows: %q"
+msgstr "名称包含 Windows 非法字符: %q"
+
+msgid "name contains a control character"
+msgstr "名称包含控制字符"
+
+#, go-format
+msgid "name is longer than %d bytes"
+msgstr "名称超过 %d 字节"
+
+msgid "name is not valid UTF-8"
+msgstr "名称不是合法的 UTF-8"
+
+#, go-format
+msgid "name must not be %q"
+msgstr "名称不能是 %q"
+
+msgid "name must not be empty"
+msgstr "名称不能为空"
+
+msgid "name must not end with a dot or space"
+msgstr "名称不能以点号或空格结尾"
+
+#, go-format
+msgid "name uses the reserved Windows device name %q"
+msgstr "名称使用了 Windows 保留设备名 %q"
 
 #, go-format
 msgid "network unavailable and no local version snapshot exists: %w"
@@ -483,6 +580,10 @@ msgid "not confirmed in a non-interactive environment; rerun with --yes to accep
 msgstr "非交互环境未确认：重跑加 --yes 全部采纳"
 
 #, go-format
+msgid "notice: changing installation directory from %q to %q keeps the old directory; run skillmod prune afterward to remove it"
+msgstr "提示：安装目录从 %q 更改为 %q 时会保留旧目录；之后可运行 skillmod prune 将其删除"
+
+#, go-format
 msgid "notice: failed to match source %s (%v); related entries will be treated as local"
 msgstr "提示: 源 %s 匹配失败（%v），相关条目按 local 处理"
 
@@ -507,6 +608,14 @@ msgstr "解析 SKILL.mod: %w"
 #, go-format
 msgid "parse repository identity %q: %w"
 msgstr "解析仓库身份 %q: %w"
+
+#, go-format
+msgid "path component %q is invalid: %w"
+msgstr "路径组件 %q 不合法: %w"
+
+#, go-format
+msgid "path contains a backslash: %q"
+msgstr "路径包含反斜杠: %q"
 
 msgid "print the execution plan without writing files"
 msgstr "只输出执行计划，不写任何文件"
@@ -555,6 +664,18 @@ msgstr "仓库地址含空白字符: %q"
 #, go-format
 msgid "repository authentication failed: %s (configure Git credentials with gh auth login or an SSH key)"
 msgstr "仓库鉴权失败: %s（配置 git 凭证：gh auth login 或 SSH key）"
+
+#, go-format
+msgid "repository file path %q cannot be materialized on this filesystem: %w"
+msgstr "仓库文件路径 %q 无法在当前文件系统上落盘: %w"
+
+#, go-format
+msgid "repository file path %q contains a backslash and cannot be materialized on Windows"
+msgstr "仓库文件路径 %q 包含反斜杠，无法在 Windows 上落盘"
+
+#, go-format
+msgid "repository file paths %q and %q collide on case-insensitive filesystems (macOS, Windows)"
+msgstr "仓库文件路径 %q 与 %q 在大小写不敏感的文件系统（macOS、Windows）上冲突"
 
 #, go-format
 msgid "repository identity contains an unsafe path segment: %q"
@@ -615,11 +736,19 @@ msgid "skill contains a symlink (%s); skillmod does not support skills containin
 msgstr "skill 包含 symlink（%s），v0.1 不支持含 symlink 的 skill"
 
 #, go-format
+msgid "skill name %q is invalid: %s"
+msgstr "skill 名称 %q 不合法: %s"
+
+#, go-format
 msgid "skill name %q matches multiple subdirectories: %s; use an exact subdirectory"
 msgstr "skill 名 %q 匹配了多个子目录：%s；请使用精确子目录"
 
 msgid "skill package is missing SKILL.md or has an invalid frontmatter name (contact the author to fix it): "
 msgstr "skill 包 SKILL.md 缺失或 frontmatter name 非法（联系作者修复）: "
+
+#, go-format
+msgid "skill path %q in %s cannot be materialized on every platform: %s"
+msgstr "skill 路径 %q（%s）无法在所有平台落地: %s"
 
 #, go-format
 msgid "skill subdirectory %q does not exist in local repository version %s"
@@ -630,6 +759,13 @@ msgstr "skillmod 用 go mod 的同构方案管理 agent skill 依赖：\nSKILL.m
 
 msgid "skip interactive confirmation (for CI)"
 msgstr "跳过交互确认（CI 用）"
+
+#, go-format
+msgid "snapshot %s was materialized by skillmod %s, which is newer than this build (%s); upgrade skillmod or remove that snapshot and re-run"
+msgstr "快照 %s 由更高版本的 skillmod %s 生成（当前构建版本为 %s）；请升级 skillmod，或移除该快照后重试"
+
+msgid "snapshot root"
+msgstr "快照根目录"
 
 #, go-format
 msgid "start git cat-file: %w"
@@ -645,6 +781,9 @@ msgstr "已同步 %d 项，校验通过"
 
 msgid "the deletion list requires confirmation: retry interactively, use --yes to skip confirmation, or use --dry-run to list only"
 msgstr "需要确认删除清单：交互模式重试，或 --yes 跳过确认；--dry-run 只列清单"
+
+msgid "the following directories were skipped because they cannot be represented as valid SKILL.mod entries:"
+msgstr "以下目录无法表示为合法的 SKILL.mod 条目，已跳过："
 
 msgid "the following directories will be deleted:"
 msgstr "将删除以下目录："
@@ -738,6 +877,10 @@ msgstr "版本元数据 version 与文件名不匹配: %s"
 #, go-format
 msgid "version reference contains whitespace: %q"
 msgstr "版本引用含空白字符: %q"
+
+#, go-format
+msgid "version snapshot %s@%s: %w"
+msgstr "版本快照 %s@%s: %w"
 
 #, go-format
 msgid "version snapshot conflict; refusing to overwrite %s\nexisting:  %s @ %s (%s)\nrequested: %s @ %s (%s)\nPossible cause: the remote tag moved or the contents of the same version were rewritten"

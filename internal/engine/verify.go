@@ -33,7 +33,7 @@ func (e *Engine) Verify(ctx context.Context, io IO) (*Report, error) {
 	rep := &Report{Action: "verify"}
 	drift := false
 	for _, sk := range m.Skills {
-		lk := findLock(lock, sk.Name)
+		lk := findLock(lock, sk)
 		if lk == nil {
 			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Source: sk.Source, Action: "drift", Note: i18n.Text("no record in SKILL.lock; run skillmod sync")})
 			drift = true
@@ -78,5 +78,8 @@ func loadLockStrict(root string) (*modfile.Lock, error) {
 	if os.IsNotExist(err) {
 		return nil, fmt.Errorf("%s", i18n.Text("SKILL.lock not found\nAdvice: run skillmod sync first to generate the lock file"))
 	}
-	return l, err
+	if err != nil {
+		return nil, fmt.Errorf("%w\nAdvice: %s", err, i18n.Text("SKILL.lock is tool-maintained; repair the listed entry by hand, or back up and delete the file, then re-run skillmod sync to regenerate it"))
+	}
+	return l, nil
 }

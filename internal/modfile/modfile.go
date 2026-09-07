@@ -15,7 +15,9 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
+	"github.com/huija/skillmod/internal/resolve"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -42,7 +44,6 @@ type ModSkill struct {
 	Version string `toml:"version,omitempty"` // exact tag, 40-character SHA, or pseudo-version
 	Alias   string `toml:"alias,omitempty"`
 	Local   bool   `toml:"local,omitempty"`
-	// Requires is reserved; v0.0.1 uses flat 1:1 dependencies and does not parse it.
 }
 
 // DirName returns the installation directory name: alias ?? name.
@@ -65,31 +66,126 @@ type LockSkill struct {
 	Version string `toml:"version,omitempty"` // omitted for local entries
 	Commit  string `toml:"commit,omitempty"`  // resolved full SHA, required to resolve pseudo-versions across machines because they contain only sha12
 	Dirhash string `toml:"dirhash"`           // "h1:..."; also present for local entries to detect drift
+	// Dir overrides Name as the installation directory when an alias is used.
+	// Canonical lock files omit it when the installation directory equals Name.
+	Dir string `toml:"dir,omitempty"`
 }
 
-// ParseMod parses SKILL.mod bytes. Unknown fields are accepted for forward compatibility with reserved fields such as requires,
-// but format versions newer than the current version are rejected.
+// InstallDir returns the installation directory represented by the lock entry.
+func (s LockSkill) InstallDir() string {
+	if s.Dir != "" {
+		return s.Dir
+	}
+	return s.Name
+}
+
+// ParseMod parses SKILL.mod bytes. The current schema is decoded strictly so
+// misspelled or unsupported fields cannot be silently ignored. Entries are
+// validated against the portable-name and uniqueness rules so hand-edited
+// manifests cannot introduce names that cannot install on every platform.
 func ParseMod(data []byte) (*Mod, error) {
 	var m Mod
-	if err := toml.Unmarshal(data, &m); err != nil {
+	if err := toml.NewDecoder(bytes.NewReader(data)).DisallowUnknownFields().Decode(&m); err != nil {
 		return nil, fmt.Errorf(i18n.Text("parse SKILL.mod: %w"), err)
 	}
-	if m.SchemaVersion > SchemaVersion {
-		return nil, fmt.Errorf(i18n.Text("SKILL.mod schemaversion=%d is newer than the supported version %d; upgrade skillmod"), m.SchemaVersion, SchemaVersion)
+	if err := ValidateMod(&m); err != nil {
+		return nil, err
 	}
 	return &m, nil
 }
 
-// ParseLock parses SKILL.lock bytes.
+// ParseLock parses SKILL.lock bytes and validates the locked entries.
 func ParseLock(data []byte) (*Lock, error) {
 	var l Lock
-	if err := toml.Unmarshal(data, &l); err != nil {
+	if err := toml.NewDecoder(bytes.NewReader(data)).DisallowUnknownFields().Decode(&l); err != nil {
 		return nil, fmt.Errorf(i18n.Text("parse SKILL.lock: %w"), err)
+	}
+	normalizeLock(&l)
+	if err := ValidateLock(&l); err != nil {
+		return nil, err
 	}
 	return &l, nil
 }
 
-// MarshalMod serializes SKILL.mod deterministically by sorting entries by (name, source),
+// ValidateMod checks every SKILL.mod declaration for a portable name, a valid
+// alias, exact entry uniqueness, and fold-uniqueness of all installation
+// directory names (letter-case differences collapse to one directory on
+// Windows and macOS). Different sources may publish the same skill name when
+// aliases give them distinct installation directories.
+func ValidateMod(m *Mod) error {
+	if m.SchemaVersion != SchemaVersion {
+		return fmt.Errorf(i18n.Text("SKILL.mod schemaversion=%d is unsupported; expected %d"), m.SchemaVersion, SchemaVersion)
+	}
+	seenEntry := map[string]bool{}
+	seenDir := map[string]string{}
+	for i := range m.Skills {
+		sk := &m.Skills[i]
+		if err := fsutil.ValidName(sk.Name); err != nil {
+			return fmt.Errorf(i18n.Text("SKILL.mod declares skill %q with an invalid name: %w"), sk.Name, err)
+		}
+		if sk.Alias != "" {
+			if err := fsutil.ValidAlias(sk.Alias); err != nil {
+				return fmt.Errorf(i18n.Text("SKILL.mod declares skill %q with an invalid alias: %w"), sk.Name, err)
+			}
+		}
+		entryKey := sk.Name + "\x00" + sk.Source + "\x00" + sk.Alias
+		if seenEntry[entryKey] {
+			return fmt.Errorf(i18n.Text("SKILL.mod declares skill %q more than once"), sk.Name)
+		}
+		seenEntry[entryKey] = true
+		if prev, ok := seenDir[fsutil.FoldKey(sk.DirName())]; ok {
+			return fmt.Errorf(i18n.Text("SKILL.mod entries %q and %q differ only in letter case and map to the same installation directory; rename one or set an alias"), prev, sk.DirName())
+		}
+		seenDir[fsutil.FoldKey(sk.DirName())] = sk.DirName()
+	}
+	return nil
+}
+
+// ValidateLock applies the same portable-name and fold-uniqueness rules to
+// SKILL.lock, plus validity of the recorded installation directory.
+func ValidateLock(l *Lock) error {
+	seenEntry := map[string]bool{}
+	seenDir := map[string]string{}
+	for i := range l.Skills {
+		sk := &l.Skills[i]
+		if err := fsutil.ValidName(sk.Name); err != nil {
+			return fmt.Errorf(i18n.Text("SKILL.lock declares skill %q with an invalid name: %w"), sk.Name, err)
+		}
+		if sk.Dir != "" {
+			if err := fsutil.ValidAlias(sk.Dir); err != nil {
+				return fmt.Errorf(i18n.Text("SKILL.lock declares skill %q with an invalid installation directory: %w"), sk.Name, err)
+			}
+		}
+		if sk.Dirhash == "" {
+			return fmt.Errorf(i18n.Text("SKILL.lock declares skill %q without a dirhash"), sk.Name)
+		}
+		if sk.Source == "" {
+			if sk.Version != "" || sk.Commit != "" {
+				return fmt.Errorf(i18n.Text("SKILL.lock declares local skill %q with remote-only version or commit fields"), sk.Name)
+			}
+		} else {
+			if sk.Version == "" {
+				return fmt.Errorf(i18n.Text("SKILL.lock declares remote skill %q without a version"), sk.Name)
+			}
+			if !resolve.IsSHA(sk.Commit) {
+				return fmt.Errorf(i18n.Text("SKILL.lock declares remote skill %q without a valid 40-character commit SHA"), sk.Name)
+			}
+		}
+		entryKey := sk.Name + "\x00" + sk.Source + "\x00" + sk.Dir
+		if seenEntry[entryKey] {
+			return fmt.Errorf(i18n.Text("SKILL.lock declares skill %q more than once"), sk.Name)
+		}
+		seenEntry[entryKey] = true
+		dir := sk.InstallDir()
+		if prev, ok := seenDir[fsutil.FoldKey(dir)]; ok {
+			return fmt.Errorf(i18n.Text("SKILL.lock entries %q and %q differ only in letter case and map to the same installation directory"), prev, dir)
+		}
+		seenDir[fsutil.FoldKey(dir)] = dir
+	}
+	return nil
+}
+
+// MarshalMod serializes SKILL.mod deterministically by sorting entries by (name, source, alias),
 // preserving struct field order, using \n line endings, and ending with exactly one newline.
 func MarshalMod(m *Mod) ([]byte, error) {
 	cp := *m
@@ -97,12 +193,22 @@ func MarshalMod(m *Mod) ([]byte, error) {
 	return marshalDeterministic(cp)
 }
 
-// MarshalLock serializes SKILL.lock deterministically using the same rules as MarshalMod.
+// MarshalLock serializes SKILL.lock deterministically by (name, source, dir).
 // A lock file is a pure function of its content, so identical input must produce identical bytes.
 func MarshalLock(l *Lock) ([]byte, error) {
 	cp := *l
 	cp.Skills = sortedLockSkills(l.Skills)
 	return marshalDeterministic(cp)
+}
+
+// normalizeLock removes representationally redundant fields while preserving
+// the installation directory represented by every entry.
+func normalizeLock(l *Lock) {
+	for i := range l.Skills {
+		if l.Skills[i].Dir == l.Skills[i].Name {
+			l.Skills[i].Dir = ""
+		}
+	}
 }
 
 func marshalDeterministic(v any) ([]byte, error) {
@@ -124,7 +230,10 @@ func sortedModSkills(skills []ModSkill) []ModSkill {
 		if cp[i].Name != cp[j].Name {
 			return cp[i].Name < cp[j].Name
 		}
-		return cp[i].Source < cp[j].Source
+		if cp[i].Source != cp[j].Source {
+			return cp[i].Source < cp[j].Source
+		}
+		return cp[i].Alias < cp[j].Alias
 	})
 	return cp
 }
@@ -132,11 +241,15 @@ func sortedModSkills(skills []ModSkill) []ModSkill {
 func sortedLockSkills(skills []LockSkill) []LockSkill {
 	cp := make([]LockSkill, len(skills))
 	copy(cp, skills)
+	normalizeLock(&Lock{Skills: cp})
 	sort.SliceStable(cp, func(i, j int) bool {
 		if cp[i].Name != cp[j].Name {
 			return cp[i].Name < cp[j].Name
 		}
-		return cp[i].Source < cp[j].Source
+		if cp[i].Source != cp[j].Source {
+			return cp[i].Source < cp[j].Source
+		}
+		return cp[i].Dir < cp[j].Dir
 	})
 	return cp
 }
@@ -161,6 +274,9 @@ func LoadLock(dir string) (*Lock, error) {
 
 // SaveMod writes SKILL.mod atomically through a temporary file and rename, preventing partial files from becoming visible.
 func SaveMod(dir string, m *Mod) error {
+	if err := ValidateMod(m); err != nil {
+		return err
+	}
 	data, err := MarshalMod(m)
 	if err != nil {
 		return err
@@ -170,6 +286,9 @@ func SaveMod(dir string, m *Mod) error {
 
 // SaveLock writes SKILL.lock atomically; the engine calls it only after a successful transaction.
 func SaveLock(dir string, l *Lock) error {
+	if err := ValidateLock(l); err != nil {
+		return err
+	}
 	data, err := MarshalLock(l)
 	if err != nil {
 		return err
@@ -178,13 +297,5 @@ func SaveLock(dir string, l *Lock) error {
 }
 
 func atomicWrite(path string, data []byte) error {
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return fmt.Errorf(i18n.Text("write %s: %w"), filepath.Base(path), err)
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
-		return fmt.Errorf(i18n.Text("commit %s to disk: %w"), filepath.Base(path), err)
-	}
-	return nil
+	return fsutil.WriteFile(path, data, 0o644)
 }

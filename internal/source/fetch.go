@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
 )
 
@@ -182,10 +183,10 @@ func (s *Source) prefetchMissingBlobs(ctx context.Context, dir string, entries [
 	if err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, git,
+	cmd := exec.CommandContext(ctx, git, platformGitArgs(
 		"-c", "protocol.version=2",
 		"fetch-pack", "--no-progress", "--refetch", "--thin", "--stdin", strings.TrimSpace(remote),
-	)
+	)...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C", "GIT_NO_LAZY_FETCH=1")
 	cmd.Stdin = strings.NewReader(strings.Join(missing, "\n") + "\n")
@@ -221,7 +222,7 @@ func (s *Source) missingBlobs(ctx context.Context, dir string, entries []lsEntry
 	if git == "" {
 		git = "git"
 	}
-	cmd := exec.CommandContext(ctx, git, "cat-file", "--batch-check")
+	cmd := exec.CommandContext(ctx, git, platformGitArgs("cat-file", "--batch-check")...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C", "GIT_NO_LAZY_FETCH=1")
 	cmd.Stdin = strings.NewReader(strings.Join(ids, "\n") + "\n")
@@ -255,7 +256,7 @@ func (s *Source) catFileBatch(ctx context.Context, dir string, entries []lsEntry
 	if git == "" {
 		git = "git"
 	}
-	cmd := exec.CommandContext(ctx, git, "cat-file", "--batch")
+	cmd := exec.CommandContext(ctx, git, platformGitArgs("cat-file", "--batch")...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
 	if noLazyFetch {
@@ -364,17 +365,20 @@ func ParseSkillName(content string) (string, error) {
 }
 
 // ParseSkillMetadata parses the scalar name and description fields from SKILL.md frontmatter.
+// Parsing is line-ending agnostic: CRLF frontmatter is accepted by normalizing the copy used
+// for parsing only, never the original content or its dirhash.
 func ParseSkillMetadata(content string) (SkillMetadata, error) {
+	content = strings.ReplaceAll(content, "\r\n", "\n")
 	if !strings.HasPrefix(content, "---\n") {
 		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Text("missing opening --- frontmatter line")}
 	}
 	rest := content[len("---\n"):]
-	end := strings.Index(rest, "\n---")
-	if end < 0 {
+	block, _, found := strings.Cut(rest, "\n---")
+	if !found {
 		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Text("missing closing --- frontmatter line")}
 	}
 	metadata := SkillMetadata{}
-	for _, line := range strings.Split(rest[:end], "\n") {
+	for line := range strings.SplitSeq(block, "\n") {
 		if v, ok := strings.CutPrefix(line, "name:"); ok {
 			metadata.Name = strings.Trim(strings.TrimSpace(v), `"'`)
 			continue
@@ -386,8 +390,8 @@ func ParseSkillMetadata(content string) (SkillMetadata, error) {
 	if metadata.Name == "" {
 		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Text("frontmatter has no name field")}
 	}
-	if strings.ContainsAny(metadata.Name, "/\\") || metadata.Name == "." || metadata.Name == ".." {
-		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Format("name %q contains invalid characters", metadata.Name)}
+	if err := fsutil.ValidName(metadata.Name); err != nil {
+		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Format("skill name %q is invalid: %s", metadata.Name, err)}
 	}
 	return metadata, nil
 }

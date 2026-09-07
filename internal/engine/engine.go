@@ -21,6 +21,7 @@ import (
 	"github.com/huija/skillmod/internal/address"
 	"github.com/huija/skillmod/internal/config"
 	"github.com/huija/skillmod/internal/dirhash"
+	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/install"
 	"github.com/huija/skillmod/internal/modfile"
@@ -100,9 +101,20 @@ func (e *TamperError) Error() string {
 // NameConflictError reports the same name referring to different sources (AC-8).
 type NameConflictError struct {
 	Name, Existing, Incoming string
+	// OtherName is set when the collision is between two spellings that differ
+	// only in letter case (for example "Demo" and "demo"), which map to one
+	// directory on case-insensitive filesystems. Field convention, shared by
+	// every construction site: Name holds the existing installation directory
+	// spelling and OtherName the incoming one, so the message reads
+	// "existing, incoming" consistently.
+	OtherName string
 }
 
 func (e *NameConflictError) Error() string {
+	if e.OtherName != "" {
+		return i18n.Format("local name conflict: %q and %q differ only in letter case and map to the same installation directory (sources %s and %s)\nUse an alias to distinguish them: skillmod get --alias <new-name> %s",
+			e.Name, e.OtherName, e.Existing, e.Incoming, e.Incoming)
+	}
 	return i18n.Format("local name conflict: %q already exists (source %s); the new source is %s\nUse an alias to distinguish them: skillmod get --alias <new-name> %s", e.Name, e.Existing, e.Incoming, e.Incoming)
 }
 
@@ -127,21 +139,58 @@ func (e *Engine) loadModOrEmpty() (*modfile.Mod, error) {
 	return m, err
 }
 
-func (e *Engine) loadLock() *modfile.Lock {
+// loadLock reads SKILL.lock, treating an absent file as an empty lock (a
+// fresh project). Any other failure—including a hand-edited lock
+// that fails validation—is propagated instead of being silently swallowed,
+// which would make sync/prune act on an empty lock and quietly discard data.
+// Validation failures are wrapped with a remediation hint.
+func (e *Engine) loadLock() (*modfile.Lock, error) {
 	l, err := modfile.LoadLock(e.Root)
-	if err != nil {
-		return &modfile.Lock{}
+	if os.IsNotExist(err) {
+		return &modfile.Lock{}, nil
 	}
-	return l
+	if err != nil {
+		return nil, fmt.Errorf("%w\nAdvice: %s", err, i18n.Text("SKILL.lock is tool-maintained; repair the listed entry by hand, or back up and delete the file, then re-run skillmod sync to regenerate it"))
+	}
+	return l, nil
 }
 
-func findLock(l *modfile.Lock, name string) *modfile.LockSkill {
+// findLock locates the lock record for a declaration by source and portable
+// installation-directory identity.
+func findLock(l *modfile.Lock, skill modfile.ModSkill) *modfile.LockSkill {
 	for i := range l.Skills {
-		if l.Skills[i].Name == name {
+		if lockMatchesSkill(l.Skills[i], skill) {
 			return &l.Skills[i]
 		}
 	}
 	return nil
+}
+
+// findLockByDir returns the first lock record whose installation directory
+// matches dir, regardless of source. It locates records occupying a slot that
+// no same-kind declaration owns anymore, such as a remote record left behind
+// when the mod entry was hand-edited into a local skill.
+func findLockByDir(l *modfile.Lock, dir string) *modfile.LockSkill {
+	for i := range l.Skills {
+		if sameDir(l.Skills[i].InstallDir(), dir) {
+			return &l.Skills[i]
+		}
+	}
+	return nil
+}
+
+func lockMatchesSkill(lock modfile.LockSkill, skill modfile.ModSkill) bool {
+	if !sameSource(lock.Source, skill.Source) {
+		return false
+	}
+	return sameDir(lock.InstallDir(), skill.DirName())
+}
+
+func sameSource(a, b string) bool {
+	if a == "" || b == "" {
+		return a == b
+	}
+	return sameRemoteSource(a, b)
 }
 
 // saveLockIfChanged writes SKILL.lock only when content changes, avoiding writes when already converged (AC-2).
@@ -158,9 +207,14 @@ func (e *Engine) saveLockIfChanged(lock *modfile.Lock) error {
 }
 
 func upsertLock(l *modfile.Lock, e modfile.LockSkill) {
-	if existing := findLock(l, e.Name); existing != nil {
-		*existing = e
-		return
+	for i := range l.Skills {
+		existing := &l.Skills[i]
+		// The installation directory is the stable slot. Replacing the source
+		// in SKILL.mod updates that slot rather than leaving an unprunable lock.
+		if sameDir(existing.InstallDir(), e.InstallDir()) {
+			*existing = e
+			return
+		}
 	}
 	l.Skills = append(l.Skills, e)
 }
@@ -282,7 +336,39 @@ func snapshotSkillDir(snap *store.Snapshot, subdir string) (string, error) {
 	if err != nil || !st.IsDir() {
 		return "", &skillSubdirError{Subdir: subdir, Version: snap.Info.Version}
 	}
+	if err := validateSkillPaths(dir, subdir); err != nil {
+		return "", err
+	}
 	return dir, nil
+}
+
+// validateSkillPaths re-checks a snapshot subtree against the current
+// portability rules. Snapshot trees are validated when they are written, but
+// snapshots written by an older skillmod may contain paths the current rules
+// reject. Reusing such a snapshot—especially one materialized on Linux and
+// installed onto Windows—would otherwise resurrect unmaterializable paths at
+// install time, so the read path enforces the same rules on every use.
+func validateSkillPaths(dir, subdir string) error {
+	display := subdir
+	if display == "" {
+		display = i18n.Text("snapshot root")
+	}
+	return filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if p == dir {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return err
+		}
+		if err := fsutil.ValidPath(filepath.ToSlash(rel)); err != nil {
+			return fmt.Errorf("%s", i18n.Format("skill path %q in %s cannot be materialized on every platform: %s", filepath.ToSlash(rel), display, err))
+		}
+		return nil
+	})
 }
 
 func (e *Engine) snapshot(repo, version string, memo *operationMemo) (*store.Snapshot, error) {
@@ -547,25 +633,6 @@ func (e *Engine) materializeLocked(ctx context.Context, repo, subdir string, lk 
 	} else if ok {
 		return mat.contentDir, nil
 	}
-	commit := lk.Commit
-	if commit == "" {
-		// Fill a missing commit in an old lock through the resolution index or network.
-		if ent, ok, indexErr := e.Store.GetResolved(repo, subdir, lk.Version); indexErr != nil {
-			return "", indexErr
-		} else if ok {
-			commit = ent.Commit
-		} else {
-			refs, err := e.refs(ctx, repo, memo)
-			if err != nil {
-				return "", fmt.Errorf(i18n.Text("entry %s is not in a local version snapshot and the network is unavailable: %w"), lk.Name, err)
-			}
-			res, err := resolve.Resolve(resolve.Request{Repo: repo, Subdir: subdir, Ref: lk.Version}, refs)
-			if err != nil {
-				return "", err
-			}
-			commit = res.Commit
-		}
-	}
 	fetchRef := ""
 	if !resolve.IsPseudoVersion(lk.Version) && !resolve.IsSHA(lk.Version) {
 		fetchRef = "refs/tags/" + lk.Version
@@ -575,7 +642,7 @@ func (e *Engine) materializeLocked(ctx context.Context, repo, subdir string, lk 
 		i18n.Text("fetching Git objects"),
 		i18n.Text("reading repository contents"),
 	)
-	tree, err := e.Source.FetchRef(ctx, repo, commit, fetchRef)
+	tree, err := e.Source.FetchRef(ctx, repo, lk.Commit, fetchRef)
 	if err != nil {
 		return "", err
 	}
@@ -584,7 +651,7 @@ func (e *Engine) materializeLocked(ctx context.Context, repo, subdir string, lk 
 		return "", err
 	}
 	snap, err := e.Store.PutSnapshot(store.SnapshotInfo{
-		Repo: repo, Version: lk.Version, Commit: commit, Treehash: treeHash,
+		Repo: repo, Version: lk.Version, Commit: lk.Commit, Treehash: treeHash,
 		Symlinks: tree.Symlinks, Submodules: tree.Submodules,
 	}, tree.Files)
 	if err != nil {

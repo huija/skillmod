@@ -1,0 +1,39 @@
+name: Test
+
+# Reusable test job, called by CI and by the release workflow as a gate.
+on:
+  workflow_call:
+    inputs:
+      os:
+        required: true
+        type: string
+      race:
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ inputs.os }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        # The race detector on Windows requires cgo and a mingw toolchain,
+        # so only unix runners pass -race.
+        run: go test ${{ inputs.race }} ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Build
+        run: go build ./...

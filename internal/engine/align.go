@@ -30,6 +30,7 @@ func (e *Engine) align(ctx context.Context, m *modfile.Mod, lock *modfile.Lock) 
 	var out []alignEntry
 	memo := newOperationMemo(nil)
 	for _, sk := range m.Skills {
+		lk := findLock(lock, sk)
 		if sk.Local {
 			continue // Callers validate local entries without modifying them.
 		}
@@ -37,8 +38,7 @@ func (e *Engine) align(ctx context.Context, m *modfile.Mod, lock *modfile.Lock) 
 		if err != nil {
 			return nil, nil, err
 		}
-		lk := findLock(lock, sk.Name)
-		if lk != nil && lk.Version == sk.Version && lk.Dirhash != "" {
+		if lk != nil && lk.Version == sk.Version {
 			// Agreement path: the lock is authoritative (AC-10), so do not call ls-remote.
 			dir, err := e.materializeLocked(ctx, repo, subdir, *lk, memo)
 			if err != nil {
@@ -58,7 +58,7 @@ func (e *Engine) align(ctx context.Context, m *modfile.Mod, lock *modfile.Lock) 
 		}
 		upsertLock(newLock, modfile.LockSkill{
 			Name: sk.Name, Source: sk.Source, Version: mat.version,
-			Commit: mat.commit, Dirhash: mat.dirhash,
+			Commit: mat.commit, Dirhash: mat.dirhash, Dir: sk.Alias,
 		})
 		out = append(out, alignEntry{
 			skill: sk, version: mat.version, dirhash: mat.dirhash,
@@ -68,15 +68,20 @@ func (e *Engine) align(ctx context.Context, m *modfile.Mod, lock *modfile.Lock) 
 	return out, newLock, nil
 }
 
-// staleEntries returns entries still present in the lock but removed from the mod; sync reports them and prune removes them.
+// staleEntries returns lock records whose installation directory is no longer
+// declared in the mod. Source/version mismatches are reconciliation work for
+// sync, not permission for prune to delete an active installation slot.
 func staleEntries(m *modfile.Mod, lock *modfile.Lock) []modfile.LockSkill {
-	inMod := map[string]bool{}
-	for _, sk := range m.Skills {
-		inMod[sk.Name] = true
-	}
 	var stale []modfile.LockSkill
 	for _, lk := range lock.Skills {
-		if !inMod[lk.Name] {
+		found := false
+		for _, sk := range m.Skills {
+			if sameDir(lk.InstallDir(), sk.DirName()) {
+				found = true
+				break
+			}
+		}
+		if !found {
 			stale = append(stale, lk)
 		}
 	}

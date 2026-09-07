@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/huija/skillmod/internal/dirhash"
+	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/resolve"
 	"github.com/huija/skillmod/internal/source"
 	"github.com/huija/skillmod/internal/testutil"
@@ -52,7 +53,8 @@ func TestOpen_DefaultAndOverride(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(HomeEnv, "")
 	t.Setenv("HOME", home)
-	s, err := Open()
+	t.Setenv("USERPROFILE", home)
+	s, err := Open("v0.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +67,7 @@ func TestOpen_DefaultAndOverride(t *testing.T) {
 
 	override := filepath.Join(t.TempDir(), "custom-store")
 	t.Setenv(HomeEnv, override)
-	s, err = Open()
+	s, err = Open("v0.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +76,7 @@ func TestOpen_DefaultAndOverride(t *testing.T) {
 	}
 
 	t.Setenv(HomeEnv, "relative/path")
-	if _, err := Open(); err == nil || !strings.Contains(err.Error(), "absolute path") {
+	if _, err := Open("v0.0.1"); err == nil || !strings.Contains(err.Error(), "absolute path") {
 		t.Fatalf("relative %s err = %v", HomeEnv, err)
 	}
 }
@@ -115,6 +117,10 @@ func TestSnapshot_RoundTripAndConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if got.Info.Format != "" {
+		t.Fatalf("Format = %q, want empty for a test store", got.Info.Format)
+	}
+	info.Format = got.Info.Format
 	if !reflect.DeepEqual(got.Info, info) {
 		t.Fatalf("Info = %+v, want %+v", got.Info, info)
 	}
@@ -177,7 +183,7 @@ func TestOpen_CreatesReadOnlySnapshots(t *testing.T) {
 			return os.Chmod(path, 0o600)
 		})
 	})
-	s, err := Open()
+	s, err := Open("v0.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,6 +367,89 @@ func TestGetSnapshotDetectsBrokenComponents(t *testing.T) {
 	}
 }
 
+func TestSnapshot_FormatVersioning(t *testing.T) {
+	files := testFiles()
+	info := SnapshotInfo{
+		Repo: "https://example.com/acme/skills", Version: "v1.0.0",
+		Commit: strings.Repeat("f", 40), Treehash: hashFiles(t, files),
+	}
+
+	t.Run("records the running version", func(t *testing.T) {
+		root := t.TempDir()
+		s := newStore(root, "v0.0.1", false)
+		snap, err := s.PutSnapshot(info, files)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if snap.Info.Format != "v0.0.1" {
+			t.Fatalf("Format = %q, want %q", snap.Info.Format, "v0.0.1")
+		}
+		got, err := s.GetSnapshot(info.Repo, info.Version)
+		if err != nil || got.Info.Format != "v0.0.1" {
+			t.Fatalf("GetSnapshot = %+v, %v", got.Info, err)
+		}
+	})
+
+	// Release and development builds of the same generation must accept each
+	// other's snapshots: the treehash is re-verified on every load regardless.
+	t.Run("accepts snapshots across builds of the same release", func(t *testing.T) {
+		root := t.TempDir()
+		release := newStore(root, "v0.0.1", false)
+		if _, err := release.PutSnapshot(info, files); err != nil {
+			t.Fatal(err)
+		}
+		dev := newStore(root, "v0.0.1-1-g21882fe", false)
+		if _, err := dev.GetSnapshot(info.Repo, info.Version); err != nil {
+			t.Fatalf("release-written snapshot rejected by dev build: %v", err)
+		}
+
+		devInfo := info
+		devInfo.Version = "v1.1.0"
+		if _, err := dev.PutSnapshot(devInfo, files); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := release.GetSnapshot(info.Repo, devInfo.Version); err != nil {
+			t.Fatalf("dev-written snapshot rejected by release build: %v", err)
+		}
+	})
+
+	t.Run("accepts snapshots written by an older release", func(t *testing.T) {
+		root := t.TempDir()
+		older := newStore(root, "v0.0.1", false)
+		if _, err := older.PutSnapshot(info, files); err != nil {
+			t.Fatal(err)
+		}
+		current := newStore(root, "v0.1.0", false)
+		if _, err := current.GetSnapshot(info.Repo, info.Version); err != nil {
+			t.Fatalf("snapshot written by an older release was rejected: %v", err)
+		}
+	})
+
+	t.Run("rejects snapshots written by a newer release", func(t *testing.T) {
+		root := t.TempDir()
+		newer := newStore(root, "v0.0.2", false)
+		if _, err := newer.PutSnapshot(info, files); err != nil {
+			t.Fatal(err)
+		}
+		older := newStore(root, "v0.0.1", false)
+		if _, err := older.GetSnapshot(info.Repo, info.Version); err == nil || !strings.Contains(err.Error(), "newer than this build") {
+			t.Fatalf("GetSnapshot error = %v, want newer-build rejection", err)
+		}
+	})
+
+	t.Run("ignores non-semver dev versions", func(t *testing.T) {
+		root := t.TempDir()
+		s := newStore(root, "21882fe", false) // Pre-tag dev builds record a bare commit.
+		if _, err := s.PutSnapshot(info, files); err != nil {
+			t.Fatal(err)
+		}
+		release := newStore(root, "v0.0.1", false)
+		if _, err := release.GetSnapshot(info.Repo, info.Version); err != nil {
+			t.Fatalf("bare-commit snapshot rejected by release build: %v", err)
+		}
+	})
+}
+
 func TestFindSnapshotVersionRejectsInvalidMetadata(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -411,8 +500,93 @@ func TestPutSnapshotRejectsInvalidTrees(t *testing.T) {
 
 	files := []source.File{{Path: "../escape", Data: []byte("unsafe")}}
 	info.Treehash = hashFiles(t, files)
-	if _, err := s.PutSnapshot(info, files); err == nil || !strings.Contains(err.Error(), "unsafe skill file path") {
+	if _, err := s.PutSnapshot(info, files); err == nil || !strings.Contains(err.Error(), "cannot be materialized") {
 		t.Fatalf("unsafe path error = %v", err)
+	}
+}
+
+func TestPutSnapshot_RejectsUnmaterializableFiles(t *testing.T) {
+	s := New(t.TempDir())
+	base := SnapshotInfo{
+		Repo: "https://example.com/acme/skills", Version: "v1.0.0",
+		Commit: strings.Repeat("a", 40), Treehash: "h1:x",
+	}
+	for name, tc := range map[string]struct {
+		files []source.File
+		want  string
+	}{
+		"reserved name":     {[]source.File{{Path: "CON", Data: []byte("x")}}, "cannot be materialized"},
+		"reserved with ext": {[]source.File{{Path: "doc/con.txt", Data: []byte("x")}}, "cannot be materialized"},
+		"trailing dot":      {[]source.File{{Path: "demo.", Data: []byte("x")}}, "cannot be materialized"},
+		"illegal char":      {[]source.File{{Path: "a:b.txt", Data: []byte("x")}}, "cannot be materialized"},
+		"backslash":         {[]source.File{{Path: `a\b.txt`, Data: []byte("x")}}, "backslash"},
+		"case collision":    {[]source.File{{Path: "doc/Readme", Data: []byte("x")}, {Path: "doc/README", Data: []byte("y")}}, "collide"},
+		"ancestor case collision": {[]source.File{
+			{Path: "Docs/guide.md", Data: []byte("x")},
+			{Path: "docs/reference.md", Data: []byte("y")},
+		}, "collide"},
+		"ancestor normalization collision": {[]source.File{
+			{Path: "café/guide.md", Data: []byte("x")},
+			{Path: "cafe\u0301/reference.md", Data: []byte("y")},
+		}, "collide"},
+		"file directory collision": {[]source.File{
+			{Path: "docs", Data: []byte("x")},
+			{Path: "DOCS/readme.md", Data: []byte("y")},
+		}, "collide"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := s.PutSnapshot(base, tc.files)
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "v1.0.0") {
+				t.Fatalf("PutSnapshot error = %v, want %q with snapshot context", err, tc.want)
+			}
+		})
+	}
+	// Positive control: non-ASCII names materialize everywhere.
+	files := []source.File{{Path: "技能/SKILL.md", Data: []byte("---\nname: 技能\n---\n")}}
+	info := base
+	info.Version = "v1.0.1"
+	info.Treehash = hashFiles(t, files)
+	if _, err := s.PutSnapshot(info, files); err != nil {
+		t.Fatalf("PutSnapshot unicode path: %v", err)
+	}
+}
+
+func TestEscapePathSegment_WindowsSafety(t *testing.T) {
+	cases := map[string]string{
+		"con":     "%63on", // lowercase reserved device name
+		"aux":     "%61ux",
+		"con.txt": "%63on.txt",
+		"demo.":   "demo%2E", // trailing dot
+		"CON":     "!c!o!n",  // !upper convention already protects uppercase
+		"simple":  "simple",
+		"a b":     "a%20b",
+		"v1.2.3":  "v1.2.3",
+	}
+	for in, want := range cases {
+		if got := escapePathSegment(in); got != want {
+			t.Errorf("escapePathSegment(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestRepoPath_ReservedOwnerOrRepo(t *testing.T) {
+	s := New(t.TempDir())
+	for _, repo := range []string{"https://example.com/con/skills", "https://example.com/acme/aux", "https://example.com/acme/skills/demo."} {
+		path, err := s.SnapshotPath(repo, "v1.0.0")
+		if err != nil {
+			t.Fatalf("SnapshotPath(%q): %v", repo, err)
+		}
+		// Every component of the cache path must survive portable validation.
+		rel, err := filepath.Rel(s.ModRoot(), path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for comp := range strings.SplitSeq(filepath.ToSlash(rel), "/") {
+			comp = strings.TrimSuffix(comp, "@v1.0.0")
+			if err := fsutil.ValidPath(comp); err != nil {
+				t.Errorf("SnapshotPath(%q) produced unsafe component %q: %v", repo, comp, err)
+			}
+		}
 	}
 }
 
@@ -482,6 +656,7 @@ func newTestSnapshot(t *testing.T) (*Store, SnapshotInfo, *Snapshot, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	info.Format = snap.Info.Format
 	infoPath, err := s.snapshotInfoPath(info.Repo, info.Version)
 	if err != nil {
 		t.Fatal(err)

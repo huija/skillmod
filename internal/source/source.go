@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/huija/skillmod/internal/i18n"
@@ -65,7 +66,7 @@ func (s *Source) run(ctx context.Context, dir string, args ...string) (string, e
 	if git == "" {
 		git = "git"
 	}
-	cmd := exec.CommandContext(ctx, git, args...)
+	cmd := exec.CommandContext(ctx, git, platformGitArgs(args...)...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
 	var stdout, stderr bytes.Buffer
@@ -75,6 +76,13 @@ func (s *Source) run(ctx context.Context, dir string, args ...string) (string, e
 		return "", mapGitError(err, stderr.String(), repoArg(args))
 	}
 	return stdout.String(), nil
+}
+
+func platformGitArgs(args ...string) []string {
+	if runtime.GOOS != "windows" {
+		return args
+	}
+	return append([]string{"-c", "core.longpaths=true"}, args...)
 }
 
 // repoArg makes a best effort to find a repository address in the arguments for error reporting.

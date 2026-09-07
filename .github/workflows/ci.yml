@@ -11,21 +11,17 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v6
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, race: "-race" }
+          - { os: macos-latest, race: "-race" }
+          - { os: windows-latest, race: "" }
+    uses: ./.github/workflows/test.yml
+    with:
+      os: ${{ matrix.os }}
+      race: ${{ matrix.race }}
 
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-
-      - name: Test
-        run: go test -race ./...
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Build
-        run: go build ./...
+  cross:
+    uses: ./.github/workflows/cross.yml

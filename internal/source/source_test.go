@@ -87,6 +87,9 @@ func TestSkillNameParsing(t *testing.T) {
 		"plain":         {content: "---\nname: demo\ndescription: test\n---\n# Demo\n", want: "demo"},
 		"double quoted": {content: "---\nname: \"demo skill\"\n---\n", want: "demo skill"},
 		"single quoted": {content: "---\nname: 'demo'\n---", want: "demo"},
+		"crlf":          {content: "---\r\nname: demo\r\ndescription: test\r\n---\r\n# Demo\r\n", want: "demo"},
+		"crlf quoted":   {content: "---\r\nname: \"café\"\r\n---\r\n", want: "café"},
+		"unicode":       {content: "---\nname: 中文技能\n---\n", want: "中文技能"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got, err := ParseSkillName(tc.content)
@@ -112,14 +115,22 @@ func TestSkillMetadataParsing(t *testing.T) {
 
 func TestSkillNameParsingErrors(t *testing.T) {
 	for name, content := range map[string]string{
-		"opening delimiter": "name: demo\n---\n",
-		"closing delimiter": "---\nname: demo\n",
-		"missing name":      "---\ndescription: test\n---\n",
-		"empty name":        "---\nname: \"\"\n---\n",
-		"slash":             "---\nname: a/b\n---\n",
-		"backslash":         "---\nname: a\\b\n---\n",
-		"dot":               "---\nname: .\n---\n",
-		"dot dot":           "---\nname: ..\n---\n",
+		"opening delimiter":  "name: demo\n---\n",
+		"closing delimiter":  "---\nname: demo\n",
+		"missing name":       "---\ndescription: test\n---\n",
+		"empty name":         "---\nname: \"\"\n---\n",
+		"slash":              "---\nname: a/b\n---\n",
+		"backslash":          "---\nname: a\\b\n---\n",
+		"dot":                "---\nname: .\n---\n",
+		"dot dot":            "---\nname: ..\n---\n",
+		"colon":              "---\nname: a:b\n---\n",
+		"reserved":           "---\nname: CON\n---\n",
+		"reserved lowercase": "---\nname: con.txt\n---\n",
+		"trailing dot":       "---\nname: demo.\n---\n",
+		"trailing space":     "---\nname: \"demo \"\n---\n",
+		"asterisk":           "---\nname: a*b\n---\n",
+		"pipe":               "---\nname: a|b\n---\n",
+		"control char":       "---\nname: a\x01b\n---\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := ParseSkillName(content)
@@ -543,6 +554,24 @@ func TestOpenRepoRejectsCacheIdentityConflict(t *testing.T) {
 			cleanup()
 		}
 		t.Fatalf("openRepo error = %v", err)
+	}
+}
+
+func TestOpenRepoRejectsMalformedCacheMetadata(t *testing.T) {
+	repo := "https://example.com/acme/skills"
+	s := &Source{VCSRoot: t.TempDir()}
+	dir := filepath.Join(s.VCSRoot, vcsKey(repo))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dir+".info", []byte(repo+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, cleanup, err := s.openRepo(context.Background(), repo); err == nil || !strings.Contains(err.Error(), "metadata is invalid") {
+		if cleanup != nil {
+			cleanup()
+		}
+		t.Fatalf("openRepo() error = %v, want invalid cache metadata", err)
 	}
 }
 

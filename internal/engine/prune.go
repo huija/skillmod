@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/huija/skillmod/internal/dirhash"
+	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/modfile"
 )
@@ -21,7 +22,10 @@ func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
 	if err != nil {
 		return nil, err
 	}
-	lock := e.loadLock()
+	lock, err := e.loadLock()
+	if err != nil {
+		return nil, err
+	}
 	stale := staleEntries(m, lock)
 	rep := &Report{Action: "prune"}
 	if len(stale) == 0 {
@@ -36,19 +40,23 @@ func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
 	}
 	var deletable []string
 	newLock := &modfile.Lock{}
-	staleNames := map[string]bool{}
+	staleDirs := map[string]bool{}
 	for _, lk := range stale {
-		staleNames[lk.Name] = true
+		staleDirs[fsutil.FoldKey(lk.InstallDir())] = true
 	}
 	for _, lk := range lock.Skills {
-		if !staleNames[lk.Name] {
+		if !staleDirs[fsutil.FoldKey(lk.InstallDir())] {
 			newLock.Skills = append(newLock.Skills, lk) // Keep entries that are not stale.
 		}
 	}
 	for _, lk := range stale {
 		entry := EntryReport{Name: lk.Name, Source: lk.Source, Version: lk.Version}
+		// The recorded installation directory survives alias removal from the
+		// mod file; without it, an aliased install could never be located
+		// again and would leak as an orphan directory.
+		dirName := lk.InstallDir()
 		for _, a := range adapters {
-			dst := adapterDir(a, e.Root, lk.Name)
+			dst := adapterDir(a, e.Root, dirName)
 			h, err := dirhash.HashDir(dst)
 			if err != nil {
 				continue // Nothing to clean when the target does not exist.
@@ -69,6 +77,14 @@ func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
 		for _, d := range deletable {
 			io.printf("  %s", d)
 		}
+	}
+	if io.DryRun {
+		// dry-run must never require confirmation: the flag promises to list
+		// what would happen, so the gate below is skipped entirely.
+		rep.Notes = append(rep.Notes, i18n.Text("dry-run: no files were deleted"))
+		return rep, nil
+	}
+	if len(deletable) > 0 {
 		ok := io.Yes
 		if !ok && io.Confirm != nil {
 			ok = io.Confirm.Confirm(i18n.Format("delete the %d directories listed above?", len(deletable)))
@@ -79,11 +95,6 @@ func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
 		if !ok {
 			return nil, fmt.Errorf("%s", i18n.Text("cancelled by user; no files were deleted"))
 		}
-	}
-
-	if io.DryRun {
-		rep.Notes = append(rep.Notes, i18n.Text("dry-run: no files were deleted"))
-		return rep, nil
 	}
 
 	for _, d := range deletable {

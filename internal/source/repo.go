@@ -61,20 +61,18 @@ func (s *Source) openRepo(ctx context.Context, repo string) (dir string, cleanup
 	info, infoErr := os.ReadFile(dir + ".info")
 	st, dirErr := os.Stat(dir)
 	if infoErr == nil && dirErr == nil && st.IsDir() {
-		haveRepo := strings.TrimPrefix(strings.TrimSpace(string(info)), "git:")
-		if RepoIdentity(haveRepo) != RepoIdentity(repo) {
+		haveInfo := strings.TrimSpace(string(info))
+		if !strings.HasPrefix(haveInfo, "git:") {
+			cleanup()
+			return "", nil, fmt.Errorf(i18n.Text("VCS cache metadata is invalid: %s"), dir+".info")
+		}
+		if haveInfo != wantInfo {
 			cleanup()
 			return "", nil, fmt.Errorf(i18n.Text("VCS cache identity conflict: %s"), dir)
 		}
 		if err := s.ensureOrigin(ctx, dir, repo); err != nil {
 			cleanup()
 			return "", nil, err
-		}
-		if strings.TrimSpace(string(info)) != wantInfo {
-			if err := os.WriteFile(dir+".info", []byte(wantInfo+"\n"), 0o600); err != nil {
-				cleanup()
-				return "", nil, err
-			}
 		}
 		return dir, cleanup, nil
 	}
@@ -133,7 +131,7 @@ func (s *Source) hasCommit(ctx context.Context, dir, commit string) bool {
 	if git == "" {
 		git = "git"
 	}
-	cmd := exec.CommandContext(ctx, git, "cat-file", "-e", commit+"^{commit}")
+	cmd := exec.CommandContext(ctx, git, platformGitArgs("cat-file", "-e", commit+"^{commit}")...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C", "GIT_NO_LAZY_FETCH=1")
 	return cmd.Run() == nil

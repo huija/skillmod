@@ -20,7 +20,10 @@ func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 	if err != nil {
 		return nil, err
 	}
-	lock := e.loadLock()
+	lock, err := e.loadLock()
+	if err != nil {
+		return nil, err
+	}
 	adapters, err := e.adapters()
 	if err != nil {
 		return nil, err
@@ -41,7 +44,7 @@ func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 		}
 		// Installation status.
 		status := "installed"
-		lk := findLock(lock, sk.Name)
+		lk := findLock(lock, sk)
 		if lk == nil {
 			status = "unlocked"
 		} else {

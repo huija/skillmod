@@ -27,6 +27,7 @@ import (
 
 	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/filelock"
+	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/resolve"
 	"github.com/huija/skillmod/internal/source"
@@ -40,28 +41,37 @@ const HomeEnv = "SKILLMOD_HOME"
 type Store struct {
 	root     string
 	readOnly bool
+	// version is the running skillmod version ("v0.0.1" for releases;
+	// development builds record a temporary release+commit version such as
+	// "v0.0.1-1-g21882fe"). It is recorded in snapshot metadata and used to
+	// reject snapshots written by a strictly newer skillmod. Empty disables
+	// the comparison; test stores leave it empty.
+	version string
 }
 
-// Open opens the default persistent store. SKILLMOD_HOME, when set, must be absolute.
-func Open() (*Store, error) {
+// Open opens the default persistent store. SKILLMOD_HOME, when set, must be
+// absolute. version is the running skillmod version recorded in the metadata
+// of every snapshot this store writes.
+func Open(version string) (*Store, error) {
 	if root := os.Getenv(HomeEnv); root != "" {
 		if !filepath.IsAbs(root) {
 			return nil, fmt.Errorf(i18n.Text("%s must be an absolute path: %q"), HomeEnv, root)
 		}
-		return newStore(filepath.Clean(root), true), nil
+		return newStore(filepath.Clean(root), version, true), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf(i18n.Text("determine user home directory: %w"), err)
 	}
-	return newStore(filepath.Join(home, ".agents", "skillmod"), true), nil
+	return newStore(filepath.Join(home, ".agents", "skillmod"), version, true), nil
 }
 
-// New creates a writable store rooted at root. It is primarily used by tests.
-func New(root string) *Store { return newStore(root, false) }
+// New creates a writable store rooted at root. It is primarily used by tests
+// and records no tool version, so it never rejects snapshots by version.
+func New(root string) *Store { return newStore(root, "", false) }
 
-func newStore(root string, readOnly bool) *Store {
-	return &Store{root: filepath.Clean(root), readOnly: readOnly}
+func newStore(root, version string, readOnly bool) *Store {
+	return &Store{root: filepath.Clean(root), version: version, readOnly: readOnly}
 }
 
 // Root returns the global store root.
@@ -84,6 +94,11 @@ type SnapshotInfo struct {
 	Treehash   string   `json:"treehash"`
 	Symlinks   []string `json:"symlinks,omitempty"`
 	Submodules []string `json:"submodules,omitempty"`
+	// Format records the skillmod release that wrote the snapshot, such as
+	// "v0.0.1"; development builds record a temporary release+commit version
+	// like "v0.0.1-1-g21882fe". Reads reject only snapshots written by a
+	// strictly newer skillmod; everything else is re-verified on every load.
+	Format string `json:"format,omitempty"`
 }
 
 // Snapshot is a verified full-repository snapshot in pkg/mod.
@@ -157,8 +172,24 @@ func versionKey(version string) (prefix, key string, err error) {
 	return prefix, key, err
 }
 
+// releaseBase drops pre-release and build suffixes from a semantic version so
+// that "v0.0.1-1-g21882fe" (a development build after the v0.0.1 release) and
+// "v0.0.1" compare as the same format generation. Invalid inputs such as
+// "dev" or a bare commit are returned unchanged.
+func releaseBase(v string) string {
+	if i := strings.IndexByte(v, '+'); i >= 0 {
+		v = v[:i]
+	}
+	if i := strings.IndexByte(v, '-'); i >= 0 {
+		v = v[:i]
+	}
+	return v
+}
+
 // escapePathSegment uses Go's readable !upper convention and percent-escapes
-// bytes that are unsafe in a cross-platform path component.
+// bytes that are unsafe in a cross-platform path component. The result is
+// post-processed so that a Windows cannot create it: lowercase reserved
+// device names are broken up and trailing dots are encoded.
 func escapePathSegment(segment string) string {
 	var b strings.Builder
 	for i := 0; i < len(segment); i++ {
@@ -176,7 +207,16 @@ func escapePathSegment(segment string) string {
 	if b.Len() == 0 {
 		return "_"
 	}
-	return b.String()
+	out := b.String()
+	// The !upper convention already protects uppercase spellings ("CON"
+	// becomes "!con"); lowercase reserved names need explicit handling.
+	if base, _, _ := strings.Cut(out, "."); fsutil.IsReservedDeviceName(base) {
+		out = fmt.Sprintf("%%%02X%s", out[0], out[1:])
+	}
+	if last := out[len(out)-1]; last == '.' {
+		out = out[:len(out)-1] + "%2E"
+	}
+	return out
 }
 
 // repoPath returns a credential-free, readable path such as
@@ -330,6 +370,18 @@ func (s *Store) GetSnapshot(repo, version string) (*Snapshot, error) {
 	if source.RepoIdentity(info.Repo) != source.RepoIdentity(repo) || info.Version != version {
 		return nil, &CorruptError{Path: dir, Detail: i18n.Text("repository/version in version metadata does not match the directory identity")}
 	}
+	if info.Format != "" && s.version != "" {
+		recorded, current := releaseBase(info.Format), releaseBase(s.version)
+		if semver.IsValid(recorded) && semver.IsValid(current) && semver.Compare(recorded, current) > 0 {
+			// Snapshots written by a newer skillmod may use metadata semantics this
+			// build does not understand yet. Older and dev versions remain valid:
+			// content is re-hashed on every load and path rules are enforced when
+			// the snapshot is materialized, so there is no stale-cache hazard.
+			return nil, fmt.Errorf("%s", i18n.Format(
+				"snapshot %s was materialized by skillmod %s, which is newer than this build (%s); upgrade skillmod or remove that snapshot and re-run",
+				dir, info.Format, s.version))
+		}
+	}
 	h, err := dirhash.HashDir(dir)
 	if err != nil {
 		return nil, &CorruptError{Path: dir, Detail: i18n.Text("version directory cannot be verified: ") + err.Error()}
@@ -365,6 +417,19 @@ func (s *Store) PutSnapshot(info SnapshotInfo, files []source.File) (*Snapshot, 
 		return existing, nil
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
+	}
+
+	// Reject repository trees that cannot be materialized on some supported
+	// filesystem before any bytes are written. Nothing is skipped or renamed:
+	// that would silently change the tree content and break the dirhash
+	// contract. Offending trees fail fast with the path named. Case-only
+	// collisions would otherwise fail much later, in the treehash check, with
+	// a confusing diagnosis.
+	if err := validateSnapshotFiles(files); err != nil {
+		return nil, fmt.Errorf(i18n.Text("version snapshot %s@%s: %w"), info.Repo, info.Version, err)
+	}
+	if info.Format == "" {
+		info.Format = s.version
 	}
 
 	parent := filepath.Dir(dst)
@@ -415,7 +480,7 @@ func (s *Store) PutSnapshot(info SnapshotInfo, files []source.File) (*Snapshot, 
 	if err := os.Rename(tmp, dst); err != nil {
 		return nil, fmt.Errorf(i18n.Text("failed to commit version snapshot to disk: %w"), err)
 	}
-	if err := replaceFile(metaTmpName, infoPath); err != nil {
+	if err := fsutil.Replace(metaTmpName, infoPath); err != nil {
 		_ = os.RemoveAll(dst)
 		return nil, fmt.Errorf(i18n.Text("failed to commit version metadata to disk: %w"), err)
 	}
@@ -430,6 +495,48 @@ func (s *Store) PutSnapshot(info SnapshotInfo, files []source.File) (*Snapshot, 
 		}
 	}
 	return &Snapshot{Info: info, ContentDir: dst}, nil
+}
+
+// validateSnapshotFiles checks every repository file path against the
+// portable-name rules and ensures no two paths collide after Unicode case
+// folding (macOS and Windows map them to one directory).
+func validateSnapshotFiles(files []source.File) error {
+	type pathNode struct {
+		spelling string
+		owner    string
+		dir      bool
+	}
+	seen := make(map[string]pathNode, len(files))
+	for _, f := range files {
+		if strings.Contains(f.Path, `\`) {
+			return fmt.Errorf(i18n.Text("repository file path %q contains a backslash and cannot be materialized on Windows"), f.Path)
+		}
+		if err := fsutil.ValidPath(f.Path); err != nil {
+			return fmt.Errorf(i18n.Text("repository file path %q cannot be materialized on this filesystem: %w"), f.Path, err)
+		}
+		var prefix string
+		components := strings.Split(f.Path, "/")
+		for i, component := range components {
+			if prefix == "" {
+				prefix = component
+			} else {
+				prefix += "/" + component
+			}
+			current := pathNode{spelling: prefix, owner: f.Path, dir: i < len(components)-1}
+			fold := fsutil.FoldKey(prefix)
+			if prev, ok := seen[fold]; ok {
+				// Sharing an exactly spelled directory is valid. Every other
+				// repeated node is either a case/normalization collision, a
+				// duplicate file, or a file-versus-directory conflict.
+				if prev.spelling != current.spelling || prev.dir != current.dir || !current.dir {
+					return fmt.Errorf(i18n.Text("repository file paths %q and %q collide on case-insensitive filesystems (macOS, Windows)"), prev.owner, f.Path)
+				}
+				continue
+			}
+			seen[fold] = current
+		}
+	}
+	return nil
 }
 
 func writeTree(dir string, files []source.File) error {
@@ -553,7 +660,7 @@ func (s *Store) PutRepoRefs(repo string, refs *resolve.Refs) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return replaceFile(tmpName, p)
+	return fsutil.Replace(tmpName, p)
 }
 
 // ResolveEntry is a persisted ref resolution used for offline get and pseudo-versions.
@@ -631,5 +738,5 @@ func (s *Store) PutResolved(repo, subdir, ref string, entry ResolveEntry) error 
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return replaceFile(tmpName, p)
+	return fsutil.Replace(tmpName, p)
 }

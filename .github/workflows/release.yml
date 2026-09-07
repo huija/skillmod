@@ -6,11 +6,32 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  # The release is gated by the same reusable workflows that CI runs, so a
+  # tag push can never bypass the platform matrix.
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, race: "-race" }
+          - { os: macos-latest, race: "-race" }
+          - { os: windows-latest, race: "" }
+    uses: ./.github/workflows/test.yml
+    with:
+      os: ${{ matrix.os }}
+      race: ${{ matrix.race }}
+
+  cross:
+    uses: ./.github/workflows/cross.yml
+
   release:
+    needs: [test, cross]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Check out source
         uses: actions/checkout@v6
@@ -21,11 +42,6 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-
-      - name: Verify release candidate
-        run: |
-          go test -race ./...
-          go vet ./...
 
       - name: Build archives and create GitHub Release
         uses: goreleaser/goreleaser-action@v7

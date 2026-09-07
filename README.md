@@ -18,7 +18,7 @@ skillmod applies the Go module model to skills: declarations in `SKILL.mod`, con
 With Go 1.26.1 or later:
 
 ```bash
-go install github.com/huija/skillmod@v0.0.1
+go install github.com/huija/skillmod@latest
 ```
 
 For local development from a repository checkout:
@@ -27,9 +27,13 @@ For local development from a repository checkout:
 make install
 ```
 
-This installs `skillmod` into `go env GOBIN`, or the first `GOPATH/bin` when `GOBIN` is unset, and embeds the current Git revision as the development version. Override the destination when needed, for example with `make install INSTALL_DIR=/usr/local/bin`. The selected directory must be on `PATH`.
+This installs `skillmod` into `go env GOBIN`, or the first `GOPATH/bin` entry (`%GOPATH%\bin` on Windows) when `GOBIN` is unset, and embeds the current Git revision as the development version. On Windows, run the Makefile from Git Bash (which provides `sh`) or override the destination, for example with `make install INSTALL_DIR=/usr/local/bin`. The selected directory must be on `PATH`.
 
 Without Go, download the archive for your platform from [GitHub Releases](https://github.com/huija/skillmod/releases), extract it, and put `skillmod` on your `PATH`.
+
+## Prerequisites
+
+skillmod invokes the system `git` executable to fetch sources, so Git must be installed and on `PATH` (on Windows, install [Git for Windows](https://gitforwindows.org/); it is not preinstalled). SSH remotes additionally require `ssh` on `PATH`.
 
 ## Capabilities
 
@@ -38,7 +42,7 @@ Without Go, download the archive for your platform from [GitHub Releases](https:
 - **Three version forms**: semantic-version tags, commit SHAs, and pseudo-versions for repositories without tags. Branch names are rejected because mutable references cannot be locked.
 - **Shared persistent storage**: readable, immutable full-repository snapshots are stored at `~/.agents/skillmod/pkg/mod/<host>/<owner>/<repo>@<version>`. Bare Git repositories, refs, and resolution metadata live under `pkg/mod/cache`. HTTPS, default-port SSH, and `.git` URL variants share storage. Set `SKILLMOD_HOME` to override the location.
 - **Copy-based installation**: byte-for-byte copies with Windows support. `sync` never deletes files automatically; confirmed cleanup is handled by `prune`.
-- **Flat 1:1 dependencies**: no transitive dependency resolution and no constraint solver. The `requires` field is reserved.
+- **Flat 1:1 dependencies**: no transitive dependency resolution and no constraint solver.
 - **Zero telemetry**
 
 ## Example
@@ -77,6 +81,8 @@ skillmod verify                                        # Validate in CI; drift p
 
 A single segment after `//` first addresses an exact root subdirectory, then falls back to a unique skill name anywhere below `skills/`; ambiguous names require the full path. When `//<subdir>` is omitted, `get` discovers a root `SKILL.md` and every `SKILL.md` below `skills/`. Interactive terminals show a compact, colored one-line list; displayed commands omit the redundant `https://` prefix and prefer a unique skill-name shorthand when safe. Use ↑/← for the previous item, ↓/→ for the next item, Space to toggle selections, D to show or hide the current description and command, and Enter to confirm. `--yes` installs every discovered skill.
 
+When different sources publish the same skill name, install the additional entry with `--alias <directory>`. Both declarations and lock records are retained; lock entries omit `dir` when the installation directory equals `name` and record it only for aliases. Aliases must be portable names and all installation directories must remain distinct after Unicode normalization and case folding so the same project works on Linux, macOS, and Windows. Re-getting the same source with another alias keeps the old directory and reports that `skillmod prune` can remove it. `skillmod update <name>` updates all entries with that published name; pass an alias to update only that installation.
+
 Long-running `get` and `update` operations show a compact animated status block on interactive terminals: the primary stage appears beside the spinner, with simultaneous detail states on a muted second line. Remote version checks request only HEAD, branch, and tag refs; `update` deduplicates equivalent repository URLs and checks up to four distinct repositories concurrently. Cached repository snapshots are integrity-checked once per command and reused across skill-name discovery and batch selection.
 
 ### Command output language
@@ -106,12 +112,15 @@ The first request for a given `repo@version` materializes a complete repository 
     └── locks/
 ```
 
-Store v2 does not automatically migrate or remove the old root-level `cache/` directory or hash-named subtree snapshots. The new layout is materialized on first use. Old directories can be removed manually after confirming that older binaries will no longer be used.
+Skills are installed into the project's `.agents/skills/` directory by default. To also install them for Claude Code, set `agents` in the config file, whose location follows `os.UserConfigDir()`:
 
-Skills are installed into the project's `.agents/skills/` directory by default. To also install them for Claude Code, configure:
+| OS      | Config path                                          |
+| ------- | ---------------------------------------------------- |
+| Linux   | `~/.config/skillmod/config.toml`                     |
+| macOS   | `~/Library/Application Support/skillmod/config.toml` |
+| Windows | `%AppData%\skillmod\config.toml`                     |
 
 ```toml
-# ~/.config/skillmod/config.toml
 agents = ["agents", "claude-code"]
 ```
 

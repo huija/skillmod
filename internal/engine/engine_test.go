@@ -6,8 +6,10 @@
 package engine_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -77,6 +79,67 @@ func loadLockSkill(t *testing.T, root, name string) modfile.LockSkill {
 	return modfile.LockSkill{}
 }
 
+func assertStateDirs(t *testing.T, root string, want ...string) {
+	t.Helper()
+	m, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatalf("LoadMod: %v", err)
+	}
+	l, err := modfile.LoadLock(root)
+	if err != nil {
+		t.Fatalf("LoadLock: %v", err)
+	}
+	modDirs := make(map[string]bool, len(m.Skills))
+	for _, skill := range m.Skills {
+		modDirs[skill.DirName()] = true
+	}
+	lockDirs := make(map[string]bool, len(l.Skills))
+	for _, skill := range l.Skills {
+		lockDirs[skill.InstallDir()] = true
+	}
+	if len(modDirs) != len(want) || len(lockDirs) != len(want) {
+		t.Fatalf("state directory counts = mod %v, lock %v; want %v", modDirs, lockDirs, want)
+	}
+	for _, dir := range want {
+		if !modDirs[dir] || !lockDirs[dir] {
+			t.Errorf("state directories = mod %v, lock %v; want both to contain %q", modDirs, lockDirs, dir)
+		}
+	}
+}
+
+func addRedundantLockDir(t *testing.T, root, name string) {
+	t.Helper()
+	path := filepath.Join(root, modfile.LockFileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := fmt.Sprintf("name = '%s'\n", name)
+	redundant := marker + fmt.Sprintf("dir = '%s'\n", name)
+	updated := strings.Replace(string(data), marker, redundant, 1)
+	if updated == string(data) {
+		t.Fatalf("addRedundantLockDir(%q) could not find lock entry in:\n%s", name, data)
+	}
+	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertCanonicalLockDir(t *testing.T, root, name string) {
+	t.Helper()
+	path := filepath.Join(root, modfile.LockFileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), fmt.Sprintf("dir = '%s'", name)) {
+		t.Errorf("%s retains redundant dir for %q:\n%s", modfile.LockFileName, name, data)
+	}
+	if got := loadLockSkill(t, root, name).Dir; got != "" {
+		t.Errorf("LoadLock(%q).Dir = %q, want empty", name, got)
+	}
+}
+
 // AC-1, first half: exercise the complete get flow and match installed content to the source.
 func TestGet_Tag(t *testing.T) {
 	r := newHelloRepo(t)
@@ -99,6 +162,9 @@ func TestGet_Tag(t *testing.T) {
 	if !strings.HasPrefix(lk.Dirhash, "h1:") || lk.Commit == "" {
 		t.Errorf("lock entry is missing dirhash or commit: %+v", lk)
 	}
+	if lk.Dir != "" {
+		t.Errorf("lock entry Dir = %q, want omitted when no alias is used", lk.Dir)
+	}
 	// Installed bytes match the Git source.
 	got, err := os.ReadFile(filepath.Join(installedDir(root, "hello"), "SKILL.md"))
 	if err != nil {
@@ -116,6 +182,24 @@ func TestGet_Tag(t *testing.T) {
 	if h != lk.Dirhash {
 		t.Errorf("recomputed installation hash %s != lock %s", h, lk.Dirhash)
 	}
+}
+
+func TestGet_RedundantAliasIsCanonical(t *testing.T) {
+	r := newHelloRepo(t)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "hello", testIO()); err != nil {
+		t.Fatalf("Get(alias equal to published name) error = %v, want nil", err)
+	}
+	m, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Skills[0].Alias; got != "" {
+		t.Errorf("Get(alias equal to published name) Alias = %q, want empty", got)
+	}
+	assertCanonicalLockDir(t, root, "hello")
+	assertStateDirs(t, root, "hello")
 }
 
 func TestGet_DiscoversSingleSkillInSkillsDirectory(t *testing.T) {
@@ -453,6 +537,21 @@ func TestSync_Idempotent(t *testing.T) {
 	}
 }
 
+func TestSync_RepairsRedundantLockDirectory(t *testing.T) {
+	r := newHelloRepo(t)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatal(err)
+	}
+	addRedundantLockDir(t, root, "hello")
+
+	if _, err := eng.Sync(ctx, false, testIO()); err != nil {
+		t.Fatalf("Sync(redundant lock dir) error = %v, want nil", err)
+	}
+	assertCanonicalLockDir(t, root, "hello")
+}
+
 // AC-3: tamper protection; changing a locked dirhash makes sync fail without modifying the filesystem.
 func TestSync_TamperedLock(t *testing.T) {
 	r := newHelloRepo(t)
@@ -713,6 +812,153 @@ func TestGet_NameConflict(t *testing.T) {
 	if _, err := os.Stat(installedDir(root, "dup-b")); err != nil {
 		t.Error("alias directory was not installed")
 	}
+	assertStateDirs(t, root, "dup", "dup-b")
+	if _, err := eng.Verify(ctx, testIO()); err != nil {
+		t.Fatalf("Verify same-name aliases: %v", err)
+	}
+
+	// Removing one of two same-name entries must prune only its installation
+	// directory and lock record.
+	m, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, skill := range m.Skills {
+		if skill.DirName() == "dup" {
+			m.Skills = []modfile.ModSkill{skill}
+			break
+		}
+	}
+	if err := modfile.SaveMod(root, m); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Prune(ctx, testIO()); err != nil {
+		t.Fatalf("Prune aliased duplicate: %v", err)
+	}
+	if _, err := os.Stat(installedDir(root, "dup")); err != nil {
+		t.Errorf("Prune removed retained same-name entry: %v", err)
+	}
+	if _, err := os.Stat(installedDir(root, "dup-b")); !os.IsNotExist(err) {
+		t.Errorf("Prune kept removed aliased entry: %v", err)
+	}
+	assertStateDirs(t, root, "dup")
+}
+
+func TestGet_AliasChangeReportsRetainedDirectory(t *testing.T) {
+	r := newHelloRepo(t)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "old-hello", testIO()); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	commandIO := testIO()
+	commandIO.Out = &out
+	rep, err := eng.Get(ctx, r.URL+"@v1.0.0", "new-hello", commandIO)
+	if err != nil {
+		t.Fatalf("Get(same source with new alias) error = %v, want nil", err)
+	}
+	notes := strings.Join(rep.Notes, "\n")
+	for _, want := range []string{"old-hello", "new-hello", "skillmod prune"} {
+		if !strings.Contains(notes, want) {
+			t.Errorf("Get(same source with new alias) notes = %q, want substring %q", notes, want)
+		}
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("Get(same source with new alias) output = %q, want substring %q", out.String(), want)
+		}
+	}
+	for _, dirName := range []string{"old-hello", "new-hello"} {
+		if _, err := os.Stat(installedDir(root, dirName)); err != nil {
+			t.Errorf("Get(same source with new alias) retained directory %q error = %v, want nil", dirName, err)
+		}
+	}
+}
+
+// Spellings that differ only in letter case map to one directory on Windows
+// and macOS; a second get from a different source must fail with both
+// spellings named. Runs on every OS because the conflict fires before any
+// directory is written.
+func TestGet_CaseOnlyNameConflictAcrossSources(t *testing.T) {
+	rA := testutil.NewRepo(t)
+	rA.WriteSkill("", "demo")
+	rA.CommitAll("init")
+	rA.Tag("v1.0.0")
+	urlA := rA.FinishNamed("repo-a")
+	rB := testutil.NewRepo(t)
+	rB.WriteSkill("", "Demo")
+	rB.CommitAll("init")
+	rB.Tag("v1.0.0")
+	urlB := rB.FinishNamed("repo-b")
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, urlA+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatal(err)
+	}
+	// Re-getting the same source stays idempotent.
+	if _, err := eng.Get(ctx, urlA+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("idempotent re-get: %v", err)
+	}
+	_, err := eng.Get(ctx, urlB+"@v1.0.0", "", testIO())
+	var conflict *engine.NameConflictError
+	if !errors.As(err, &conflict) || conflict.OtherName == "" {
+		t.Fatalf("second Get error = %v (%T), want case-only NameConflictError", err, err)
+	}
+	if conflict.Name != "demo" || conflict.OtherName != "Demo" {
+		t.Fatalf("conflict spellings = %q, %q; want demo, Demo", conflict.Name, conflict.OtherName)
+	}
+	// A case-variant alias collides too, while a distinct alias installs.
+	_, err = eng.Get(ctx, urlB+"@v1.0.0", "DEMO", testIO())
+	if !errors.As(err, &conflict) || conflict.OtherName == "" {
+		t.Fatalf("alias DEMO error = %v (%T), want case-only NameConflictError", err, err)
+	}
+	if _, err := eng.Get(ctx, urlB+"@v1.0.0", "capital-demo", testIO()); err != nil {
+		t.Fatalf("distinct alias get: %v", err)
+	}
+	assertStateDirs(t, root, "demo", "capital-demo")
+}
+
+// Two skills in one repository whose frontmatter names differ only by case
+// map to one installation directory and collide within one batch. The
+// directories themselves must not collide (that would be rejected earlier by
+// snapshot path validation), so they live in differently named subdirs. The
+// fixture needs a case-sensitive filesystem to build both directories.
+func TestGet_CaseOnlyNameConflictWithinOneRepo(t *testing.T) {
+	if caseInsensitiveFS(t.TempDir()) {
+		t.Skip("requires a case-sensitive filesystem")
+	}
+	r := testutil.NewRepo(t)
+	r.Write("README.md", "collection\n")
+	r.WriteSkill("skills/one", "Demo")
+	r.WriteSkill("skills/two", "demo")
+	r.CommitAll("init")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	_, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO())
+	var conflict *engine.NameConflictError
+	if !errors.As(err, &conflict) || conflict.OtherName == "" {
+		t.Fatalf("batch Get error = %v (%T), want case-only NameConflictError", err, err)
+	}
+	// Convention: Name is the existing directory spelling, OtherName the
+	// incoming one. The first discovered skill (Demo, in skills/one) is the
+	// existing entry, so it is Name.
+	if conflict.Name != "Demo" || conflict.OtherName != "demo" {
+		t.Fatalf("conflict spellings = %q, %q; want Demo, demo", conflict.Name, conflict.OtherName)
+	}
+}
+
+func caseInsensitiveFS(dir string) bool {
+	probe := filepath.Join(dir, "skillmod-case-probe")
+	if err := os.WriteFile(probe, []byte("x"), 0o644); err != nil {
+		return true // fail safe: skip when the probe cannot be created
+	}
+	defer func() { _ = os.Remove(probe) }()
+	_, err := os.Stat(filepath.Join(dir, "SKILLMOD-CASE-PROBE"))
+	return err == nil
 }
 
 // AC-9: protect local modifications; sync does not overwrite them and reports a conflict, while --yes keeps and skips automatically.
@@ -924,6 +1170,62 @@ func TestInit_ScansAllKnownAdapters(t *testing.T) {
 	}
 }
 
+func TestInit_PreservesSameNameAliasDirectories(t *testing.T) {
+	root := t.TempDir()
+	for _, dirName := range []string{"dup", "dup-b"} {
+		dir := filepath.Join(root, ".agents", "skills", dirName)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := "---\nname: dup\ndescription: local\n---\n# local\n"
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatal(err)
+	}
+	assertStateDirs(t, root, "dup", "dup-b")
+}
+
+func TestInit_SkipsDirectoriesThatCannotBeAliases(t *testing.T) {
+	root := t.TempDir()
+	writeSkill := func(dirName, skillName string) {
+		t.Helper()
+		dir := filepath.Join(root, ".agents", "skills", dirName)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := "---\nname: " + skillName + "\ndescription: local\n---\n# local\n"
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeSkill("kept", "kept")
+	writeSkill("café", "unicode-alias")
+	writeSkill("a b", "space-alias")
+
+	eng := newEngine(t, root, t.TempDir())
+	rep, err := eng.Init(ctx, false, testIO())
+	if err != nil {
+		t.Fatalf("Init(with directories that cannot be aliases) error = %v, want nil", err)
+	}
+	assertStateDirs(t, root, "kept")
+	notes := strings.Join(rep.Notes, "\n")
+	for _, want := range []string{"café", "a b", "alias"} {
+		if !strings.Contains(notes, want) {
+			t.Errorf("Init(with directories that cannot be aliases) notes = %q, want substring %q", notes, want)
+		}
+	}
+	for _, dirName := range []string{"café", "a b"} {
+		if _, err := os.Stat(installedDir(root, dirName)); err != nil {
+			t.Errorf("Init(with directories that cannot be aliases) source directory %q error = %v, want nil", dirName, err)
+		}
+	}
+}
+
 // update advances tagged entries to latest and pseudo-version entries to a new pseudo-version at HEAD.
 func TestUpdate(t *testing.T) {
 	r := newHelloRepo(t)
@@ -956,6 +1258,82 @@ func TestUpdate(t *testing.T) {
 	}
 	if rep.Entries[0].Note != i18n.Text("already up to date") {
 		t.Errorf("second update = %+v, want already up to date", rep.Entries[0])
+	}
+}
+
+func TestUpdate_RepairsRedundantLockDirectory(t *testing.T) {
+	r := newHelloRepo(t)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatal(err)
+	}
+	addRedundantLockDir(t, root, "hello")
+
+	if _, err := eng.Update(ctx, nil, testIO()); err != nil {
+		t.Fatalf("Update(redundant lock dir) error = %v, want nil", err)
+	}
+	assertCanonicalLockDir(t, root, "hello")
+}
+
+func TestUpdate_SameNameAliasesRemainIndependent(t *testing.T) {
+	newRepo := func(file string) *testutil.Repo {
+		t.Helper()
+		r := testutil.NewRepo(t)
+		r.WriteSkill("", "dup", file)
+		r.CommitAll("v1.0")
+		r.Tag("v1.0.0")
+		r.Finish()
+		return r
+	}
+	r1, r2 := newRepo("first.txt"), newRepo("second.txt")
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r1.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Get(ctx, r2.URL+"@v1.0.0", "dup-b", testIO()); err != nil {
+		t.Fatal(err)
+	}
+
+	r1.Write("first-v1.1.txt", "first update\n")
+	r1.CommitAll("v1.1")
+	r1.Evolve("v1.1.0", false)
+	r2.Write("second-v1.2.txt", "second update\n")
+	r2.CommitAll("v1.2")
+	r2.Evolve("v1.2.0", false)
+
+	if _, err := eng.Update(ctx, []string{"dup-b"}, testIO()); err != nil {
+		t.Fatalf("Update(alias): %v", err)
+	}
+	m, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	versions := map[string]string{}
+	for _, skill := range m.Skills {
+		versions[skill.DirName()] = skill.Version
+	}
+	if versions["dup"] != "v1.0.0" || versions["dup-b"] != "v1.2.0" {
+		t.Fatalf("versions after alias update = %v, want dup=v1.0.0 and dup-b=v1.2.0", versions)
+	}
+
+	if _, err := eng.Update(ctx, []string{"dup"}, testIO()); err != nil {
+		t.Fatalf("Update(published name): %v", err)
+	}
+	m, err = modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	versions = map[string]string{}
+	for _, skill := range m.Skills {
+		versions[skill.DirName()] = skill.Version
+	}
+	if versions["dup"] != "v1.1.0" || versions["dup-b"] != "v1.2.0" {
+		t.Fatalf("versions after name update = %v, want dup=v1.1.0 and dup-b=v1.2.0", versions)
+	}
+	if _, err := eng.Verify(ctx, testIO()); err != nil {
+		t.Fatalf("Verify same-name updates: %v", err)
 	}
 }
 
@@ -1119,6 +1497,175 @@ func TestPrune(t *testing.T) {
 		if lk.Name == "bb" {
 			t.Error("lock still contains the stale entry")
 		}
+	}
+}
+
+// dry-run must list what would be deleted without requiring confirmation,
+// even in a non-interactive context (regression: the confirmation gate used
+// to reject --dry-run with advice that suggested using --dry-run).
+func TestPrune_DryRunSkipsConfirmation(t *testing.T) {
+	r := newHelloRepo(t)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatal(err)
+	}
+	m, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Skills = nil
+	if err := modfile.SaveMod(root, m); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	rep, err := eng.Prune(ctx, engine.IO{Out: &out, Err: io.Discard, DryRun: true})
+	if err != nil {
+		t.Fatalf("prune --dry-run was gated by confirmation: %v", err)
+	}
+	if len(rep.Entries) == 0 || rep.Entries[0].Action != "prune" {
+		t.Fatalf("dry-run entries = %+v, want the stale install listed", rep.Entries)
+	}
+	if _, err := os.Stat(installedDir(root, "hello")); err != nil {
+		t.Error("dry-run deleted files despite the never-delete contract")
+	}
+	if !strings.Contains(out.String(), "will be deleted") {
+		t.Errorf("dry-run output %q is missing the deletion list", out.String())
+	}
+}
+
+// The --dry-run flag promises to print the execution plan; sync must not be
+// silent when everything is already consistent (regression: the early return
+// used to happen before any output).
+func TestSync_DryRunPrintsPlan(t *testing.T) {
+	r := newHelloRepo(t)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	rep, err := eng.Sync(ctx, false, engine.IO{Out: &out, Err: io.Discard, DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Entries) == 0 {
+		t.Fatalf("dry-run entries = %+v, want the plan", rep.Entries)
+	}
+	if !strings.Contains(out.String(), "dry-run: everything is already consistent") {
+		t.Errorf("dry-run output = %q, want a plan summary", out.String())
+	}
+}
+
+// A hand-edited remote→local conversion leaves the remote lock record behind;
+// sync must replace it with a fresh local baseline so verify stops reporting
+// drift and the follow-up guidance no longer loops (verify says sync, sync
+// used to say init).
+func TestSync_ReestablishesBaselineAfterRemoteToLocalConversion(t *testing.T) {
+	r := newHelloRepo(t)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatal(err)
+	}
+	m, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Skills[0] = modfile.ModSkill{Name: m.Skills[0].Name, Local: true}
+	if err := modfile.SaveMod(root, m); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := eng.Sync(ctx, false, testIO())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lk := loadLockSkill(t, root, "hello")
+	if lk.Source != "" || lk.Version != "" || lk.Commit != "" || lk.Dirhash == "" {
+		t.Fatalf("lock record after conversion = %+v, want a fresh local baseline", lk)
+	}
+	reported := false
+	for _, en := range rep.Entries {
+		if en.Name == "hello" && strings.Contains(en.Note, "re-established") {
+			reported = true
+		}
+	}
+	if !reported {
+		t.Fatalf("sync entries = %+v, want the baseline re-establishment reported", rep.Entries)
+	}
+	if _, err := eng.Verify(ctx, testIO()); err != nil {
+		t.Fatalf("verify after baseline re-establishment = %v, want no drift", err)
+	}
+}
+
+// The lock records the installation directory, so prune still locates and
+// removes an aliased install after the alias was removed from SKILL.mod.
+func TestPrune_AliasedInstallAfterAliasRemoval(t *testing.T) {
+	r := newHelloRepo(t)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "aliased-hello", testIO()); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadLockSkill(t, root, "hello").Dir; got != "aliased-hello" {
+		t.Errorf("aliased lock entry Dir = %q, want aliased-hello", got)
+	}
+
+	// Remove the entry (and its alias) from the mod file.
+	m, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Skills = nil
+	if err := modfile.SaveMod(root, m); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Prune(ctx, testIO()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(installedDir(root, "aliased-hello")); !os.IsNotExist(err) {
+		t.Error("prune did not delete the aliased directory recorded in the lock")
+	}
+	l, err := modfile.LoadLock(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(l.Skills) != 0 {
+		t.Errorf("lock = %+v, want the stale aliased entry removed", l.Skills)
+	}
+}
+
+func TestPrune_DoesNotDeleteDirectoryStillDeclaredWithNewSource(t *testing.T) {
+	r := newHelloRepo(t)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Skills[0].Source = "file:///replacement/repo.git"
+	if err := modfile.SaveMod(root, m); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Prune(ctx, testIO()); err != nil {
+		t.Fatalf("Prune after source edit: %v", err)
+	}
+	if _, err := os.Stat(installedDir(root, "hello")); err != nil {
+		t.Fatalf("Prune deleted an installation directory still declared in SKILL.mod: %v", err)
+	}
+	l, err := modfile.LoadLock(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(l.Skills) != 1 {
+		t.Fatalf("lock entries after prune = %+v, want active directory lock retained for sync", l.Skills)
 	}
 }
 
