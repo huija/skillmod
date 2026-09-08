@@ -40,24 +40,6 @@ var (
 	Version = "dev"
 )
 
-// Error renders the what/why/advice template required by the PRD.
-type Error struct {
-	What   string // what happened
-	Why    string // diagnosed cause
-	Advice string // suggested next command or action
-}
-
-func (e *Error) Error() string {
-	s := i18n.Text("Error: ") + e.What
-	if e.Why != "" {
-		s += i18n.Text("\nCause: ") + e.Why
-	}
-	if e.Advice != "" {
-		s += i18n.Text("\nAdvice: ") + e.Advice
-	}
-	return s
-}
-
 // NewRootCmd assembles the root command and all subcommands.
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
@@ -123,10 +105,15 @@ func newEngine() (*engine.Engine, error) {
 }
 
 // newIO configures I/O channels from global flags and terminal state.
+// In --json mode stdout must carry only the machine-readable report, so
+// human-readable engine summaries are routed to stderr.
 func newIO(cmd *cobra.Command) engine.IO {
+	out := cmd.OutOrStdout()
+	if flagJSON {
+		out = cmd.ErrOrStderr()
+	}
 	io := engine.IO{
-		Out:    cmd.OutOrStdout(),
-		Err:    cmd.ErrOrStderr(),
+		Out:    out,
 		Yes:    flagYes,
 		DryRun: flagDryRun,
 	}
@@ -153,6 +140,6 @@ func output(cmd *cobra.Command, rep *engine.Report) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(cmd.OutOrStdout(), string(data))
-	return nil
+	_, err = fmt.Fprintln(cmd.OutOrStdout(), string(data))
+	return err
 }

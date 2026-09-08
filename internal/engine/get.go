@@ -225,12 +225,10 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 		return nil, err
 	}
 	if err := modfile.SaveMod(e.Root, m); err != nil {
-		finalize(false)
-		return nil, err
+		return nil, errors.Join(err, finalize(false))
 	}
 	if err := modfile.SaveLock(e.Root, lock); err != nil {
-		finalize(false)
-		return nil, err
+		return nil, errors.Join(err, finalize(false))
 	}
 	if err := finalize(true); err != nil {
 		return nil, err
@@ -486,6 +484,9 @@ func skillCandidates(root string) ([]skillCandidate, error) {
 		if !hasSkillManifest(dir) {
 			return nil
 		}
+		if strings.Contains(subdir, "@") {
+			return fmt.Errorf(i18n.Text("subdirectory must not contain @: %q"), subdir)
+		}
 		metadata, err := source.SkillMetadataFromDir(dir)
 		if err != nil {
 			return err
@@ -552,7 +553,7 @@ func candidateAddress(repo, subdir string) string {
 	if subdir == "" {
 		return "skillmod get " + repo
 	}
-	return "skillmod get " + repo + "//" + subdir
+	return "skillmod get " + repo + subdirSuffix(subdir)
 }
 
 func sameRemoteSource(a, b string) bool {

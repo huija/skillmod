@@ -131,9 +131,58 @@ func TestInstallRestoreAndCommit(t *testing.T) {
 	}
 	commit()
 	assertFileContent(t, filepath.Join(dst, "SKILL.md"), "new")
-	if _, err := os.Stat(dst + ".skillmod-bak"); !os.IsNotExist(err) {
-		t.Fatalf("backup remains after commit: %v", err)
+	matches, err := filepath.Glob(filepath.Join(parent, ".skillmod-bak-*"))
+	if err != nil {
+		t.Fatal(err)
 	}
+	if len(matches) != 0 {
+		t.Fatalf("backup remains after commit: %v", matches)
+	}
+}
+
+// Regression: updating one skill must not delete a sibling skill whose
+// directory name merely resembles the backup suffix. v0.0.1 reused the fixed
+// dst+".skillmod-bak" path and removed any directory already occupying it.
+func TestInstallDoesNotDeleteSiblingBackupNamedSkill(t *testing.T) {
+	src := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "SKILL.md"), []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	parent := t.TempDir()
+	dst := filepath.Join(parent, "demo")
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dst, "SKILL.md"), []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sibling := filepath.Join(parent, "demo.skillmod-bak")
+	if err := os.MkdirAll(sibling, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sibling, "SKILL.md"), []byte("sibling"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	restore, _, err := Install(src, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFileContent(t, filepath.Join(dst, "SKILL.md"), "new")
+	assertFileContent(t, filepath.Join(sibling, "SKILL.md"), "sibling")
+	if err := restore(); err != nil {
+		t.Fatal(err)
+	}
+	assertFileContent(t, filepath.Join(dst, "SKILL.md"), "old")
+	assertFileContent(t, filepath.Join(sibling, "SKILL.md"), "sibling")
+
+	_, commit2, err := Install(src, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit2()
+	assertFileContent(t, filepath.Join(dst, "SKILL.md"), "new")
+	assertFileContent(t, filepath.Join(sibling, "SKILL.md"), "sibling")
 }
 
 func TestInstallNewDestinationCanBeRestored(t *testing.T) {

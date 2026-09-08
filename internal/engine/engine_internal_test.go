@@ -412,8 +412,12 @@ func TestApplyInstallsCommitAndRollback(t *testing.T) {
 			t.Fatal(err)
 		}
 		assertInstallationContent(t, target, "new")
-		if _, err := os.Stat(target + ".skillmod-bak"); !os.IsNotExist(err) {
-			t.Fatalf("backup remains after commit: %v", err)
+		matches, err := filepath.Glob(filepath.Join(filepath.Dir(target), ".skillmod-bak-*"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(matches) != 0 {
+			t.Fatalf("backup remains after commit: %v", matches)
 		}
 	})
 
@@ -437,7 +441,7 @@ func TestApplyInstallsCommitAndRollback(t *testing.T) {
 			{name: "good", contentDir: src, targets: []string{target}},
 			{name: "bad", contentDir: filepath.Join(t.TempDir(), "missing"), targets: []string{filepath.Join(t.TempDir(), "bad")}},
 		}
-		if _, err := applyInstalls(plans); err == nil || !strings.Contains(err.Error(), "all changes were rolled back") {
+		if _, err := applyInstalls(plans); err == nil || !strings.Contains(err.Error(), "rolling back changes") {
 			t.Fatalf("applyInstalls error = %v", err)
 		}
 		assertInstallationContent(t, target, "old")

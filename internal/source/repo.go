@@ -37,7 +37,7 @@ func (s *Source) openRepo(ctx context.Context, repo string) (dir string, cleanup
 	}
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		if ephemeral {
-			os.RemoveAll(root)
+			_ = os.RemoveAll(root)
 		}
 		return "", nil, err
 	}
@@ -46,7 +46,7 @@ func (s *Source) openRepo(ctx context.Context, repo string) (dir string, cleanup
 	unlock, err := filelock.Lock(dir + ".lock")
 	if err != nil {
 		if ephemeral {
-			os.RemoveAll(root)
+			_ = os.RemoveAll(root)
 		}
 		return "", nil, err
 	}
@@ -163,10 +163,19 @@ func (s *Source) fetchTarget(ctx context.Context, dir, commit, fetchRef string) 
 	}
 
 	// Some servers reject direct SHA fetches. Fall back to advertised heads/tags,
-	// including their history, matching Go's direct VCS strategy.
-	allRefs := []string{"fetch", "-f", "--filter=blob:none", "--quiet", "origin", "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"}
+	// including their history, matching Go's direct VCS strategy. Earlier
+	// --depth=1 fetches leave shallow boundaries that truncate history, so a
+	// shallow clone must unshallow first; otherwise an old commit that is still
+	// in the remote's history would be reported as nonexistent.
+	var depth []string
+	if isShallow(dir) {
+		depth = append(depth, "--unshallow")
+	}
+	allRefs := append([]string{"fetch", "-f", "--filter=blob:none", "--quiet", "origin"}, depth...)
+	allRefs = append(allRefs, "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*")
 	if _, err := s.run(ctx, dir, allRefs...); err != nil {
-		plain := []string{"fetch", "-f", "--quiet", "origin", "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"}
+		plain := append([]string{"fetch", "-f", "--quiet", "origin"}, depth...)
+		plain = append(plain, "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*")
 		if _, plainErr := s.run(ctx, dir, plain...); plainErr != nil {
 			return fmt.Errorf(i18n.Text("failed to fetch %s@%s: %w"), repoOrigin(dir), shortSHA(commit), plainErr)
 		}
@@ -175,6 +184,14 @@ func (s *Source) fetchTarget(ctx context.Context, dir, commit, fetchRef string) 
 		return fmt.Errorf(i18n.Text("commit %s is not in the history of the remote's public heads or tags"), commit)
 	}
 	return nil
+}
+
+// isShallow reports whether the bare repository truncates history at shallow
+// boundaries. Every fetch uses --depth, so the marker file is created by Git
+// exactly when shallow grafts are in effect.
+func isShallow(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, "shallow"))
+	return err == nil
 }
 
 func repoOrigin(dir string) string {

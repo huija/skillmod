@@ -119,8 +119,9 @@ func CopyDir(src, dst string) error {
 	})
 }
 
-// Install atomically installs srcDir at dst by copying to a sibling temporary directory, backing up dst, and renaming.
-// It returns restore, which swaps the backup back in, and commit, which removes the backup.
+// Install atomically installs srcDir at dst by copying to a sibling temporary directory, backing up dst
+// at a unique sibling path, and renaming. It returns restore, which swaps the backup back in, and
+// commit, which removes the backup. The unique backup path never deletes an unrelated directory.
 func Install(srcDir, dst string) (restore func() error, commit func(), err error) {
 	parent := filepath.Dir(dst)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
@@ -131,26 +132,39 @@ func Install(srcDir, dst string) (restore func() error, commit func(), err error
 		return nil, nil, err
 	}
 	// MkdirTemp created the directory, but CopyDir requires it not to exist, so remove it first.
-	os.RemoveAll(tmp)
+	if err := os.RemoveAll(tmp); err != nil {
+		return nil, nil, err
+	}
 	if err := CopyDir(srcDir, tmp); err != nil {
-		os.RemoveAll(tmp)
+		_ = os.RemoveAll(tmp)
 		return nil, nil, fmt.Errorf(i18n.Text("copy to temporary directory failed: %w"), err)
 	}
 
+	// A unique backup path never collides with a user skill whose name merely
+	// resembles the backup suffix, so no pre-existing directory is deleted here.
 	bak := ""
 	if _, err := os.Lstat(dst); err == nil {
-		bak = dst + ".skillmod-bak"
-		os.RemoveAll(bak)
+		b, err := os.MkdirTemp(parent, ".skillmod-bak-*")
+		if err != nil {
+			_ = os.RemoveAll(tmp)
+			return nil, nil, err
+		}
+		// MkdirTemp created the directory, but Rename requires the target not to exist.
+		if err := os.RemoveAll(b); err != nil {
+			_ = os.RemoveAll(tmp)
+			return nil, nil, err
+		}
+		bak = b
 		if err := os.Rename(dst, bak); err != nil {
-			os.RemoveAll(tmp)
+			_ = os.RemoveAll(tmp)
 			return nil, nil, fmt.Errorf(i18n.Text("backing up the existing directory failed: %w"), err)
 		}
 	}
 	if err := os.Rename(tmp, dst); err != nil {
 		if bak != "" {
-			os.Rename(bak, dst) // Best-effort restoration.
+			_ = os.Rename(bak, dst) // Best-effort restoration.
 		}
-		os.RemoveAll(tmp)
+		_ = os.RemoveAll(tmp)
 		return nil, nil, fmt.Errorf(i18n.Text("writing to disk failed: %w"), err)
 	}
 
@@ -165,7 +179,7 @@ func Install(srcDir, dst string) (restore func() error, commit func(), err error
 	}
 	commit = func() {
 		if bak != "" {
-			os.RemoveAll(bak)
+			_ = os.RemoveAll(bak)
 		}
 	}
 	return restore, commit, nil

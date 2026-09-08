@@ -13,18 +13,16 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/huija/skillmod/internal/i18n"
 	"golang.org/x/mod/sumdb/dirhash"
 )
 
-// HashBlobs computes an h1: hash for content addressed by slash-separated subtree-relative paths.
+// HashBlobs computes an h1: hash for content addressed by slash-separated
+// subtree-relative paths. Hash1 copies and sorts the file list itself.
 func HashBlobs(files []string, open func(string) (io.ReadCloser, error)) (string, error) {
-	sorted := append([]string(nil), files...)
-	sort.Strings(sorted)
-	return dirhash.Hash1(sorted, open)
+	return dirhash.Hash1(files, open)
 }
 
 // HashDir recomputes an h1: hash for a directory by walking regular files and slash-normalizing paths.

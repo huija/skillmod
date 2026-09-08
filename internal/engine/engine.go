@@ -42,7 +42,7 @@ type Engine struct {
 
 // IO contains the input, output, and confirmation channels for one command run.
 type IO struct {
-	Out, Err io.Writer
+	Out      io.Writer
 	Confirm  ui.Confirmer // nil means non-interactive and applies safe conflict defaults
 	Progress ui.Progress  // nil disables interactive activity updates
 	Yes      bool         // skip confirmation in CI
@@ -51,7 +51,7 @@ type IO struct {
 
 func (io IO) printf(format string, args ...any) {
 	if io.Out != nil {
-		fmt.Fprintf(io.Out, format+"\n", args...)
+		_, _ = fmt.Fprintf(io.Out, format+"\n", args...)
 	}
 }
 
@@ -685,6 +685,7 @@ type plannedInstall struct {
 // applyInstalls writes each installation atomically and rolls all of them back if installation fails.
 // On success it returns finalize; callers invoke finalize(true) after writing mod and lock to remove backups,
 // or finalize(false) on a write failure to restore old directories and keep declarations aligned with the filesystem.
+// finalize(false) describes any rollback failure, which callers join with the error that triggered it.
 func applyInstalls(plans []plannedInstall) (finalize func(ok bool) error, err error) {
 	type applied struct {
 		restore func() error
@@ -698,14 +699,17 @@ func applyInstalls(plans []plannedInstall) (finalize func(ok bool) error, err er
 				first = err
 			}
 		}
-		return first
+		if first != nil {
+			return fmt.Errorf(i18n.Text("rollback also failed: %w"), first)
+		}
+		return nil
 	}
 	for _, p := range plans {
 		for _, tgt := range p.targets {
 			restore, commit, err := install.Install(p.contentDir, tgt)
 			if err != nil {
-				rollback()
-				return nil, fmt.Errorf(i18n.Text("install %s to %s (all changes were rolled back): %w"), p.name, tgt, err)
+				primary := fmt.Errorf(i18n.Text("install %s to %s (rolling back changes): %w"), p.name, tgt, err)
+				return nil, errors.Join(primary, rollback())
 			}
 			dones = append(dones, applied{restore, commit})
 		}

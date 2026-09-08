@@ -5,7 +5,6 @@
 package ui
 
 import (
-	"bufio"
 	"bytes"
 	"slices"
 	"strings"
@@ -57,41 +56,6 @@ func TestChoose_EnglishPrompt(t *testing.T) {
 	}
 	if text := out.String(); !strings.Contains(text, "choose [1-2]") || !strings.Contains(text, "invalid choice; try again") {
 		t.Fatalf("English prompt = %q", text)
-	}
-}
-
-func TestChooseMany_ValidAndRetry(t *testing.T) {
-	var out bytes.Buffer
-	c := &interactive{
-		r: bufio.NewReader(strings.NewReader("1,x\n2, 1, 2\n")),
-		w: &out,
-	}
-	got := c.ChooseMany("pick", []Option{
-		{Label: "first", Description: "first description", Detail: "install first"},
-		{Label: "second", Description: "second description", Detail: "install second"},
-		{Label: "third", Description: "third description", Detail: "install third"},
-	})
-	if want := []int{1, 0}; !slices.Equal(got, want) {
-		t.Errorf("ChooseMany(valid retry input) = %v, want %v", got, want)
-	}
-	if text := out.String(); !strings.Contains(text, "invalid selection; try again") ||
-		!strings.Contains(text, "comma-separated") ||
-		!strings.Contains(text, "Description: first description") ||
-		!strings.Contains(text, "Install command: install first") {
-		t.Errorf("ChooseMany(valid retry input) output = %q, want retry and structured option details", text)
-	}
-}
-
-func TestChooseMany_EmptyAndEOFAbort(t *testing.T) {
-	for _, input := range []string{"\n", ""} {
-		c := &interactive{
-			r: bufio.NewReader(strings.NewReader(input)),
-			w: &bytes.Buffer{},
-		}
-		options := []Option{{Label: "first"}, {Label: "second"}}
-		if got := c.ChooseMany("pick", options); got != nil {
-			t.Errorf("ChooseMany(%q) = %v, want nil", input, got)
-		}
 	}
 }
 
@@ -148,6 +112,27 @@ func TestChooseMany_HuhKeepsEveryOptionOnOneLine(t *testing.T) {
 	}
 	if text := out.String(); strings.Contains(text, "\nforged line") || strings.Contains(text, "hidden") {
 		t.Errorf("ChooseMany(option with newline) output = %q, want a sanitized one-line option", text)
+	}
+}
+
+func TestChooseMany_HuhKeepsExpandedDetailsAfterSubmit(t *testing.T) {
+	t.Setenv("TERM", "xterm-256color")
+	input := strings.NewReader("d \r")
+	var out bytes.Buffer
+	selector := &interactive{tuiInput: input, w: &out}
+	options := []Option{{
+		Label:       "first",
+		Description: "first description",
+		Detail:      "skillmod get github.com/acme/first",
+	}}
+
+	got := selector.ChooseMany("pick", options)
+	if want := []int{0}; !slices.Equal(got, want) {
+		t.Fatalf("ChooseMany(d, space, enter) = %v, want %v; output = %q", got, want, out.String())
+	}
+	wantSuffix := "Description: first description\nInstall command: skillmod get github.com/acme/first\n"
+	if !strings.HasSuffix(out.String(), wantSuffix) {
+		t.Errorf("ChooseMany expanded output = %q, want suffix %q", out.String(), wantSuffix)
 	}
 }
 

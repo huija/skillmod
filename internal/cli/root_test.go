@@ -7,6 +7,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -19,6 +20,12 @@ import (
 	"github.com/huija/skillmod/internal/store"
 	"github.com/huija/skillmod/internal/testutil"
 )
+
+var errTestOutput = errors.New("test output failure")
+
+type errorWriter struct{}
+
+func (errorWriter) Write([]byte) (int, error) { return 0, errTestOutput }
 
 func TestMain(m *testing.M) { testutil.RunMain(m) }
 
@@ -60,21 +67,6 @@ func TestVersion(t *testing.T) {
 	}
 }
 
-func TestErrorLanguage(t *testing.T) {
-	err := &Error{What: "what", Why: "why", Advice: "advice"}
-
-	t.Setenv(i18n.Env, "en")
-	if got := err.Error(); got != "Error: what\nCause: why\nAdvice: advice" {
-		t.Fatalf("English error = %q", got)
-	}
-
-	t.Setenv(i18n.Env, "zh")
-	if got := err.Error(); got == "Error: what\nCause: why\nAdvice: advice" ||
-		!strings.Contains(got, "what") || !strings.Contains(got, "why") || !strings.Contains(got, "advice") {
-		t.Fatalf("localized error = %q", got)
-	}
-}
-
 func TestNewEngineAndIO(t *testing.T) {
 	preserveFlags(t)
 	project, storeRoot := isolateCLI(t)
@@ -96,8 +88,13 @@ func TestNewEngineAndIO(t *testing.T) {
 	flagYes = true
 	flagDryRun = true
 	got := newIO(cmd)
-	if got.Out != &stdout || got.Err != &stderr || !got.Yes || !got.DryRun {
+	if got.Out != &stdout || !got.Yes || !got.DryRun {
 		t.Fatalf("newIO = %+v", got)
+	}
+	flagJSON = true
+	got = newIO(cmd)
+	if got.Out != &stderr {
+		t.Fatalf("--json must route engine summaries to stderr; newIO = %+v", got)
 	}
 }
 
@@ -130,6 +127,29 @@ func TestOutputJSON(t *testing.T) {
 	}
 }
 
+func TestJSONCommandsReturnOutputErrors(t *testing.T) {
+	preserveFlags(t)
+	project, _ := isolateCLI(t)
+	if err := modfile.SaveMod(project, &modfile.Mod{SchemaVersion: modfile.SchemaVersion}); err != nil {
+		t.Fatalf("SaveMod(%q): %v", project, err)
+	}
+	if err := modfile.SaveLock(project, &modfile.Lock{}); err != nil {
+		t.Fatalf("SaveLock(%q): %v", project, err)
+	}
+
+	for _, name := range []string{"sync", "verify"} {
+		t.Run(name, func(t *testing.T) {
+			cmd := NewRootCmd()
+			cmd.SetOut(errorWriter{})
+			cmd.SetErr(io.Discard)
+			cmd.SetArgs([]string{"--json", name})
+			if err := cmd.Execute(); !errors.Is(err, errTestOutput) {
+				t.Errorf("skillmod --json %s error = %v, want errors.Is(errTestOutput)", name, err)
+			}
+		})
+	}
+}
+
 func TestCommandWiring(t *testing.T) {
 	preserveFlags(t)
 	isolateCLI(t)
@@ -143,8 +163,13 @@ func TestCommandWiring(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), `"action": "init"`) {
-		t.Fatalf("init JSON = %q", out.String())
+	// stdout must parse as JSON on its own; engine summaries go to stderr.
+	var rep engine.Report
+	if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+		t.Fatalf("init stdout is not valid JSON: %v\n%s", err, out.String())
+	}
+	if rep.Action != "init" {
+		t.Fatalf("init JSON = %+v", rep)
 	}
 
 	// Every remaining handler reaches the engine and returns the expected

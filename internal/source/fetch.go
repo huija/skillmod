@@ -57,12 +57,6 @@ func (e *NoSkillMDError) Error() string {
 	return i18n.Text("skill package is missing SKILL.md or has an invalid frontmatter name (contact the author to fix it): ") + e.Detail
 }
 
-// Fetch retrieves the complete repository tree at repo@commit, first attempting a targeted commit fetch
-// when no known ref is available.
-func (s *Source) Fetch(ctx context.Context, repo, commit string) (*Tree, error) {
-	return s.FetchRef(ctx, repo, commit, "")
-}
-
 // FetchRef uses one persistent bare repository per remote, fetches one complete
 // immutable repository revision, then reads its exact tree through Git objects.
 // No checkout occurs, so CRLF conversion and worktree filters cannot change bytes.
@@ -94,7 +88,7 @@ func (s *Source) FetchRef(ctx context.Context, repo, commit, fetchRef string) (*
 		return nil, err
 	}
 	tree := &Tree{Commit: commit, CommitTime: time.Unix(ct, 0).UTC()}
-	entries, err := parseLsTree(out, "")
+	entries, err := parseLsTree(out)
 	if err != nil {
 		return nil, err
 	}
@@ -137,9 +131,9 @@ type lsEntry struct {
 	mode, typ, sha, path string
 }
 
-// parseLsTree parses `git ls-tree -r -z` output in the form "<mode> <type> <sha>\t<path>\0".
-// Removing prefix yields a path relative to the subtree.
-func parseLsTree(out, prefix string) ([]lsEntry, error) {
+// parseLsTree parses `git ls-tree -r -z` output in the form "<mode> <type> <sha>\t<path>\0"
+// into entries whose paths are relative to the repository root.
+func parseLsTree(out string) ([]lsEntry, error) {
 	var entries []lsEntry
 	for _, rec := range strings.Split(strings.TrimRight(out, "\x00"), "\x00") {
 		if rec == "" {
@@ -157,13 +151,6 @@ func parseLsTree(out, prefix string) ([]lsEntry, error) {
 		mode, typ, sha := parts[0], parts[1], parts[2]
 		if typ != "blob" && typ != "commit" {
 			continue
-		}
-		if prefix != "" {
-			p, ok := strings.CutPrefix(path, prefix+"/")
-			if !ok {
-				continue
-			}
-			path = p
 		}
 		entries = append(entries, lsEntry{mode: mode, typ: typ, sha: sha, path: path})
 	}
@@ -275,9 +262,9 @@ func (s *Source) catFileBatch(ctx context.Context, dir string, entries []lsEntry
 	}
 	go func() {
 		for _, e := range entries {
-			io.WriteString(stdin, e.sha+"\n")
+			_, _ = io.WriteString(stdin, e.sha+"\n")
 		}
-		stdin.Close()
+		_ = stdin.Close()
 	}()
 
 	out := make(map[string][]byte, len(entries))
@@ -285,26 +272,26 @@ func (s *Source) catFileBatch(ctx context.Context, dir string, entries []lsEntry
 	for _, e := range entries {
 		header, err := r.ReadString('\n')
 		if err != nil {
-			cmd.Wait()
+			_ = cmd.Wait()
 			return nil, fmt.Errorf(i18n.Text("failed to read blob %s header: %w"), e.sha, err)
 		}
 		parts := strings.Fields(strings.TrimRight(header, "\n"))
 		if len(parts) != 3 || parts[1] != "blob" {
-			cmd.Wait()
+			_ = cmd.Wait()
 			return nil, fmt.Errorf(i18n.Text("blob %s is unreadable: %s"), e.sha, strings.TrimSpace(header))
 		}
 		size, err := strconv.Atoi(parts[2])
 		if err != nil {
-			cmd.Wait()
+			_ = cmd.Wait()
 			return nil, err
 		}
 		data := make([]byte, size)
 		if _, err := io.ReadFull(r, data); err != nil {
-			cmd.Wait()
+			_ = cmd.Wait()
 			return nil, fmt.Errorf(i18n.Text("failed to read blob %s contents: %w"), e.sha, err)
 		}
 		if _, err := r.ReadByte(); err != nil { // Separator newline after the blob.
-			cmd.Wait()
+			_ = cmd.Wait()
 			return nil, err
 		}
 		out[e.sha] = data
@@ -313,21 +300,6 @@ func (s *Source) catFileBatch(ctx context.Context, dir string, entries []lsEntry
 		return nil, fmt.Errorf("git cat-file: %w", err)
 	}
 	return out, nil
-}
-
-// SkillName reads the name field from SKILL.md frontmatter at the subtree root, the PRD's sole authority for local names.
-func (t *Tree) SkillName() (string, error) {
-	for _, f := range t.Files {
-		if f.Path != "SKILL.md" {
-			continue
-		}
-		name, err := ParseSkillName(string(f.Data))
-		if err != nil {
-			return "", err
-		}
-		return name, nil
-	}
-	return "", &NoSkillMDError{Detail: i18n.Text("SKILL.md is missing from the subtree root")}
 }
 
 // SkillMetadata describes the frontmatter fields used to identify a skill.
@@ -348,16 +320,6 @@ func SkillMetadataFromDir(dir string) (SkillMetadata, error) {
 // SkillNameFromDir reads the SKILL.md frontmatter name from a directory on disk for version-snapshot hits.
 func SkillNameFromDir(dir string) (string, error) {
 	metadata, err := SkillMetadataFromDir(dir)
-	if err != nil {
-		return "", err
-	}
-	return metadata.Name, nil
-}
-
-// ParseSkillName parses the name field from SKILL.md frontmatter using a minimal YAML subset:
-// it extracts a scalar `name:` from a block delimited by `---`, which covers canonical frontmatter.
-func ParseSkillName(content string) (string, error) {
-	metadata, err := ParseSkillMetadata(content)
 	if err != nil {
 		return "", err
 	}

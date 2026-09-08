@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"slices"
-	"strconv"
 	"strings"
 	"unicode"
 
@@ -113,15 +112,11 @@ func (i *interactive) Choose(prompt string, options []string) int {
 	}
 }
 
-// ChooseMany returns the selected zero-based indices. Terminal input uses
-// huh's Bubble Tea multi-select; a selector without TUI input retains the
-// comma-separated number interface.
+// ChooseMany returns the selected zero-based indices using huh's Bubble Tea
+// multi-select over the terminal input the selector was constructed with.
 func (i *interactive) ChooseMany(prompt string, options []Option) []int {
 	if len(options) == 0 {
 		return nil
-	}
-	if i.tuiInput == nil {
-		return i.chooseManyByNumber(prompt, options)
 	}
 
 	huhOptions := make([]huh.Option[int], len(options))
@@ -150,6 +145,14 @@ func (i *interactive) ChooseMany(prompt string, options []Option) []int {
 		Run()
 	if err != nil {
 		return nil
+	}
+	// Huh clears the form when it quits. Preserve explicitly expanded details
+	// as ordinary terminal output so confirming the selection does not make the
+	// second line disappear before the user can read it.
+	if collapsibleField.expanded {
+		if details := collapsibleField.details(); details != "" {
+			_, _ = fmt.Fprintln(i.w, details)
+		}
 	}
 	slices.Sort(selected)
 	return selected
@@ -201,50 +204,20 @@ func (m *collapsibleMultiSelect) refreshDetails() {
 		m.Description("")
 		return
 	}
+	m.Description(m.details())
+}
+
+func (m *collapsibleMultiSelect) details() string {
+	index, ok := m.Hovered()
+	if !ok || index < 0 || index >= len(m.options) {
+		return ""
+	}
 	option := m.options[index]
 	details := fmt.Sprintf("%s: %s", i18n.Text("Description"), description(option))
 	if command := cleanLine(option.Detail); command != "" {
 		details += fmt.Sprintf("\n%s: %s", i18n.Text("Install command"), command)
 	}
-	m.Description(details)
-}
-
-func (i *interactive) chooseManyByNumber(prompt string, options []Option) []int {
-	for {
-		if _, err := fmt.Fprintf(i.w, "%s\n", cleanLine(prompt)); err != nil {
-			return nil
-		}
-		for idx, option := range options {
-			if _, err := fmt.Fprintf(i.w, "  %d) %s\n", idx+1, cleanLine(option.Label)); err != nil {
-				return nil
-			}
-			if _, err := fmt.Fprintf(i.w, "     %s: %s\n", i18n.Text("Description"), description(option)); err != nil {
-				return nil
-			}
-			if detail := cleanLine(option.Detail); detail != "" {
-				if _, err := fmt.Fprintf(i.w, "     %s: %s\n", i18n.Text("Install command"), detail); err != nil {
-					return nil
-				}
-			}
-		}
-		if _, err := fmt.Fprintf(i.w, i18n.Text("select one or more [1-%d, comma-separated; empty to abort]: "), len(options)); err != nil {
-			return nil
-		}
-		line, err := i.r.ReadString('\n')
-		if err != nil || strings.TrimSpace(line) == "" {
-			if _, writeErr := fmt.Fprintln(i.w); writeErr != nil {
-				return nil
-			}
-			return nil
-		}
-		selected, ok := parseChoices(line, len(options))
-		if ok {
-			return selected
-		}
-		if _, err := fmt.Fprintln(i.w, i18n.Text("invalid selection; try again")); err != nil {
-			return nil
-		}
-	}
+	return details
 }
 
 func description(option Option) string {
@@ -266,21 +239,4 @@ func cleanLine(value string) string {
 		}
 	}, value)
 	return strings.Join(strings.Fields(value), " ")
-}
-
-func parseChoices(line string, optionCount int) ([]int, bool) {
-	seen := make(map[int]bool, optionCount)
-	var selected []int
-	for _, value := range strings.Split(strings.TrimSpace(line), ",") {
-		n, err := strconv.Atoi(strings.TrimSpace(value))
-		if err != nil || n < 1 || n > optionCount {
-			return nil, false
-		}
-		idx := n - 1
-		if !seen[idx] {
-			seen[idx] = true
-			selected = append(selected, idx)
-		}
-	}
-	return selected, len(selected) > 0
 }

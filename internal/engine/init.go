@@ -27,13 +27,8 @@ import (
 // It only reads existing skill files, refuses to run when SKILL.mod exists, and backs up and rebuilds with --force.
 func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 	modPath := filepath.Join(e.Root, modfile.ModFileName)
-	if _, err := os.Stat(modPath); err == nil {
-		if !force {
-			return nil, fmt.Errorf(i18n.Text("%s already exists\nAdvice: review it, then use --force to regenerate it (the original is backed up as SKILL.mod.bak)"), modPath)
-		}
-		if err := copyFile(modPath, modPath+".bak"); err != nil {
-			return nil, fmt.Errorf(i18n.Text("backup failed: %w"), err)
-		}
+	if _, err := os.Stat(modPath); err == nil && !force {
+		return nil, fmt.Errorf(i18n.Text("%s already exists\nAdvice: review it, then use --force to regenerate it (the original is backed up as SKILL.mod.bak)"), modPath)
 	}
 
 	// init is the migration and discovery entry point; scan all known platform directories independently of configured installation targets.
@@ -219,6 +214,12 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 	if io.DryRun {
 		rep.Notes = append(rep.Notes, i18n.Text("dry-run: no files were written"))
 		return rep, nil
+	}
+	// The backup happens at the write phase so --dry-run never overwrites it.
+	if _, err := os.Stat(modPath); err == nil {
+		if err := copyFile(modPath, modPath+".bak"); err != nil {
+			return nil, fmt.Errorf(i18n.Text("backup failed: %w"), err)
+		}
 	}
 	if err := modfile.SaveMod(e.Root, m); err != nil {
 		return nil, err

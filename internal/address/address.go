@@ -21,7 +21,7 @@ type Address struct {
 	Ref    string // explicit version reference; empty asks package resolve for the latest version
 }
 
-// String returns the canonical address, or <repo>[//<subdir>] when Ref is empty.
+// String returns the canonical address.
 func (a *Address) String() string {
 	s := a.Repo
 	if a.Subdir != "" {
@@ -68,18 +68,20 @@ func Parse(raw string) (*Address, error) {
 	return &Address{Repo: repo, Subdir: subdir, Ref: ref}, nil
 }
 
-// splitRef splits at the final @ that acts as a version separator.
-// A separator is valid only when the suffix contains no slash, naturally excluding git@host:path.
+// splitRef splits at the final @ that acts as a version separator. Explicit
+// versions are deliberately limited to a tag name without slashes or a commit
+// SHA; slash-bearing forms remain part of the address.
 func splitRef(s string) (base, ref string, err error) {
-	i := strings.LastIndex(s, "@")
+	i := strings.LastIndexByte(s, '@')
 	if i < 0 {
 		return s, "", nil
 	}
-	if suffix := s[i+1:]; suffix == "" || strings.Contains(suffix, "/") {
-		if suffix == "" {
-			return "", "", fmt.Errorf(i18n.Text("missing version reference after @: %q"), s)
-		}
-		return s, "", nil // git@host:path form with no ref
+	suffix := s[i+1:]
+	if suffix == "" {
+		return "", "", fmt.Errorf(i18n.Text("missing version reference after @: %q"), s)
+	}
+	if strings.ContainsAny(suffix, ":/") {
+		return s, "", nil // scp-like form with no ref
 	}
 	if s[:i] == "" {
 		return "", "", fmt.Errorf(i18n.Text("missing repository address: %q"), s)
@@ -120,6 +122,9 @@ func normalizeRepo(repo string) string {
 func cleanSubdir(s string) (string, error) {
 	if strings.Contains(s, "\\") {
 		return "", fmt.Errorf(i18n.Text("subdirectory must use / separators: %q"), s)
+	}
+	if strings.Contains(s, "@") {
+		return "", fmt.Errorf(i18n.Text("subdirectory must not contain @: %q"), s)
 	}
 	c := path.Clean(s)
 	if c != s || c == "." || c == ".." || strings.HasPrefix(c, "../") {

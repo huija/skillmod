@@ -213,11 +213,15 @@ func IsSHA(s string) bool {
 		return false
 	}
 	for _, c := range s {
-		if !('0' <= c && c <= '9' || 'a' <= c && c <= 'f') {
+		if !isLowerHex(c) {
 			return false
 		}
 	}
 	return true
+}
+
+func isLowerHex(c rune) bool {
+	return '0' <= c && c <= '9' || 'a' <= c && c <= 'f'
 }
 
 // PseudoVersion creates v0.0.0-<UTC commit time: yyyymmddhhmmss>-<sha12>,

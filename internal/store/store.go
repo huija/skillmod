@@ -440,7 +440,7 @@ func (s *Store) PutSnapshot(info SnapshotInfo, files []source.File) (*Snapshot, 
 	if err != nil {
 		return nil, err
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 
 	if err := writeTree(tmp, files); err != nil {
 		return nil, err
@@ -465,13 +465,13 @@ func (s *Store) PutSnapshot(info SnapshotInfo, files []source.File) (*Snapshot, 
 		return nil, err
 	}
 	metaTmpName := metaTmp.Name()
-	defer os.Remove(metaTmpName)
+	defer func() { _ = os.Remove(metaTmpName) }()
 	if err := metaTmp.Chmod(0o600); err != nil {
-		metaTmp.Close()
+		_ = metaTmp.Close()
 		return nil, err
 	}
 	if _, err := metaTmp.Write(meta); err != nil {
-		metaTmp.Close()
+		_ = metaTmp.Close()
 		return nil, err
 	}
 	if err := metaTmp.Close(); err != nil {
@@ -648,13 +648,13 @@ func (s *Store) PutRepoRefs(repo string, refs *resolve.Refs) error {
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() { _ = os.Remove(tmpName) }()
 	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
@@ -726,13 +726,13 @@ func (s *Store) PutResolved(repo, subdir, ref string, entry ResolveEntry) error 
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() { _ = os.Remove(tmpName) }()
 	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {

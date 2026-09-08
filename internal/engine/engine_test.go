@@ -47,7 +47,7 @@ func newEngine(t *testing.T, root, storeDir string) *engine.Engine {
 }
 
 func testIO() engine.IO {
-	return engine.IO{Out: io.Discard, Err: io.Discard, Yes: true}
+	return engine.IO{Out: io.Discard, Yes: true}
 }
 
 // Standard single-skill repository with a root hello skill tagged v1.0.0.
@@ -260,7 +260,7 @@ func TestGet_SelectsFromRootAndSkillsDirectory(t *testing.T) {
 	chooser := &getSkillChooser{choices: []int{1}}
 	root := t.TempDir()
 	eng := newEngine(t, root, t.TempDir())
-	io := engine.IO{Out: io.Discard, Err: io.Discard, Confirm: chooser}
+	io := engine.IO{Out: io.Discard, Confirm: chooser}
 	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", io); err != nil {
 		t.Fatalf("Get collection root: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestGet_RequiresExplicitSelectionForMultipleSkills(t *testing.T) {
 	r.Finish()
 
 	eng := newEngine(t, t.TempDir(), t.TempDir())
-	_, err := eng.Get(ctx, r.URL+"@v1.0.0", "", engine.IO{Out: io.Discard, Err: io.Discard})
+	_, err := eng.Get(ctx, r.URL+"@v1.0.0", "", engine.IO{Out: io.Discard})
 	if err == nil || !strings.Contains(err.Error(), "select one or more") ||
 		!strings.Contains(err.Error(), "//nested-skill") || strings.Contains(err.Error(), "//skills/nested") {
 		t.Fatalf("Get multiple candidates error = %v", err)
@@ -1135,6 +1135,77 @@ func TestInit_RefuseExisting(t *testing.T) {
 	}
 }
 
+// Regression: the SKILL.mod backup belongs to the write phase, so --dry-run
+// must neither create a backup nor overwrite an existing one.
+func TestInit_DryRunDoesNotTouchBackup(t *testing.T) {
+	setup := func(t *testing.T, backup string) (root, modPath string) {
+		t.Helper()
+		root = t.TempDir()
+		skillDir := installedDir(root, "demo")
+		if err := os.MkdirAll(skillDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"),
+			[]byte("---\nname: demo\n---\n# demo\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		modPath = filepath.Join(root, modfile.ModFileName)
+		if err := os.WriteFile(modPath, []byte("old mod\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if backup != "" {
+			if err := os.WriteFile(modPath+".bak", []byte(backup), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return root, modPath
+	}
+
+	t.Run("does not create a backup", func(t *testing.T) {
+		root, modPath := setup(t, "")
+		dryRun := testIO()
+		dryRun.DryRun = true
+		if _, err := newEngine(t, root, t.TempDir()).Init(ctx, true, dryRun); err != nil {
+			t.Fatalf("init --force --dry-run: %v", err)
+		}
+		if _, err := os.Stat(modPath + ".bak"); !os.IsNotExist(err) {
+			t.Errorf("dry-run created a backup: %v", err)
+		}
+		if got := readFileString(t, modPath); got != "old mod\n" {
+			t.Errorf("dry-run rewrote SKILL.mod = %q", got)
+		}
+	})
+
+	t.Run("does not overwrite an existing backup", func(t *testing.T) {
+		root, modPath := setup(t, "previous backup\n")
+		eng := newEngine(t, root, t.TempDir())
+		dryRun := testIO()
+		dryRun.DryRun = true
+		if _, err := eng.Init(ctx, true, dryRun); err != nil {
+			t.Fatalf("init --force --dry-run: %v", err)
+		}
+		if got := readFileString(t, modPath+".bak"); got != "previous backup\n" {
+			t.Errorf("dry-run overwrote the backup = %q", got)
+		}
+		// The write phase backs up the pre-regeneration SKILL.mod.
+		if _, err := eng.Init(ctx, true, testIO()); err != nil {
+			t.Fatalf("init --force: %v", err)
+		}
+		if got := readFileString(t, modPath+".bak"); got != "old mod\n" {
+			t.Errorf("backup after --force = %q, want the previous SKILL.mod", got)
+		}
+	})
+}
+
+func readFileString(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
 func TestInit_ScansAllKnownAdapters(t *testing.T) {
 	root := t.TempDir()
 	writeLocalSkill := func(base, name string) {
@@ -1520,7 +1591,7 @@ func TestPrune_DryRunSkipsConfirmation(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	rep, err := eng.Prune(ctx, engine.IO{Out: &out, Err: io.Discard, DryRun: true})
+	rep, err := eng.Prune(ctx, engine.IO{Out: &out, DryRun: true})
 	if err != nil {
 		t.Fatalf("prune --dry-run was gated by confirmation: %v", err)
 	}
@@ -1546,7 +1617,7 @@ func TestSync_DryRunPrintsPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	rep, err := eng.Sync(ctx, false, engine.IO{Out: &out, Err: io.Discard, DryRun: true})
+	rep, err := eng.Sync(ctx, false, engine.IO{Out: &out, DryRun: true})
 	if err != nil {
 		t.Fatal(err)
 	}

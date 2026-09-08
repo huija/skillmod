@@ -58,22 +58,25 @@ func TestParseLsTree(t *testing.T) {
 		"100755 blob bbbb\tskills/demo/run.sh\x00" +
 		"160000 commit cccc\tskills/demo/vendor\x00" +
 		"040000 tree dddd\tskills/demo/ignored\x00"
-	entries, err := parseLsTree(out, "skills/demo")
+	entries, err := parseLsTree(out)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 2 {
+	if len(entries) != 3 {
 		t.Fatalf("entries = %+v", entries)
 	}
-	if entries[0] != (lsEntry{mode: "100755", typ: "blob", sha: "bbbb", path: "run.sh"}) {
-		t.Errorf("blob entry = %+v", entries[0])
+	if entries[0] != (lsEntry{mode: "100644", typ: "blob", sha: "aaaa", path: "root.txt"}) {
+		t.Errorf("root blob entry = %+v", entries[0])
 	}
-	if entries[1].typ != "commit" || entries[1].path != "vendor" {
-		t.Errorf("submodule entry = %+v", entries[1])
+	if entries[1] != (lsEntry{mode: "100755", typ: "blob", sha: "bbbb", path: "skills/demo/run.sh"}) {
+		t.Errorf("blob entry = %+v", entries[1])
+	}
+	if entries[2].typ != "commit" || entries[2].path != "skills/demo/vendor" {
+		t.Errorf("submodule entry = %+v", entries[2])
 	}
 
 	for _, malformed := range []string{"no-tab", "100644 blob\tfile"} {
-		if _, err := parseLsTree(malformed, ""); err == nil {
+		if _, err := parseLsTree(malformed); err == nil {
 			t.Errorf("parseLsTree(%q) succeeded", malformed)
 		}
 	}
@@ -92,11 +95,11 @@ func TestSkillNameParsing(t *testing.T) {
 		"unicode":       {content: "---\nname: 中文技能\n---\n", want: "中文技能"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			got, err := ParseSkillName(tc.content)
+			metadata, err := ParseSkillMetadata(tc.content)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got != tc.want {
+			if got := metadata.Name; got != tc.want {
 				t.Fatalf("name = %q, want %q", got, tc.want)
 			}
 		})
@@ -133,7 +136,7 @@ func TestSkillNameParsingErrors(t *testing.T) {
 		"control char":       "---\nname: a\x01b\n---\n",
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := ParseSkillName(content)
+			_, err := ParseSkillMetadata(content)
 			var invalid *NoSkillMDError
 			if !errors.As(err, &invalid) || invalid.Detail == "" {
 				t.Fatalf("error = %v (%T), want NoSkillMDError", err, err)
@@ -142,16 +145,8 @@ func TestSkillNameParsingErrors(t *testing.T) {
 	}
 }
 
-func TestTreeAndDirectorySkillName(t *testing.T) {
+func TestDirectorySkillName(t *testing.T) {
 	content := []byte("---\nname: demo\n---\n")
-	tree := &Tree{Files: []File{{Path: "other.txt"}, {Path: "SKILL.md", Data: content}}}
-	if got, err := tree.SkillName(); err != nil || got != "demo" {
-		t.Fatalf("Tree.SkillName = %q, %v", got, err)
-	}
-	if _, err := (&Tree{}).SkillName(); err == nil {
-		t.Fatal("Tree.SkillName succeeded without SKILL.md")
-	}
-
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), content, 0o644); err != nil {
 		t.Fatal(err)
@@ -296,7 +291,7 @@ func TestPrefetchMissingBlobs_Batched(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entries, err := parseLsTree(out, "")
+	entries, err := parseLsTree(out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,12 +525,57 @@ func TestFetchWrapper(t *testing.T) {
 	url, headSHA := newFixtureRepo(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	tree, err := (&Source{VCSRoot: t.TempDir()}).Fetch(ctx, url, headSHA)
+	tree, err := (&Source{VCSRoot: t.TempDir()}).FetchRef(ctx, url, headSHA, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if tree.Commit != headSHA || len(tree.Files) == 0 {
-		t.Fatalf("Fetch tree = commit %q, %d files", tree.Commit, len(tree.Files))
+		t.Fatalf("FetchRef tree = commit %q, %d files", tree.Commit, len(tree.Files))
+	}
+}
+
+// Regression: a shallow cache must unshallow during the advertised-refs
+// fallback. Servers that reject direct SHA fetches leave only the heads/tags
+// path; without unshallowing, an old commit that is still in the remote's
+// history would be reported as nonexistent after the branch advanced.
+func TestFetchRef_FallbackUnshallowsHistory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses a POSIX shell wrapper")
+	}
+	url, _ := newFixtureRepo(t)
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("git is unavailable")
+	}
+	// Simulate a server that rejects targeted fetches: every git invocation
+	// carrying the direct-commit refs/skillmod refspec fails.
+	wrapper := filepath.Join(t.TempDir(), "git")
+	body := "#!/bin/sh\nfor arg in \"$@\"; do\n  case \"$arg\" in *refs/skillmod*) exit 1;; esac\ndone\nexec \"$SKILLMOD_REAL_GIT\" \"$@\"\n"
+	if err := os.WriteFile(wrapper, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SKILLMOD_REAL_GIT", realGit)
+	s := &Source{Git: wrapper, VCSRoot: t.TempDir()}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	refs, err := s.Refs(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A first tagged fetch leaves the bare cache shallow at the newer commit.
+	if _, err := s.FetchRef(ctx, url, refs.Tags["v2.0.0"], "refs/tags/v2.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	repoDir := filepath.Join(s.VCSRoot, vcsKey(url))
+	if !isShallow(repoDir) {
+		t.Fatal("the targeted fetch did not leave a shallow clone")
+	}
+	// The older commit is still in main's history; the fallback must unshallow to reach it.
+	if _, err := s.FetchRef(ctx, url, refs.Tags["v1.0.0"], ""); err != nil {
+		t.Fatalf("fallback fetch of an in-history commit failed: %v", err)
+	}
+	if isShallow(repoDir) {
+		t.Fatal("the advertised-refs fallback did not unshallow the repository")
 	}
 }
 

@@ -6,6 +6,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 
 	"github.com/huija/skillmod/internal/dirhash"
@@ -46,8 +47,11 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 	rep := &Report{Action: "sync"}
 	var plans []plannedInstall
 	var conflicts []conflict
+	// Entry conflicts are remembered so resolveConflicts' overwrite selections
+	// can extend the plan without reclassifying and rehashing every target.
+	conflictsByEntry := make([][]string, len(entries))
 
-	for _, en := range entries {
+	for i, en := range entries {
 		prevHash := ""
 		if old := findLock(lock, en.skill); old != nil {
 			prevHash = old.Dirhash // The pre-alignment lock hash allows a clean old version to be overwritten.
@@ -61,6 +65,7 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 				targets = append(targets, dst)
 			case "conflict":
 				conflicts = append(conflicts, conflict{name: en.skill.DirName(), dir: dst})
+				conflictsByEntry[i] = append(conflictsByEntry[i], dst)
 			}
 		}
 		action := "keep"
@@ -125,16 +130,15 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 	if err != nil {
 		return nil, err
 	}
-	for _, en := range entries {
-		prevHash := ""
-		if old := findLock(lock, en.skill); old != nil {
-			prevHash = old.Dirhash
-		}
-		for _, a := range adapters {
-			dst := adapterDir(a, e.Root, en.skill.DirName())
-			if classifyTarget(dst, en.dirhash, prevHash) == "conflict" && !skip[dst] {
-				plans = append(plans, plannedInstall{name: en.skill.DirName(), contentDir: en.contentDir, targets: []string{dst}})
+	for i := range entries {
+		var overwrite []string
+		for _, dst := range conflictsByEntry[i] {
+			if !skip[dst] {
+				overwrite = append(overwrite, dst)
 			}
+		}
+		if len(overwrite) > 0 {
+			plans = append(plans, plannedInstall{name: entries[i].skill.DirName(), contentDir: entries[i].contentDir, targets: overwrite})
 		}
 	}
 
@@ -161,8 +165,7 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 		return nil, err
 	}
 	if err := e.saveLockIfChanged(newLock); err != nil {
-		finalize(false)
-		return nil, err
+		return nil, errors.Join(err, finalize(false))
 	}
 	if err := finalize(true); err != nil {
 		return nil, err

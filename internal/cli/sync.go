@@ -5,6 +5,8 @@
 package cli
 
 import (
+	"errors"
+
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/spf13/cobra"
 )
@@ -22,8 +24,7 @@ func newSyncCmd() *cobra.Command {
 				return err
 			}
 			rep, err := eng.Sync(cmd.Context(), check, newIO(cmd))
-			_ = output(cmd, rep)
-			return err
+			return errors.Join(err, output(cmd, rep))
 		},
 	}
 	cmd.Flags().BoolVar(&check, "check", false, i18n.Text("verify without modifying anything (alias for skillmod verify)"))

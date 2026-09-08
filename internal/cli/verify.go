@@ -5,6 +5,8 @@
 package cli
 
 import (
+	"errors"
+
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/spf13/cobra"
 )
@@ -21,8 +23,7 @@ func newVerifyCmd() *cobra.Command {
 				return err
 			}
 			rep, err := eng.Verify(cmd.Context(), newIO(cmd))
-			_ = output(cmd, rep)
-			return err
+			return errors.Join(err, output(cmd, rep))
 		},
 	}
 }

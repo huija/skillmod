@@ -6,6 +6,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -197,12 +198,10 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 		return nil, err
 	}
 	if err := modfile.SaveMod(e.Root, m); err != nil {
-		finalize(false)
-		return nil, err
+		return nil, errors.Join(err, finalize(false))
 	}
 	if err := modfile.SaveLock(e.Root, lock); err != nil {
-		finalize(false)
-		return nil, err
+		return nil, errors.Join(err, finalize(false))
 	}
 	if err := finalize(true); err != nil {
 		return nil, err

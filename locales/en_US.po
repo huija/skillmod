@@ -11,12 +11,6 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-msgid "\nAdvice: "
-msgstr "\nAdvice: "
-
-msgid "\nCause: "
-msgstr "\nCause: "
-
 #, go-format
 msgid " (%s)"
 msgstr " (%s)"
@@ -57,9 +51,6 @@ msgstr "Conflicts detected (targets exist and their contents do not match the lo
 
 msgid "Description"
 msgstr "Description"
-
-msgid "Error: "
-msgstr "Error: "
 
 msgid "Exit with status 2 when drift is detected. Uses the same implementation as sync --check."
 msgstr "Exit with status 2 when drift is detected. Uses the same implementation as sync --check."
@@ -422,8 +413,8 @@ msgid "install %s from %s?\n%s"
 msgstr "install %s from %s?\n%s"
 
 #, go-format
-msgid "install %s to %s (all changes were rolled back): %w"
-msgstr "install %s to %s (all changes were rolled back): %w"
+msgid "install %s to %s (rolling back changes): %w"
+msgstr "install %s to %s (rolling back changes): %w"
 
 msgid "installation directory alias (resolves name conflicts)"
 msgstr "installation directory alias (resolves name conflicts)"
@@ -445,9 +436,6 @@ msgstr "internal error: missing blob %s"
 
 msgid "invalid choice; try again"
 msgstr "invalid choice; try again"
-
-msgid "invalid selection; try again"
-msgstr "invalid selection; try again"
 
 #, go-format
 msgid "invalid source in SKILL.mod: %w"
@@ -717,12 +705,12 @@ msgstr "resolve the latest versions, update the lock, and install"
 msgid "resolved using the same-repository reference cache; remote was not refreshed"
 msgstr "resolved using the same-repository reference cache; remote was not refreshed"
 
+#, go-format
+msgid "rollback also failed: %w"
+msgstr "rollback also failed: %w"
+
 msgid "scan existing skills and draft SKILL.mod"
 msgstr "scan existing skills and draft SKILL.mod"
-
-#, go-format
-msgid "select one or more [1-%d, comma-separated; empty to abort]: "
-msgstr "select one or more [1-%d, comma-separated; empty to abort]: "
 
 msgid "show details"
 msgstr "show details"
@@ -770,6 +758,10 @@ msgstr "snapshot root"
 #, go-format
 msgid "start git cat-file: %w"
 msgstr "start git cat-file: %w"
+
+#, go-format
+msgid "subdirectory must not contain @: %q"
+msgstr "subdirectory must not contain @: %q"
 
 #, go-format
 msgid "subdirectory must use / separators: %q"

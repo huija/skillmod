@@ -11,12 +11,6 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-msgid "\nAdvice: "
-msgstr "\n建议: "
-
-msgid "\nCause: "
-msgstr "\n原因: "
-
 #, go-format
 msgid " (%s)"
 msgstr "（%s）"
@@ -57,9 +51,6 @@ msgstr "检测到冲突（目标已存在且内容与锁定不符）："
 
 msgid "Description"
 msgstr "描述"
-
-msgid "Error: "
-msgstr "错误: "
 
 msgid "Exit with status 2 when drift is detected. Uses the same implementation as sync --check."
 msgstr "检出漂移时退出码为 2；与 sync --check 为同一实现。"
@@ -422,8 +413,8 @@ msgid "install %s from %s?\n%s"
 msgstr "要从 %s 安装 %s 吗？\n%s"
 
 #, go-format
-msgid "install %s to %s (all changes were rolled back): %w"
-msgstr "安装 %s 到 %s（已回滚全部变更）: %w"
+msgid "install %s to %s (rolling back changes): %w"
+msgstr "安装 %s 到 %s（正在回滚变更）: %w"
 
 msgid "installation directory alias (resolves name conflicts)"
 msgstr "安装目录别名（解决同名冲突）"
@@ -445,9 +436,6 @@ msgstr "内部错误：缺少 blob %s"
 
 msgid "invalid choice; try again"
 msgstr "无效选择，请重试"
-
-msgid "invalid selection; try again"
-msgstr "选择无效，请重试"
 
 #, go-format
 msgid "invalid source in SKILL.mod: %w"
@@ -717,12 +705,12 @@ msgstr "重新解析最新版本，更新 lock 并安装"
 msgid "resolved using the same-repository reference cache; remote was not refreshed"
 msgstr "使用同仓引用缓存解析，未刷新远端"
 
+#, go-format
+msgid "rollback also failed: %w"
+msgstr "回滚也失败: %w"
+
 msgid "scan existing skills and draft SKILL.mod"
 msgstr "扫描仓库现有 skill，生成 SKILL.mod 草案"
-
-#, go-format
-msgid "select one or more [1-%d, comma-separated; empty to abort]: "
-msgstr "请选择一个或多个 [1-%d，使用逗号分隔；留空取消]："
 
 msgid "show details"
 msgstr "展开详情"
@@ -770,6 +758,10 @@ msgstr "快照根目录"
 #, go-format
 msgid "start git cat-file: %w"
 msgstr "启动 git cat-file: %w"
+
+#, go-format
+msgid "subdirectory must not contain @: %q"
+msgstr "子目录不能包含 @：%q"
 
 #, go-format
 msgid "subdirectory must use / separators: %q"

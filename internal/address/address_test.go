@@ -33,6 +33,8 @@ func TestParse(t *testing.T) {
 		{"scp-like without ref", "git@github.com:a/b", &Address{Repo: "git@github.com:a/b"}, ""},
 		{"scp-like with ref", "git@github.com:a/b@v1.0.0", &Address{Repo: "git@github.com:a/b", Ref: "v1.0.0"}, ""},
 		{"scp-like with subdirectory and ref", "git@github.com:a/b//x@v1.0.0", &Address{Repo: "git@github.com:a/b", Subdir: "x", Ref: "v1.0.0"}, ""},
+		// User information in a URL is not a version separator.
+		{"url with user info", "https://user@host/path", &Address{Repo: "https://user@host/path"}, ""},
 		// Commit SHA reference.
 		{"40-character SHA", "github.com/a/b@0123456789abcdef0123456789abcdef01234567", &Address{Repo: "https://github.com/a/b", Ref: "0123456789abcdef0123456789abcdef01234567"}, ""},
 		// Invalid addresses.
@@ -47,6 +49,8 @@ func TestParse(t *testing.T) {
 		{"subdirectory trailing slash", "github.com/a/b//x/", nil, "non-canonical"},
 		{"subdirectory backslash", `github.com/a/b//x\y`, nil, "use / separators"},
 		{"subdirectory redundant slash", "github.com/a/b//x//y", nil, "non-canonical"},
+		{"escaped at subdirectory", "github.com/a/b//foo@@bar", nil, "must not contain @"},
+		{"slash-bearing full tag", "github.com/a/b//code-review@code-review/v1.2.0", nil, "must not contain @"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
