@@ -114,7 +114,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 					return nil, fmt.Errorf(i18n.Text("cannot import different skills at %s and %s under the same directory name; reconcile them or rename one first"), prev.srcDirs[0], dir)
 				}
 				prev.srcDirs = append(prev.srcDirs, dir)
-				prev.note = appendInitNote(prev.note, i18n.Text("a skill with the same name appears in multiple platform directories; merged into one entry"))
+				prev.note = appendNote(prev.note, i18n.Text("a skill with the same name appears in multiple platform directories; merged into one entry"))
 				continue // Treat the same installation directory as one skill.
 			}
 			seen[s.dirName] = s
@@ -136,11 +136,11 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 		repo string
 		refs *resolve.Refs
 	}
+	memo := newOperationMemo(io.Progress)
+	e.loadRefsBestEffort(ctx, e.Config.KnownSources, memo, 15*time.Second)
 	var sources []srcRefs
 	for _, repo := range e.Config.KnownSources {
-		rctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		refs, err := e.Source.Refs(rctx, repo)
-		cancel()
+		refs, err := e.refs(ctx, repo, memo)
 		if err != nil {
 			io.printf(i18n.Text("notice: failed to match source %s (%v); related entries will be treated as local"), repo, err)
 			continue
@@ -163,7 +163,6 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 	if legacyErr != nil {
 		rep.Notes = append(rep.Notes, legacyErr.Error())
 	}
-	memo := newOperationMemo(io.Progress)
 	var locator *store.SnapshotLocator
 	if e.Store != nil {
 		locator = e.Store.NewSnapshotLocator()
@@ -216,7 +215,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 		} else if matched == nil && recorded && previous.SourceType != "local" {
 			io.setProgress(i18n.Format("recovering installed skill provenance: %s", name))
 			rctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-			matched, matchedLock, err = importer.match(rctx, previous, name, alias)
+			matched, matchedLock, err = importer.match(rctx, previous, name, alias, s.hash)
 			cancel()
 			if err != nil {
 				entry.Action = "unresolved"
@@ -227,7 +226,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 						entry.Source += subdirSuffix(subdir)
 					}
 				}
-				entry.Note = appendInitNote(entry.Note, err.Error())
+				entry.Note = appendNote(entry.Note, err.Error())
 				entry.Targets = append([]string(nil), s.srcDirs...)
 				// Preserve a usable declaration and baseline even when the old
 				// installer record cannot be verified today. The source is kept in
@@ -267,7 +266,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 			mat, matchErr := e.materialize(rctx, sr.repo, subdir, *candidate, "", memo)
 			cancel()
 			if matchErr != nil {
-				entry.Note = appendInitNote(entry.Note, i18n.Format("source could not be verified; kept as local: %v", matchErr))
+				entry.Note = appendNote(entry.Note, i18n.Format("source could not be verified; kept as local: %v", matchErr))
 				continue
 			}
 			if mat.dirhash != s.hash {
@@ -292,7 +291,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 				entry.Note = ""
 			}
 			if recorded && matchedLock.Dirhash != s.hash {
-				entry.Note = appendInitNote(entry.Note, i18n.Text("installed contents differ from the recorded source revision; the recorded source version was retained; run skillmod sync to align"))
+				entry.Note = appendNote(entry.Note, i18n.Text("installed contents differ from the recorded source revision; the recorded source version was retained; run skillmod sync to align"))
 			}
 			m.Skills = append(m.Skills, *matched)
 		} else {
@@ -301,13 +300,13 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 			upsertLock(lock, modfile.LockSkill{Name: name, Dirhash: s.hash, Dir: alias})
 			entry.Action = "local"
 			if ambiguity != "" {
-				entry.Note = appendInitNote(entry.Note, ambiguity)
+				entry.Note = appendNote(entry.Note, ambiguity)
 			} else if !recorded && entry.Note == "" {
 				entry.Note = i18n.Text("no verifiable source record found; retained as a local baseline")
 			}
 		}
 		if s.note != "" {
-			entry.Note = appendInitNote(entry.Note, s.note)
+			entry.Note = appendNote(entry.Note, s.note)
 		}
 		rep.Entries = append(rep.Entries, entry)
 	}
@@ -321,7 +320,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 
 	io.stopProgress()
 	for _, entry := range rep.Entries {
-		summary := entry.Name + ": " + entry.Action
+		summary := entry.Name + ": " + string(entry.Action)
 		if entry.Source != "" {
 			summary += " " + entry.Source
 		}
@@ -392,16 +391,6 @@ func hasPrefixTag(refs *resolve.Refs, prefix string) bool {
 		}
 	}
 	return false
-}
-
-func appendInitNote(existing, note string) string {
-	if existing == "" {
-		return note
-	}
-	if note == "" {
-		return existing
-	}
-	return existing + "; " + note
 }
 
 func copyFile(src, dst string) error {

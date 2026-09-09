@@ -14,12 +14,14 @@ import (
 	"path/filepath"
 
 	"github.com/huija/skillmod/internal/filelock"
+	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
 )
 
 // lockState serializes commands that observe or mutate one manifest scope.
-// The lock lives in the user store so projects do not gain an untracked lock
-// file. Its key uses the canonical absolute manifest path.
+// The lock lives in the OS temporary area so projects do not gain an untracked
+// file and commands still serialize when they use different store roots. Its
+// key uses the canonical absolute manifest path.
 func (e *Engine) lockState() (func(), error) {
 	root, err := filepath.Abs(e.manifestRoot())
 	if err != nil {
@@ -35,12 +37,11 @@ func (e *Engine) lockState() (func(), error) {
 		return nil, fmt.Errorf(i18n.Text("resolve manifest parent: %w"), parentErr)
 	}
 
-	lockRoot := filepath.Join(os.TempDir(), "skillmod-locks")
-	if e.Store != nil {
-		lockRoot = filepath.Join(e.Store.CacheRoot(), "locks")
-	}
-	sum := sha256.Sum256([]byte(filepath.Clean(root)))
-	path := filepath.Join(lockRoot, "state-"+hex.EncodeToString(sum[:])+".lock")
+	// Fold case for Windows/macOS aliases and put the lock directly below the
+	// per-host temporary root. A shared 0700 parent would prevent other users
+	// on Unix from using skillmod at all once one user created it.
+	sum := sha256.Sum256([]byte(fsutil.FoldKey(filepath.Clean(root))))
+	path := filepath.Join(os.TempDir(), "skillmod-state-"+hex.EncodeToString(sum[:])+".lock")
 	unlock, err := filelock.Lock(path)
 	if err != nil {
 		return nil, fmt.Errorf(i18n.Text("lock manifest state: %w"), err)
@@ -90,4 +91,21 @@ func applyRemovals(paths []string) (finalize func(bool) error, err error) {
 		}
 		return errors.Join(cleanupErrs...)
 	}, nil
+}
+
+func confirmRemovals(io IO, paths []string) error {
+	if len(paths) == 0 || io.DryRun {
+		return nil
+	}
+	ok := io.Yes
+	if !ok && io.Confirm != nil {
+		ok = io.Confirm.Confirm(i18n.Format("delete the %d directories listed above?", len(paths)))
+	}
+	if !ok && io.Confirm == nil {
+		return fmt.Errorf("%s", i18n.Text("the deletion list requires confirmation: retry interactively, use --yes to skip confirmation, or use --dry-run to list only"))
+	}
+	if !ok {
+		return fmt.Errorf("%s", i18n.Text("cancelled by user; no files were deleted"))
+	}
+	return nil
 }

@@ -37,7 +37,7 @@ skillmod 通过系统 `git` 可执行文件获取源码，因此必须安装 Git
 
 ## 功能
 
-- **CLI 七个命令**：`init` / `get` / `sync` / `list` / `update` / `prune` / `verify`
+- **CLI 九个命令**：`init` / `get` / `sync` / `list` / `why` / `update` / `remove` / `prune` / `verify`
 - **源直接走 git**（对应 go 的 direct 模式）：skill = 带 tag 的 repo 或 monorepo 子目录（`<repo>//<subdir>`），打 tag 即发布；无服务端、无 registry
 - **版本三种形态**：semver tag / commit SHA / 伪版本（无 tag 仓兜底）；分支名拒绝——可变引用不可锁定
 - **共享持久存储**：`~/.agents/skillmod/pkg/mod/<域名>/<组织>/<repo>@<版本>` 保存可读、只读的整仓版本快照；bare Git、refs 与解析元数据位于 `pkg/mod/cache`，HTTPS / 默认端口 SSH / `.git` 变体共享；可用 `SKILLMOD_HOME` 覆盖
@@ -77,6 +77,8 @@ skillmod init                                          # 扫描现有 skill 生�
 skillmod get github.com/anthropics/skills//skills/pdf  # 添加（无 tag 仓自动落伪版本）
 skillmod get github.com/openai/skills//gh-fix-ci       # 唯一 skill 名可缩写嵌套路径
 skillmod sync                                          # 按 lock 对齐，幂等
+skillmod why pdf                                       # 说明来源和各目标状态
+skillmod remove pdf                                    # 删除声明和内容未改动的受管安装
 skillmod verify                                        # CI 校验，漂移退出码非零
 ```
 
@@ -96,16 +98,16 @@ skillmod --global list
 skillmod --global verify
 ```
 
-`init` 扫描所选范围的 `.agents/skills/` 和 `.claude/skills/`，保留原有目录、链接和文件。有效目录链接会跟随到内容进行校验；失效链接、不可校验内容和非法目录名会列出并跳过。同名目录在两个平台中内容不一致时，需要先整理或重命名，避免登记错误的基线。
+`init` 扫描所选范围的 `.agents/skills/` 和 `.claude/skills/`，保留原有目录、链接和文件。有效目录链接会跟随到内容进行校验；失效链接、不可校验内容和非法目录名会列出并跳过。同名目录在两个平台中内容不一致时，需要先整理或重命名；内容相同时会合并条目，但保留所有候选路径用于恢复来源。
 
-来源恢复优先使用匹配的旧锁记录或经过校验的 skillmod 缓存快照（包括 monorepo 子目录与 alias）。`init --global` 还会导入上游安装器的 `.skill-lock.json`，项目初始化会读取 `skills-lock.json`。只要旧记录中的 Git 来源和版本可以解析，即使已安装目录发生漂移，init 仍以该来源版本为准写入清单，同时报告漂移并建议运行 `skillmod sync`。无法解析的来源会保留为本地基线，单个条目失败不会丢弃本次导入的其他结果。导入同时生成 `SKILL.mod` 和 `SKILL.lock`；已有声明需要 `--force`，写入前会备份为 `SKILL.mod.bak`。
+来源恢复优先使用匹配的旧锁记录或经过校验的 skillmod 缓存快照（包括 monorepo 子目录与 alias）。`init --global` 还会导入上游安装器的 `.skill-lock.json`，项目初始化会读取 `skills-lock.json`。旧记录包含 Git revision 时以该不可变版本为准；缺少 revision 时，仅当远端最新不可变解析与已安装内容完全一致才接管为远程技能。无法安全解析的来源会保留为本地基线，单个条目失败不会丢弃本次导入的其他结果。导入同时生成 `SKILL.mod` 和 `SKILL.lock`；已有声明需要 `--force`，写入前会备份为 `SKILL.mod.bak`。
 
 | 范围 | 声明与锁文件位置 | 默认技能安装位置 |
 | --- | --- | --- |
 | 项目（默认） | 当前目录的 `SKILL.mod`、`SKILL.lock` | 当前目录的 `.agents/skills/` |
 | 全局（`--global`） | `$SKILLMOD_HOME/global/`，默认 `~/.agents/skillmod/global/` | `~/.agents/skills/` |
 
-**缓存只有一份**：两个范围都使用 `$SKILLMOD_HOME/pkg/mod/`（默认 `~/.agents/skillmod/pkg/mod/`）。`global/` 仅存清单，不包含另一份快照缓存。启用 Claude Code 时，全局安装目录为 `~/.claude/skills/`。所有七个命令都支持 `--global`；默认命令不会自动合并项目与全局清单。`--dry-run` 不写清单或安装目录，远程来源校验可能填充共享缓存。
+**缓存只有一份**：两个范围都使用 `$SKILLMOD_HOME/pkg/mod/`（默认 `~/.agents/skillmod/pkg/mod/`）。`global/` 仅存清单，不包含另一份快照缓存。启用 Claude Code 时，全局安装目录为 `~/.claude/skills/`。所有九个命令都支持 `--global`；默认命令不会自动合并项目与全局清单。`--dry-run` 不写清单或安装目录，远程来源校验可能填充共享缓存。
 
 ### 安装方式与旧拷贝迁移
 
@@ -117,6 +119,10 @@ skillmod sync --relink --install-mode=copy  # 转成独立、可编辑的目录
 ```
 
 普通 `sync` 保留内容已一致的安装，维持幂等；`--relink` 显式按所选安装方式重装远程条目。两者都遵守本地修改的冲突处理规则，`--yes` 不会强制覆盖冲突；本地条目只登记和校验，不会自动迁移。
+
+`get`、`sync`、`update`、`remove` 在独立操作已完成、但有目标被安全保留时返回退出码 3。JSON 报告提供 `targetResults`，自动化可以区分 `install`、`installed`、`keep`、`skip`、`missing`、`drift` 等动作。远端较新 tag 消失时，`update` 默认拒绝静默降级；明确需要降级时使用 `--allow-downgrade`。
+
+`skillmod remove <名称或别名>` 会在一个可回滚事务中删除匹配的声明和内容未改动的受管安装；本地修改过或无法验证的目录会保留，并报告为部分完成。`skillmod why <名称或别名>` 展示来源、解析版本、commit、dirhash、alias 目录和每个安装目标的状态。
 
 `auto` 优先使用系统目录软链接，创建失败时回退为字节级拷贝；`copy` 始终创建独立目录。可通过 `--install-mode` 临时覆盖配置中的 `install_mode`。链接指向共享只读快照，需要编辑时先使用 `copy` 模式分离目录。技能内部的符号链接仍不支持。
 

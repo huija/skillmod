@@ -5,12 +5,15 @@
 package cli
 
 import (
+	"errors"
+
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/spf13/cobra"
 )
 
 func newUpdateCmd() *cobra.Command {
-	return &cobra.Command{
+	var allowDowngrade bool
+	cmd := &cobra.Command{
 		Use:   i18n.Text("update [names…]"),
 		Short: i18n.Text("resolve the latest versions, update the lock, and install"),
 		Long:  i18n.Text("With no names, update every entry. Commit-pinned entries, including pseudo-versions, advance to a new pseudo-version at default-branch HEAD."),
@@ -19,11 +22,12 @@ func newUpdateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			rep, err := eng.Update(cmd.Context(), args, newIO(cmd))
-			if err != nil {
-				return err
-			}
-			return output(cmd, rep)
+			io := newIO(cmd)
+			io.AllowDowngrade = allowDowngrade
+			rep, err := eng.Update(cmd.Context(), args, io)
+			return errors.Join(err, output(cmd, rep))
 		},
 	}
+	cmd.Flags().BoolVar(&allowDowngrade, "allow-downgrade", false, i18n.Text("allow update to select a lower semantic version when newer tags disappeared"))
+	return cmd
 }

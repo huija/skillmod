@@ -12,6 +12,18 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 
 #, go-format
+msgid "  %s: %s"
+msgstr "  %s: %s"
+
+#, go-format
+msgid "  commit: %s"
+msgstr "  commit: %s"
+
+#, go-format
+msgid "  dirhash: %s"
+msgstr "  dirhash: %s"
+
+#, go-format
 msgid " (%s)"
 msgstr " (%s)"
 
@@ -30,6 +42,10 @@ msgstr "%d skills had known but unresolved sources; those entries were retained 
 #, go-format
 msgid "%s (%v)"
 msgstr "%s (%v)"
+
+#, go-format
+msgid "%s (directory %s): %s %s"
+msgstr "%s (directory %s): %s %s"
 
 #, go-format
 msgid "%s (unreadable or broken directory link: %v)"
@@ -146,6 +162,9 @@ msgstr "SKILL.mod schemaversion=%d is unsupported; expected %d"
 msgid "Scan existing skill directories and directory links, verify source provenance, and generate SKILL.mod and SKILL.lock without changing installed files. Unknown sources remain local. Use --global for user-wide skills; --force backs up an existing SKILL.mod before rebuilding."
 msgstr "Scan existing skill directories and directory links, verify source provenance, and generate SKILL.mod and SKILL.lock without changing installed files. Unknown sources remain local. Use --global for user-wide skills; --force backs up an existing SKILL.mod before rebuilding."
 
+msgid "Select by published name or installation alias. Locally modified installations are kept and reported as partial completion."
+msgstr "Select by published name or installation alias. Locally modified installations are kept and reported as partial completion."
+
 #, go-format
 msgid "VCS cache identity conflict: %s"
 msgstr "VCS cache identity conflict: %s"
@@ -182,6 +201,9 @@ msgstr "alias %q contains invalid characters (only letters, digits, '.', '_', an
 
 msgid "align local skill directories with the state pinned in SKILL.lock"
 msgstr "align local skill directories with the state pinned in SKILL.lock"
+
+msgid "allow update to select a lower semantic version when newer tags disappeared"
+msgstr "allow update to select a lower semantic version when newer tags disappeared"
 
 msgid "already up to date"
 msgstr "already up to date"
@@ -268,6 +290,9 @@ msgstr "commit pending resolution"
 msgid "comparing available versions"
 msgstr "comparing available versions"
 
+msgid "completed partially; one or more targets were preserved"
+msgstr "completed partially; one or more targets were preserved"
+
 #, go-format
 msgid "conflict (--yes automatically kept and skipped): %s"
 msgstr "conflict (--yes automatically kept and skipped): %s"
@@ -286,6 +311,10 @@ msgstr "contents do not match the baseline (local changes)"
 
 msgid "contents do not match the lock"
 msgstr "contents do not match the lock"
+
+#, go-format
+msgid "could not verify %s; kept installed files: %v"
+msgstr "could not verify %s; kept installed files: %v"
 
 #, go-format
 msgid "delete the %d directories listed above?"
@@ -330,12 +359,19 @@ msgid "dry-run: no files were written"
 msgstr "dry-run: no files were written"
 
 #, go-format
+msgid "dry-run: no writes planned; %d conflicting targets would be kept"
+msgstr "dry-run: no writes planned; %d conflicting targets would be kept"
+
+#, go-format
 msgid "entry %q is not in SKILL.mod"
 msgstr "entry %q is not in SKILL.mod"
 
 #, go-format
 msgid "entry %s: remote has no default branch"
 msgstr "entry %s: remote has no default branch"
+
+msgid "explain an entry's declaration, immutable provenance, and installation status"
+msgstr "explain an entry's declaration, immutable provenance, and installation status"
 
 #, go-format
 msgid "failed to access repository: %s: %s"
@@ -497,6 +533,9 @@ msgstr "keep and skip"
 msgid "list all declared entries and their status (installed / missing / upgradable)"
 msgstr "list all declared entries and their status (installed / missing / upgradable)"
 
+msgid "local"
+msgstr "local"
+
 msgid "local entry contents do not match the baseline (local changes)"
 msgstr "local entry contents do not match the baseline (local changes)"
 
@@ -510,6 +549,9 @@ msgstr "local name conflict: %q and %q differ only in letter case and map to the
 
 msgid "locally modified; kept files and removed only the lock record: "
 msgstr "locally modified; kept files and removed only the lock record: "
+
+msgid "locally modified; kept installed files: "
+msgstr "locally modified; kept installed files: "
 
 #, go-format
 msgid "lock manifest state: %w"
@@ -602,6 +644,10 @@ msgstr "no baseline in the lock; verification skipped (run init again to establi
 msgid "no changes"
 msgstr "no changes"
 
+#, go-format
+msgid "no changes; %d conflicting targets were kept"
+msgstr "no changes; %d conflicting targets were kept"
+
 msgid "no description"
 msgstr "no description"
 
@@ -669,8 +715,8 @@ msgstr "path component %q is invalid: %w"
 msgid "path contains a backslash: %q"
 msgstr "path contains a backslash: %q"
 
-msgid "previous installer record has no immutable tag or commit SHA"
-msgstr "previous installer record has no immutable tag or commit SHA"
+msgid "previous installer record has no immutable revision and the latest source does not match the installed contents"
+msgstr "previous installer record has no immutable revision and the latest source does not match the installed contents"
 
 msgid "previous installer recorded a tree hash without its repository path"
 msgstr "previous installer recorded a tree hash without its repository path"
@@ -722,11 +768,25 @@ msgid "remote contents do not match the lock and may have been modified: %s\nloc
 msgstr "remote contents do not match the lock and may have been modified: %s\nlock:     %s\ncomputed: %s\nVerify that the source has not been tampered with; if it is valid, use skillmod get to lock it again"
 
 #, go-format
+msgid "remote latest is %s; refusing to downgrade from %s without --allow-downgrade"
+msgstr "remote latest is %s; refusing to downgrade from %s without --allow-downgrade"
+
+msgid "remove <names…>"
+msgstr "remove <names…>"
+
+#, go-format
 msgid "remove backup for %s: %w"
 msgstr "remove backup for %s: %w"
 
+msgid "remove declarations and clean managed installations"
+msgstr "remove declarations and clean managed installations"
+
 msgid "remove installed files left by stale entries (list and confirm before deleting)"
 msgstr "remove installed files left by stale entries (list and confirm before deleting)"
+
+#, go-format
+msgid "removed %d declarations and %d clean installation directories"
+msgstr "removed %d declarations and %d clean installation directories"
 
 msgid "removed from the mod; files were kept—run skillmod prune to clean them"
 msgstr "removed from the mod; files were kept—run skillmod prune to clean them"
@@ -1009,6 +1069,9 @@ msgstr "version snapshot contains an irregular file: %s"
 
 msgid "waiting for remote references"
 msgstr "waiting for remote references"
+
+msgid "why <name-or-alias>"
+msgstr "why <name-or-alias>"
 
 #, go-format
 msgid "write %s: %w"

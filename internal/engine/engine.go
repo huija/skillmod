@@ -2,7 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
-// Package engine orchestrates transactional logic for get, sync, verify, update, prune, list, and init.
+// Package engine orchestrates transactional logic for init, get, sync, list,
+// why, update, remove, prune, and verify.
 // Its core principle is validate before writing in two phases: phase 1 never writes project files,
 // so network, hash, and conflict failures happen before phase 2 installs local links or copies.
 package engine
@@ -43,12 +44,13 @@ type Engine struct {
 
 // IO contains the input, output, and confirmation channels for one command run.
 type IO struct {
-	Out      io.Writer
-	Confirm  ui.Confirmer // nil means non-interactive and applies safe conflict defaults
-	Progress ui.Progress  // nil disables interactive activity updates
-	Yes      bool         // skip confirmation in CI
-	Relink   bool         // explicitly convert matching remote installations using the configured mode
-	DryRun   bool         // report the plan without writing files
+	Out            io.Writer
+	Confirm        ui.Confirmer // nil means non-interactive and applies safe conflict defaults
+	Progress       ui.Progress  // nil disables interactive activity updates
+	Yes            bool         // skip confirmation in CI
+	Relink         bool         // explicitly convert matching remote installations using the configured mode
+	AllowDowngrade bool         // permit update to select a lower remaining semantic version
+	DryRun         bool         // report the plan without writing files
 }
 
 func (io IO) printf(format string, args ...any) {
@@ -67,23 +69,6 @@ func (io IO) stopProgress() {
 	if io.Progress != nil {
 		io.Progress.Stop()
 	}
-}
-
-// EntryReport is one entry's result and the structured unit emitted by --json.
-type EntryReport struct {
-	Name    string   `json:"name"`
-	Source  string   `json:"source,omitempty"`
-	Action  string   `json:"action"` // install/update/keep/skip/conflict/drift/local/stale/...
-	Version string   `json:"version,omitempty"`
-	Note    string   `json:"note,omitempty"`
-	Targets []string `json:"targets,omitempty"`
-}
-
-// Report is the structured result of a command.
-type Report struct {
-	Action  string        `json:"action"`
-	Entries []EntryReport `json:"entries"`
-	Notes   []string      `json:"notes,omitempty"`
 }
 
 // DriftError reports drift detected by verify and maps to CLI exit code 2 for AC-12.

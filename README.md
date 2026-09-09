@@ -37,7 +37,7 @@ skillmod invokes the system `git` executable to fetch sources, so Git must be in
 
 ## Capabilities
 
-- **Seven CLI commands**: `init` / `get` / `sync` / `list` / `update` / `prune` / `verify`
+- **Nine CLI commands**: `init` / `get` / `sync` / `list` / `why` / `update` / `remove` / `prune` / `verify`
 - **Direct Git sources**, analogous to Go's direct mode: a skill is either a tagged repository or a monorepo subdirectory (`<repo>//<subdir>`). Publishing means creating a tag; no server or registry is required.
 - **Three version forms**: semantic-version tags, commit SHAs, and pseudo-versions for repositories without tags. Branch names are rejected because mutable references cannot be locked.
 - **Shared persistent storage**: readable, immutable full-repository snapshots are stored at `~/.agents/skillmod/pkg/mod/<host>/<owner>/<repo>@<version>`. Bare Git repositories, refs, and resolution metadata live under `pkg/mod/cache`. HTTPS, default-port SSH, and `.git` URL variants share storage. Set `SKILLMOD_HOME` to override the location.
@@ -77,6 +77,8 @@ skillmod init                                          # Scan existing skills an
 skillmod get github.com/anthropics/skills//skills/pdf  # Add a skill; use a pseudo-version when no tag exists
 skillmod get github.com/openai/skills//gh-fix-ci       # A unique skill name can abbreviate a nested path
 skillmod sync                                          # Reconcile with the lock file, idempotently
+skillmod why pdf                                       # Explain provenance and per-target status
+skillmod remove pdf                                    # Remove its declaration and clean managed installs
 skillmod verify                                        # Validate in CI; drift produces a non-zero exit code
 ```
 
@@ -96,16 +98,16 @@ skillmod --global list
 skillmod --global verify
 ```
 
-`init` scans `.agents/skills/` and `.claude/skills/` in the selected scope without changing existing directories, links, or files. Directory links are followed for content verification. Broken links, unverifiable contents, and invalid directory names are reported and skipped. Different contents at the same directory name across platforms must be reconciled or renamed first.
+`init` scans `.agents/skills/` and `.claude/skills/` in the selected scope without changing existing directories, links, or files. Directory links are followed for content verification. Broken links, unverifiable contents, and invalid directory names are reported and skipped. Different contents at the same directory name across platforms must be reconciled or renamed first. Identical entries across adapters are merged while every candidate path remains available for provenance recovery.
 
-Provenance is recovered from matching existing lock records or verified skillmod snapshots, including monorepo subdirectories and aliases. `init --global` also imports the upstream installer's `.skill-lock.json`, while project init reads `skills-lock.json`. A recorded Git source and revision remain authoritative even when the installed directory has drifted; init records that revision, reports the drift, and recommends `skillmod sync`. Sources that cannot be resolved are retained as local baselines so one unresolved entry does not discard the rest of the import. Import writes both `SKILL.mod` and `SKILL.lock`; replacing an existing declaration requires `--force`, which first backs it up as `SKILL.mod.bak`.
+Provenance is recovered from matching existing lock records or verified skillmod snapshots, including monorepo subdirectories and aliases. `init --global` also imports the upstream installer's `.skill-lock.json`, while project init reads `skills-lock.json`. A recorded Git source and revision remain authoritative even when the installed directory has drifted; when an upstream record omits its revision, init adopts the latest immutable resolution only if its contents exactly match the installed skill. Sources that cannot be resolved safely are retained as local baselines so one unresolved entry does not discard the rest of the import. Import writes both `SKILL.mod` and `SKILL.lock`; replacing an existing declaration requires `--force`, which first backs it up as `SKILL.mod.bak`.
 
 | Scope | Declaration and lock location | Default installation directory |
 | --- | --- | --- |
 | Project (default) | `SKILL.mod` and `SKILL.lock` in the current directory | `.agents/skills/` in the current directory |
 | Global (`--global`) | `$SKILLMOD_HOME/global/`, default `~/.agents/skillmod/global/` | `~/.agents/skills/` |
 
-**There is only one cache**: both scopes use `$SKILLMOD_HOME/pkg/mod/`, defaulting to `~/.agents/skillmod/pkg/mod/`. The `global/` directory contains manifests, not another snapshot cache. With the Claude Code adapter enabled, global installations use `~/.claude/skills/`. All seven commands support `--global`; project commands do not automatically merge the global manifest. `--dry-run` leaves manifests and installations untouched, though remote provenance verification may populate the shared cache.
+**There is only one cache**: both scopes use `$SKILLMOD_HOME/pkg/mod/`, defaulting to `~/.agents/skillmod/pkg/mod/`. The `global/` directory contains manifests, not another snapshot cache. With the Claude Code adapter enabled, global installations use `~/.claude/skills/`. All nine commands support `--global`; project commands do not automatically merge the global manifest. `--dry-run` leaves manifests and installations untouched, though remote provenance verification may populate the shared cache.
 
 ### Installation modes and migrating existing copies
 
@@ -117,6 +119,10 @@ skillmod sync --relink --install-mode=copy  # Detach into independent, editable 
 ```
 
 Ordinary `sync` preserves matching installations and remains idempotent. `--relink` explicitly reinstalls remote entries using the selected mode. Both respect local-modification conflict handling; `--yes` does not force conflicting files to be overwritten. Local entries are recorded and verified without automatic migration.
+
+`get`, `sync`, `update`, and `remove` return exit code 3 when independent work completed but one or more targets were safely preserved. JSON reports include `targetResults` so automation can distinguish actions such as `install`, `installed`, `keep`, `skip`, `missing`, and `drift`. `update` never silently moves to a lower semantic version when a newer tag disappears; use `--allow-downgrade` for an intentional downgrade.
+
+`skillmod remove <name-or-alias>` removes matching declarations and clean managed installations as one recoverable transaction. Locally modified or unverifiable directories are preserved and produce partial completion. `skillmod why <name-or-alias>` shows the source, resolved version, commit, dirhash, alias directory, and status of every configured installation target.
 
 `auto` prefers native directory symlinks and falls back to copies if link creation fails; `copy` always creates an independent directory. `--install-mode` overrides the machine configuration's `install_mode` setting. Links point at shared read-only snapshots; detach with `copy` before editing. Symlinks inside skill contents remain unsupported.
 

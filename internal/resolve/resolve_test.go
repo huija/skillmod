@@ -216,6 +216,15 @@ func TestPseudoVersion(t *testing.T) {
 	}
 }
 
+func TestCompareVersions(t *testing.T) {
+	if got := CompareVersions("skills/demo/v1.3.0", "v1.2.0"); got <= 0 {
+		t.Errorf("CompareVersions(skills/demo/v1.3.0, v1.2.0) = %d, want > 0", got)
+	}
+	if got := CompareVersions("v1.2.0", "skills/demo/v1.2.0"); got != 0 {
+		t.Errorf("CompareVersions(v1.2.0, skills/demo/v1.2.0) = %d, want 0", got)
+	}
+}
+
 func TestResolutionErrorDiagnostics(t *testing.T) {
 	tests := []struct {
 		err  error

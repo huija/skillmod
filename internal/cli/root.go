@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-// Package cli provides the entry layer for the seven subcommands: validate arguments, call the engine, and format output.
+// Package cli provides the entry layer for the nine subcommands: validate arguments, call the engine, and format output.
 // All business logic lives in internal/engine; this layer only handles I/O.
 package cli
 
@@ -27,9 +27,10 @@ import (
 
 // Exit-code contract.
 const (
-	ExitOK    = 0
-	ExitError = 1
-	ExitDrift = 2 // verify detected drift; intended for CI use (AC-12)
+	ExitOK      = 0
+	ExitError   = 1
+	ExitDrift   = 2 // verify detected drift; intended for CI use (AC-12)
+	ExitPartial = 3 // safe conflict handling skipped at least one target
 )
 
 // Global flags.
@@ -68,7 +69,9 @@ ensuring every machine gets exactly the same set of skills.`),
 		newGetCmd(),
 		newSyncCmd(),
 		newListCmd(),
+		newWhyCmd(),
 		newUpdateCmd(),
+		newRemoveCmd(),
 		newPruneCmd(),
 		newVerifyCmd(),
 	)
@@ -78,14 +81,32 @@ ensuring every machine gets exactly the same set of skills.`),
 // Execute runs the root command and maps errors to exit codes.
 func Execute() int {
 	if err := NewRootCmd().Execute(); err != nil {
-		var drift *engine.DriftError
-		if errors.As(err, &drift) {
-			return ExitDrift
+		code := exitCode(err)
+		// Drift and partial completion are expected operational outcomes. Their
+		// commands already emitted a human summary (or a JSON report), so only
+		// unexpected failures need an additional stderr diagnostic here.
+		if code == ExitError {
+			fmt.Fprintln(os.Stderr, err)
 		}
-		fmt.Fprintln(os.Stderr, err)
-		return ExitError
+		return code
 	}
 	return ExitOK
+}
+
+func exitCode(err error) int {
+	var outputErr *outputError
+	if errors.As(err, &outputErr) {
+		return ExitError
+	}
+	var drift *engine.DriftError
+	if errors.As(err, &drift) {
+		return ExitDrift
+	}
+	var partial *engine.PartialError
+	if errors.As(err, &partial) {
+		return ExitPartial
+	}
+	return ExitError
 }
 
 // newEngine selects declarations and installation roots while sharing one user store.
@@ -161,8 +182,16 @@ func output(cmd *cobra.Command, rep *engine.Report) error {
 	}
 	data, err := json.MarshalIndent(rep, "", "  ")
 	if err != nil {
-		return err
+		return &outputError{err: err}
 	}
 	_, err = fmt.Fprintln(cmd.OutOrStdout(), string(data))
-	return err
+	if err != nil {
+		return &outputError{err: err}
+	}
+	return nil
 }
+
+type outputError struct{ err error }
+
+func (e *outputError) Error() string { return fmt.Sprintf("write JSON output: %v", e.err) }
+func (e *outputError) Unwrap() error { return e.err }

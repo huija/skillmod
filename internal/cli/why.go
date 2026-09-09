@@ -11,17 +11,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newPruneCmd() *cobra.Command {
+func newWhyCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "prune",
-		Short: i18n.Text("remove installed files left by stale entries (list and confirm before deleting)"),
-		Args:  cobra.NoArgs,
+		Use:   i18n.Text("why <name-or-alias>"),
+		Short: i18n.Text("explain an entry's declaration, immutable provenance, and installation status"),
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			eng, err := newEngine()
 			if err != nil {
 				return err
 			}
-			rep, err := eng.Prune(cmd.Context(), newIO(cmd))
+			rep, err := eng.Why(cmd.Context(), args[0], newIO(cmd))
 			return errors.Join(err, output(cmd, rep))
 		},
 	}

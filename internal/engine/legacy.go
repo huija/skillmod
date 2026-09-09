@@ -145,7 +145,7 @@ type legacyImporter struct {
 	memo      *operationMemo
 }
 
-func (im *legacyImporter) match(ctx context.Context, old legacySkill, name, alias string) (*modfile.ModSkill, *modfile.LockSkill, error) {
+func (im *legacyImporter) match(ctx context.Context, old legacySkill, name, alias, installedHash string) (*modfile.ModSkill, *modfile.LockSkill, error) {
 	repo, subdir, err := old.location()
 	if err != nil {
 		return nil, nil, err
@@ -197,6 +197,9 @@ func (im *legacyImporter) match(ctx context.Context, old legacySkill, name, alia
 	if remoteName != name {
 		return nil, nil, fmt.Errorf(i18n.Text("recorded source path contains skill %q, not installed skill %q"), remoteName, name)
 	}
+	if old.Ref == "" && mat.dirhash != installedHash {
+		return nil, nil, errors.New(i18n.Text("previous installer record has no immutable revision and the latest source does not match the installed contents"))
+	}
 	// The old installer record is authoritative for provenance. The installed
 	// directory may have been edited after installation (or normalized by the
 	// old installer), so a hash mismatch is reported by init but does not erase
@@ -214,7 +217,15 @@ func (im *legacyImporter) match(ctx context.Context, old legacySkill, name, alia
 func (im *legacyImporter) immutableResolution(ctx context.Context, repo, subdir, ref string) (resolve.Resolution, error) {
 	switch {
 	case ref == "":
-		return resolve.Resolution{}, fmt.Errorf("%s", i18n.Text("previous installer record has no immutable tag or commit SHA"))
+		refs, err := im.engine.refs(ctx, repo, im.memo)
+		if err != nil {
+			return resolve.Resolution{}, err
+		}
+		res, err := resolve.Resolve(resolve.Request{Repo: repo, Subdir: subdir}, refs)
+		if err != nil {
+			return resolve.Resolution{}, err
+		}
+		return *res, nil
 	case strings.HasPrefix(ref, "refs/heads/"):
 		return resolve.Resolution{}, &resolve.BranchError{Ref: strings.TrimPrefix(ref, "refs/heads/")}
 	case resolve.IsSHA(ref):

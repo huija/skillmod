@@ -21,8 +21,10 @@ import (
 )
 
 func TestLockStateSerializesManifestScope(t *testing.T) {
-	e := &Engine{Root: t.TempDir(), Store: store.New(t.TempDir())}
-	unlock, err := e.lockState()
+	root := t.TempDir()
+	first := &Engine{Root: root, Store: store.New(t.TempDir())}
+	second := &Engine{Root: root, Store: store.New(t.TempDir())}
+	unlock, err := first.lockState()
 	if err != nil {
 		t.Fatalf("first lockState(): %v", err)
 	}
@@ -35,7 +37,7 @@ func TestLockStateSerializesManifestScope(t *testing.T) {
 
 	acquired := make(chan error, 1)
 	go func() {
-		secondUnlock, err := e.lockState()
+		secondUnlock, err := second.lockState()
 		if err == nil {
 			secondUnlock()
 		}
@@ -56,6 +58,23 @@ func TestLockStateSerializesManifestScope(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Error("second lockState() did not acquire after unlock")
+	}
+}
+
+func TestMergeInspectionStatusIsOrderIndependent(t *testing.T) {
+	for _, tc := range []struct {
+		left, right Action
+		want        Action
+	}{
+		{ActionInstalled, ActionMissing, ActionMissing},
+		{ActionMissing, ActionInstalled, ActionMissing},
+		{ActionMissing, ActionDrift, ActionDrift},
+		{ActionDrift, ActionMissing, ActionDrift},
+		{ActionLocal, ActionUnlocked, ActionUnlocked},
+	} {
+		if got := mergeInspectionStatus(tc.left, tc.right); got != tc.want {
+			t.Errorf("mergeInspectionStatus(%q, %q) = %q, want %q", tc.left, tc.right, got, tc.want)
+		}
 	}
 }
 
@@ -413,7 +432,7 @@ func TestDisplayListAction(t *testing.T) {
 		"drift":     "drift",
 		"local":     "local",
 	} {
-		if got := displayListAction(action); got != want {
+		if got := displayListAction(Action(action)); got != want {
 			t.Errorf("displayListAction(%q) = %q, want %q", action, got, want)
 		}
 	}

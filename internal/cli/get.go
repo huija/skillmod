@@ -5,6 +5,8 @@
 package cli
 
 import (
+	"errors"
+
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/spf13/cobra"
 )
@@ -24,10 +26,7 @@ A single segment after // first addresses an exact root subdirectory, then falls
 				return err
 			}
 			rep, err := eng.Get(cmd.Context(), args[0], alias, newIO(cmd))
-			if err != nil {
-				return err
-			}
-			return output(cmd, rep)
+			return errors.Join(err, output(cmd, rep))
 		},
 	}
 	cmd.Flags().StringVar(&alias, "alias", "", i18n.Text("installation directory alias (resolves name conflicts)"))

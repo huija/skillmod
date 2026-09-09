@@ -5,6 +5,8 @@
 package cli
 
 import (
+	"errors"
+
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/spf13/cobra"
 )
@@ -20,10 +22,7 @@ func newListCmd() *cobra.Command {
 				return err
 			}
 			rep, err := eng.List(cmd.Context(), newIO(cmd))
-			if err != nil {
-				return err
-			}
-			return output(cmd, rep)
+			return errors.Join(err, output(cmd, rep))
 		},
 	}
 }

@@ -109,8 +109,8 @@ func TestRelinkDryRunAndCopyDetachment(t *testing.T) {
 		t.Errorf("detached edit damaged snapshot: %v", err)
 	}
 	// Relink must obey conflict handling and keep local modifications.
-	if _, err := eng.Sync(ctx, false, relink); err != nil {
-		t.Fatal(err)
+	if _, err := eng.Sync(ctx, false, relink); err == nil {
+		t.Fatal("relink conflict did not report partial completion")
 	}
 	if got := readFileString(t, filepath.Join(dst, "SKILL.md")); got != "local edit" {
 		t.Errorf("relink overwrote local edit: %q", got)

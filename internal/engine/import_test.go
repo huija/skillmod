@@ -360,7 +360,7 @@ func TestInitLegacyTreeHashPreservesTagAfterUnrelatedCommit(t *testing.T) {
 	}
 }
 
-func TestInitLegacyWithoutImmutableRefStaysLocal(t *testing.T) {
+func TestInitLegacyWithoutImmutableRefKeepsMismatchedContentsLocal(t *testing.T) {
 	r := newHelloRepo(t)
 	root := t.TempDir()
 	skill := installedDir(root, "hello")
@@ -373,15 +373,14 @@ func TestInitLegacyWithoutImmutableRefStaysLocal(t *testing.T) {
 	writeLegacyLock(t, root, "hello", map[string]any{
 		"sourceType": "git",
 		"sourceUrl":  r.URL,
-		"skillPath":  "SKILL.md",
 	})
 
 	rep, err := newEngine(t, root, t.TempDir()).Init(ctx, false, testIO())
 	if err != nil {
 		t.Fatalf("Init: %v", err)
 	}
-	if len(rep.Entries) != 1 || rep.Entries[0].Action != "unresolved" || !strings.Contains(rep.Entries[0].Note, "no immutable tag") {
-		t.Fatalf("Init report = %+v, want missing immutable ref kept unresolved", rep.Entries)
+	if len(rep.Entries) != 1 || rep.Entries[0].Action != "unresolved" || !strings.Contains(rep.Entries[0].Note, "latest source does not match") {
+		t.Fatalf("Init report = %+v, want mismatched ref-less source kept unresolved", rep.Entries)
 	}
 	m, err := modfile.LoadMod(root)
 	if err != nil {
@@ -389,6 +388,38 @@ func TestInitLegacyWithoutImmutableRefStaysLocal(t *testing.T) {
 	}
 	if len(m.Skills) != 1 || !m.Skills[0].Local {
 		t.Fatalf("Init declarations = %+v, want local hello baseline", m.Skills)
+	}
+}
+
+func TestInitLegacyWithoutImmutableRefAdoptsMatchingLatestContents(t *testing.T) {
+	r := newHelloRepo(t)
+	producer := newEngine(t, t.TempDir(), t.TempDir())
+	if _, err := producer.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get(%q): %v", r.URL+"@v1.0.0", err)
+	}
+
+	root := t.TempDir()
+	if err := install.CopyDir(installedDir(producer.Root, "hello"), installedDir(root, "hello")); err != nil {
+		t.Fatalf("CopyDir installed hello: %v", err)
+	}
+	writeLegacyLock(t, root, "hello", map[string]any{
+		"sourceType": "git",
+		"sourceUrl":  r.URL,
+	})
+
+	rep, err := newEngine(t, root, t.TempDir()).Init(ctx, false, testIO())
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Action != "matched" || rep.Entries[0].Version != "v1.0.0" {
+		t.Fatalf("Init report = %+v, want ref-less source matched to latest v1.0.0", rep.Entries)
+	}
+	m, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatalf("LoadMod(%q): %v", root, err)
+	}
+	if len(m.Skills) != 1 || m.Skills[0].Local || m.Skills[0].Source != r.URL || m.Skills[0].Version != "v1.0.0" {
+		t.Errorf("Init declarations = %+v, want recovered remote %s@v1.0.0", m.Skills, r.URL)
 	}
 }
 

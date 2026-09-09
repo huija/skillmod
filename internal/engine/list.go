@@ -38,6 +38,17 @@ func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 	type latestKey struct{ repo, subdir string }
 	latestCache := map[latestKey]string{}
 	memo := newOperationMemo(nil)
+	var repositories []string
+	for _, skill := range m.Skills {
+		if skill.Local || findLock(lock, skill) == nil || resolve.IsPseudoVersion(skill.Version) {
+			continue
+		}
+		repo, _, err := splitSource(skill.Source)
+		if err == nil {
+			repositories = append(repositories, repo)
+		}
+	}
+	e.loadRefsBestEffort(ctx, repositories, memo, 10*time.Second)
 
 	rep := &Report{Action: "list"}
 	for _, sk := range m.Skills {
@@ -48,22 +59,26 @@ func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 			continue
 		}
 		// Installation status.
-		status := "installed"
+		status := Action("installed")
 		lk := findLock(lock, sk)
 		if lk == nil {
-			status = "unlocked"
+			status = ActionUnlocked
 		} else {
 			for _, a := range adapters {
 				dst := adapterDir(a, e.Root, sk.DirName())
+				entry.Targets = append(entry.Targets, dst)
 				h, err := dirhash.HashDir(dst)
 				if err != nil {
-					status = "missing"
-					break
+					setTargetResult(&entry, dst, ActionMissing)
+					status = mergeInspectionStatus(status, ActionMissing)
+					continue
 				}
 				if h != lk.Dirhash {
-					status = "drift"
-					break
+					setTargetResult(&entry, dst, ActionDrift)
+					status = mergeInspectionStatus(status, ActionDrift)
+					continue
 				}
+				setTargetResult(&entry, dst, ActionInstalled)
 			}
 		}
 		entry.Action = status
@@ -74,9 +89,7 @@ func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 			key := latestKey{repo, subdir}
 			latest, done := latestCache[key]
 			if !done {
-				rctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-				refs, err := e.refs(rctx, repo, memo)
-				cancel()
+				refs, err := e.refs(ctx, repo, memo)
 				if err == nil {
 					if r, err := resolve.Resolve(resolve.Request{Repo: repo, Subdir: subdir}, refs); err == nil && r.Kind == resolve.KindTag {
 						latest = r.Version
@@ -84,7 +97,7 @@ func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 				}
 				latestCache[key] = latest
 			}
-			if latest != "" && latest != sk.Version {
+			if latest != "" && resolve.CompareVersions(latest, sk.Version) > 0 {
 				entry.Note = i18n.Text("upgrade available → ") + latest
 			}
 		}
@@ -101,17 +114,17 @@ func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 	return rep, nil
 }
 
-func displayListAction(action string) string {
+func displayListAction(action Action) string {
 	switch action {
-	case "installed":
+	case ActionInstalled:
 		return i18n.Text("installed")
-	case "unlocked":
+	case ActionUnlocked:
 		return i18n.Text("unlocked")
-	case "missing":
+	case ActionMissing:
 		return i18n.Text("missing")
-	case "drift":
+	case ActionDrift:
 		return i18n.Text("drift")
 	default:
-		return action
+		return string(action)
 	}
 }

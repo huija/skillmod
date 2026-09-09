@@ -7,7 +7,6 @@ package engine
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 
@@ -99,17 +98,8 @@ func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
 		rep.Notes = append(rep.Notes, i18n.Text("dry-run: no files were deleted"))
 		return rep, nil
 	}
-	if len(deletable) > 0 {
-		ok := io.Yes
-		if !ok && io.Confirm != nil {
-			ok = io.Confirm.Confirm(i18n.Format("delete the %d directories listed above?", len(deletable)))
-		}
-		if !ok && io.Confirm == nil && !io.Yes {
-			return nil, fmt.Errorf("%s", i18n.Text("the deletion list requires confirmation: retry interactively, use --yes to skip confirmation, or use --dry-run to list only"))
-		}
-		if !ok {
-			return nil, fmt.Errorf("%s", i18n.Text("cancelled by user; no files were deleted"))
-		}
+	if err := confirmRemovals(io, deletable); err != nil {
+		return nil, err
 	}
 
 	finalize, err := applyRemovals(deletable)

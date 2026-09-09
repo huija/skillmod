@@ -12,6 +12,18 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 
 #, go-format
+msgid "  %s: %s"
+msgstr "  %s：%s"
+
+#, go-format
+msgid "  commit: %s"
+msgstr "  提交：%s"
+
+#, go-format
+msgid "  dirhash: %s"
+msgstr "  目录哈希：%s"
+
+#, go-format
 msgid " (%s)"
 msgstr "（%s）"
 
@@ -30,6 +42,10 @@ msgstr "有 %d 个技能的来源已知但暂时无法解析；这些条目已�
 #, go-format
 msgid "%s (%v)"
 msgstr "%s (%v)"
+
+#, go-format
+msgid "%s (directory %s): %s %s"
+msgstr "%s（目录 %s）：%s %s"
 
 #, go-format
 msgid "%s (unreadable or broken directory link: %v)"
@@ -146,6 +162,9 @@ msgstr "SKILL.mod schemaversion=%d 不受支持；应为 %d"
 msgid "Scan existing skill directories and directory links, verify source provenance, and generate SKILL.mod and SKILL.lock without changing installed files. Unknown sources remain local. Use --global for user-wide skills; --force backs up an existing SKILL.mod before rebuilding."
 msgstr "扫描现有技能目录和目录链接，验证来源并生成 SKILL.mod 与 SKILL.lock，不修改已安装文件。无法确认来源的技能保留为本地条目。使用 --global 管理用户级技能；--force 在重建前备份已有 SKILL.mod。"
 
+msgid "Select by published name or installation alias. Locally modified installations are kept and reported as partial completion."
+msgstr "可按发布名称或安装别名选择。本地修改过的安装会被保留，并报告为部分完成。"
+
 #, go-format
 msgid "VCS cache identity conflict: %s"
 msgstr "VCS 缓存身份冲突: %s"
@@ -182,6 +201,9 @@ msgstr "别名 %q 含非法字符（仅允许字母数字 . _ -）"
 
 msgid "align local skill directories with the state pinned in SKILL.lock"
 msgstr "按 SKILL.lock 将本地 skill 目录对齐到锁定状态"
+
+msgid "allow update to select a lower semantic version when newer tags disappeared"
+msgstr "当较新的标签消失时，允许 update 选择更低的语义版本"
 
 msgid "already up to date"
 msgstr "已是最新"
@@ -268,6 +290,9 @@ msgstr "commit 待解析"
 msgid "comparing available versions"
 msgstr "正在比较可用版本"
 
+msgid "completed partially; one or more targets were preserved"
+msgstr "已部分完成；一个或多个目标被安全保留"
+
 #, go-format
 msgid "conflict (--yes automatically kept and skipped): %s"
 msgstr "冲突（--yes 自动保留并跳过）: %s"
@@ -286,6 +311,10 @@ msgstr "内容与基线不符（本地改动）"
 
 msgid "contents do not match the lock"
 msgstr "内容与锁定不符"
+
+#, go-format
+msgid "could not verify %s; kept installed files: %v"
+msgstr "无法验证 %s，已保留安装文件：%v"
 
 #, go-format
 msgid "delete the %d directories listed above?"
@@ -330,12 +359,19 @@ msgid "dry-run: no files were written"
 msgstr "dry-run：未写任何文件"
 
 #, go-format
+msgid "dry-run: no writes planned; %d conflicting targets would be kept"
+msgstr "试运行：没有计划写入；将保留 %d 个冲突目标"
+
+#, go-format
 msgid "entry %q is not in SKILL.mod"
 msgstr "条目 %q 不在 SKILL.mod 中"
 
 #, go-format
 msgid "entry %s: remote has no default branch"
 msgstr "条目 %s: 远端无默认分支"
+
+msgid "explain an entry's declaration, immutable provenance, and installation status"
+msgstr "说明条目的声明、不可变来源和安装状态"
 
 #, go-format
 msgid "failed to access repository: %s: %s"
@@ -497,6 +533,9 @@ msgstr "保留并跳过"
 msgid "list all declared entries and their status (installed / missing / upgradable)"
 msgstr "列出全部声明条目及状态（已安装 / 缺失 / 可升级）"
 
+msgid "local"
+msgstr "本地"
+
 msgid "local entry contents do not match the baseline (local changes)"
 msgstr "local 条目内容与基线不符（本地改动）"
 
@@ -510,6 +549,9 @@ msgstr "本地名称冲突: %q 与 %q 仅大小写不同，会映射到同一个
 
 msgid "locally modified; kept files and removed only the lock record: "
 msgstr "本地被修改过，保留文件、仅清 lock 记录: "
+
+msgid "locally modified; kept installed files: "
+msgstr "存在本地修改，已保留安装文件："
 
 #, go-format
 msgid "lock manifest state: %w"
@@ -602,6 +644,10 @@ msgstr "lock 中无基线记录，跳过校验（重新 init 可建立基线）"
 msgid "no changes"
 msgstr "无变更"
 
+#, go-format
+msgid "no changes; %d conflicting targets were kept"
+msgstr "没有变更；已保留 %d 个冲突目标"
+
 msgid "no description"
 msgstr "无 description"
 
@@ -669,8 +715,8 @@ msgstr "路径组件 %q 不合法: %w"
 msgid "path contains a backslash: %q"
 msgstr "路径包含反斜杠: %q"
 
-msgid "previous installer record has no immutable tag or commit SHA"
-msgstr "旧安装器记录不含不可变 tag 或 commit SHA"
+msgid "previous installer record has no immutable revision and the latest source does not match the installed contents"
+msgstr "旧安装器记录没有不可变版本，且最新来源与已安装内容不匹配"
 
 msgid "previous installer recorded a tree hash without its repository path"
 msgstr "旧安装器记录了 tree 哈希，但缺少仓库路径"
@@ -722,11 +768,25 @@ msgid "remote contents do not match the lock and may have been modified: %s\nloc
 msgstr "远程内容与锁定不符，可能被改动: %s\nlock 记录: %s\n实算:     %s\n建议核对来源是否被篡改；确认无误后用 skillmod get 重新锁定"
 
 #, go-format
+msgid "remote latest is %s; refusing to downgrade from %s without --allow-downgrade"
+msgstr "远端最新版本为 %s；未指定 --allow-downgrade，拒绝从 %s 降级"
+
+msgid "remove <names…>"
+msgstr "remove <名称…>"
+
+#, go-format
 msgid "remove backup for %s: %w"
 msgstr "删除 %s 的备份失败：%w"
 
+msgid "remove declarations and clean managed installations"
+msgstr "删除声明和内容未改动的受管安装"
+
 msgid "remove installed files left by stale entries (list and confirm before deleting)"
 msgstr "清理过期条目的残留安装文件（前列清单，确认后才删除）"
+
+#, go-format
+msgid "removed %d declarations and %d clean installation directories"
+msgstr "已删除 %d 个声明和 %d 个内容未改动的安装目录"
 
 msgid "removed from the mod; files were kept—run skillmod prune to clean them"
 msgstr "已从 mod 移除，文件保留；运行 skillmod prune 清理"
@@ -1009,6 +1069,9 @@ msgstr "版本快照含非常规文件: %s"
 
 msgid "waiting for remote references"
 msgstr "正在等待远程 refs"
+
+msgid "why <name-or-alias>"
+msgstr "why <名称或别名>"
 
 #, go-format
 msgid "write %s: %w"

@@ -62,30 +62,32 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 			prevHash = old.Dirhash // The pre-alignment lock hash allows a clean old version to be overwritten.
 		}
 		var targets []string
+		var targetResults []TargetReport
 		for _, a := range adapters {
 			dst := adapterDir(a, e.Root, en.skill.DirName())
 			action := classifyTarget(dst, en.dirhash, prevHash)
-			if action == "keep" && io.Relink {
-				action = "install"
+			if action == ActionKeep && io.Relink {
+				action = ActionInstall
 			}
+			targetResults = append(targetResults, TargetReport{Path: dst, Action: action})
 			switch action {
-			case "install":
+			case ActionInstall:
 				targets = append(targets, dst)
-			case "conflict":
+			case ActionConflict:
 				conflicts = append(conflicts, conflict{name: en.skill.DirName(), dir: dst})
 				conflictsByEntry[i] = append(conflictsByEntry[i], dst)
 			}
 		}
-		action := "keep"
+		action := ActionKeep
 		if len(targets) > 0 {
-			action = "install"
+			action = ActionInstall
 		}
 		if len(conflictsByEntry[i]) > 0 {
-			action = "conflict"
+			action = ActionConflict
 		}
 		rep.Entries = append(rep.Entries, EntryReport{
 			Name: en.skill.Name, Source: en.skill.Source, Version: en.version,
-			Action: action, Note: en.note, Targets: targets,
+			Action: action, Note: en.note, Targets: targets, TargetResults: targetResults,
 		})
 		if len(targets) > 0 {
 			plans = append(plans, plannedInstall{name: en.skill.DirName(), contentDir: en.contentDir, targets: targets})
@@ -144,9 +146,11 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 		for _, dst := range conflictsByEntry[i] {
 			if skip[dst] {
 				skipped++
+				setTargetResult(&rep.Entries[i], dst, ActionSkip)
 				continue
 			}
 			overwrite = append(overwrite, dst)
+			setTargetResult(&rep.Entries[i], dst, ActionInstall)
 		}
 		if len(overwrite) > 0 {
 			plans = append(plans, plannedInstall{name: entries[i].skill.DirName(), contentDir: entries[i].contentDir, targets: overwrite})
@@ -154,21 +158,17 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 		}
 		switch {
 		case len(rep.Entries[i].Targets) > 0 && skipped > 0:
-			rep.Entries[i].Action = "partial"
+			rep.Entries[i].Action = ActionPartial
 		case len(rep.Entries[i].Targets) > 0:
-			rep.Entries[i].Action = "install"
+			rep.Entries[i].Action = ActionInstall
 		case skipped > 0:
-			rep.Entries[i].Action = "conflict"
+			rep.Entries[i].Action = ActionConflict
 		default:
-			rep.Entries[i].Action = "keep"
+			rep.Entries[i].Action = ActionKeep
 		}
 		if skipped > 0 {
 			note := i18n.Format("%d conflicting targets were kept and skipped", skipped)
-			if rep.Entries[i].Note == "" {
-				rep.Entries[i].Note = note
-			} else {
-				rep.Entries[i].Note += "; " + note
-			}
+			rep.Entries[i].Note = appendNote(rep.Entries[i].Note, note)
 		}
 	}
 
@@ -177,17 +177,20 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 		// before returning; nothing is written in dry-run mode.
 		planned := 0
 		for _, en := range rep.Entries {
-			if en.Action == "install" || en.Action == "partial" {
+			if en.Action == ActionInstall || en.Action == ActionPartial {
 				planned++
 			}
 		}
-		if planned == 0 {
+		skipped := skippedConflictCount(conflicts, skip)
+		if planned == 0 && skipped > 0 {
+			io.printf(i18n.Format("dry-run: no writes planned; %d conflicting targets would be kept", skipped))
+		} else if planned == 0 {
 			io.printf(i18n.Text("dry-run: everything is already consistent"))
 		} else {
 			io.printf(i18n.Format("dry-run: %d entries would be installed or updated", planned))
 		}
 		rep.Notes = append(rep.Notes, i18n.Text("dry-run: no files were written"))
-		return rep, nil
+		return rep, partialError(rep, conflicts, skip)
 	}
 
 	finalize, err := applyInstallsWithMode(plans, e.Config.InstallMode)
@@ -203,16 +206,20 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 
 	changed := 0
 	for _, en := range rep.Entries {
-		if en.Action == "install" || en.Action == "partial" {
+		if en.Action == ActionInstall || en.Action == ActionPartial {
 			changed++
 		}
 	}
 	if changed == 0 {
-		io.printf(i18n.Text("no changes")) // Idempotency required by AC-2.
+		if skipped := skippedConflictCount(conflicts, skip); skipped > 0 {
+			io.printf(i18n.Format("no changes; %d conflicting targets were kept", skipped))
+		} else {
+			io.printf(i18n.Text("no changes")) // Idempotency required by AC-2.
+		}
 	} else {
 		io.printf(i18n.Text("synchronized %d entries; verification passed"), changed)
 	}
-	return rep, nil
+	return rep, partialError(rep, conflicts, skip)
 }
 
 // reestablishLocalBaseline replaces a stale remote lock record occupying a

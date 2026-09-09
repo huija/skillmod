@@ -168,10 +168,12 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 		}
 		for _, adapter := range adapters {
 			dst := adapterDir(adapter, e.Root, entries[i].dir)
-			switch classifyTarget(dst, entries[i].mat.dirhash, prevHash) {
-			case "install":
+			action := classifyTarget(dst, entries[i].mat.dirhash, prevHash)
+			entries[i].targetResults = append(entries[i].targetResults, TargetReport{Path: dst, Action: action})
+			switch action {
+			case ActionInstall:
 				entries[i].targets = append(entries[i].targets, dst)
-			case "conflict":
+			case ActionConflict:
 				conflicts = append(conflicts, conflict{name: entries[i].dir, dir: dst})
 			}
 		}
@@ -182,17 +184,30 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 		return nil, err
 	}
 	for _, c := range conflicts {
-		if !skip[c.dir] {
-			index := byDir[fsutil.FoldKey(c.name)]
+		index := byDir[fsutil.FoldKey(c.name)]
+		if skip[c.dir] {
+			entries[index].skippedTargets = append(entries[index].skippedTargets, c.dir)
+			setGetTargetResult(&entries[index], c.dir, ActionSkip)
+		} else {
 			entries[index].targets = append(entries[index].targets, c.dir) // Overwrite was selected.
+			setGetTargetResult(&entries[index], c.dir, ActionInstall)
 		}
 	}
 
 	rep := &Report{Action: "get"}
 	for _, entry := range entries {
+		action := ActionInstall
+		switch {
+		case len(entry.targets) > 0 && len(entry.skippedTargets) > 0:
+			action = ActionPartial
+		case len(entry.targets) == 0 && len(entry.skippedTargets) > 0:
+			action = ActionConflict
+		case len(entry.targets) == 0:
+			action = ActionKeep
+		}
 		rep.Entries = append(rep.Entries, EntryReport{
 			Name: entry.name, Source: entry.source, Version: entry.mat.version,
-			Action: "install", Note: entry.mat.note, Targets: entry.targets,
+			Action: action, Note: entry.mat.note, Targets: entry.targets, TargetResults: entry.targetResults,
 		})
 		if note := entry.directoryChangeNote(); note != "" {
 			rep.Notes = append(rep.Notes, note)
@@ -201,7 +216,7 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 
 	if io.DryRun {
 		rep.Notes = append(rep.Notes, i18n.Text("dry-run: no files were written"))
-		return rep, nil
+		return rep, partialError(rep, conflicts, skip)
 	}
 
 	for _, entry := range entries {
@@ -236,12 +251,14 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 		return nil, err
 	}
 	for _, entry := range entries {
-		io.printf(i18n.Text("installed %s %s; SKILL.mod and SKILL.lock were updated"), entry.name, entry.mat.version)
+		if len(entry.targets) > 0 {
+			io.printf(i18n.Text("installed %s %s; SKILL.mod and SKILL.lock were updated"), entry.name, entry.mat.version)
+		}
 		if note := entry.directoryChangeNote(); note != "" {
 			io.printf("%s", note)
 		}
 	}
-	return rep, nil
+	return rep, partialError(rep, conflicts, skip)
 }
 
 type getEntry struct {
@@ -252,8 +269,19 @@ type getEntry struct {
 	alias  string
 	// previousDir is set when get moves an existing source to another
 	// installation directory. The old directory remains managed by prune.
-	previousDir string
-	targets     []string
+	previousDir    string
+	targets        []string
+	skippedTargets []string
+	targetResults  []TargetReport
+}
+
+func setGetTargetResult(entry *getEntry, path string, action Action) {
+	for i := range entry.targetResults {
+		if entry.targetResults[i].Path == path {
+			entry.targetResults[i].Action = action
+			return
+		}
+	}
 }
 
 func (e getEntry) modSkill() modfile.ModSkill {
@@ -628,26 +656,26 @@ func validDirName(s string) bool {
 
 // classifyTarget selects install for absent or clean old content, keep for matching content, or conflict for local modifications.
 // prevHash is the previous lock hash; matching content is a clean old installation that can be overwritten without losing user data.
-func classifyTarget(dst, wantHash, prevHash string) string {
+func classifyTarget(dst, wantHash, prevHash string) Action {
 	h, err := dirhash.HashDir(dst)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return "install"
+			return ActionInstall
 		}
 		// An existing but empty directory holds nothing to preserve and can
 		// be installed over safely. Any other unhashable content (a symlink,
 		// permission errors) stems from local modifications and must not be
 		// overwritten silently, so it is treated as a conflict.
 		if entries, readErr := os.ReadDir(dst); readErr == nil && len(entries) == 0 {
-			return "install"
+			return ActionInstall
 		}
-		return "conflict"
+		return ActionConflict
 	}
 	if h == wantHash {
-		return "keep"
+		return ActionKeep
 	}
 	if prevHash != "" && h == prevHash {
-		return "install"
+		return ActionInstall
 	}
-	return "conflict"
+	return ActionConflict
 }

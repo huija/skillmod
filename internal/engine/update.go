@@ -9,7 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
+	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/modfile"
 	"github.com/huija/skillmod/internal/resolve"
@@ -67,6 +69,7 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 	var plans []plannedInstall
 	var conflicts []conflict
 	contentByDir := map[string]string{}
+	reportByDir := map[string]int{}
 	memo := newOperationMemo(io.Progress)
 	adapters, err := e.adapters()
 	if err != nil {
@@ -119,6 +122,13 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 			if err != nil {
 				return nil, err
 			}
+			if r.Kind == resolve.KindTag && resolve.CompareVersions(r.Version, cur) < 0 && !io.AllowDowngrade {
+				rep.Entries = append(rep.Entries, EntryReport{
+					Name: sk.Name, Source: sk.Source, Action: ActionKeep, Version: cur,
+					Note: i18n.Format("remote latest is %s; refusing to downgrade from %s without --allow-downgrade", r.Version, cur),
+				})
+				continue
+			}
 			if r.Version == cur && lk != nil && lk.Commit != "" {
 				if r.Commit == lk.Commit {
 					rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "keep", Version: cur, Note: i18n.Text("already up to date")})
@@ -145,12 +155,15 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 			prevHash = lk.Dirhash
 		}
 		var tgts []string
+		var targetResults []TargetReport
 		for _, a := range adapters {
 			dst := adapterDir(a, e.Root, sk.DirName())
-			switch classifyTarget(dst, mat.dirhash, prevHash) {
-			case "install":
+			action := classifyTarget(dst, mat.dirhash, prevHash)
+			targetResults = append(targetResults, TargetReport{Path: dst, Action: action})
+			switch action {
+			case ActionInstall:
 				tgts = append(tgts, dst)
-			case "conflict":
+			case ActionConflict:
 				conflicts = append(conflicts, conflict{name: sk.DirName(), dir: dst})
 			}
 		}
@@ -159,8 +172,9 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 		}
 		rep.Entries = append(rep.Entries, EntryReport{
 			Name: sk.Name, Source: sk.Source, Action: "update",
-			Version: mat.version, Note: fmt.Sprintf("%s → %s", cur, mat.version),
+			Version: mat.version, Note: fmt.Sprintf("%s → %s", cur, mat.version), Targets: append([]string(nil), tgts...), TargetResults: targetResults,
 		})
+		reportByDir[fsutil.FoldKey(sk.DirName())] = len(rep.Entries) - 1
 		// Update the in-memory mod and lock; write them only after success.
 		for i := range m.Skills {
 			if sameDir(m.Skills[i].DirName(), sk.DirName()) {
@@ -179,9 +193,17 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 		return nil, err
 	}
 	for _, c := range conflicts {
-		if skip[c.dir] {
+		reportIndex, ok := reportByDir[fsutil.FoldKey(c.name)]
+		if !ok {
 			continue
 		}
+		if skip[c.dir] {
+			rep.Entries[reportIndex].Action = ActionPartial
+			setTargetResult(&rep.Entries[reportIndex], c.dir, ActionSkip)
+			continue
+		}
+		setTargetResult(&rep.Entries[reportIndex], c.dir, ActionInstall)
+		rep.Entries[reportIndex].Targets = append(rep.Entries[reportIndex].Targets, c.dir)
 		// For an overwrite, locate the corresponding entry's contentDir.
 		for _, sk := range targets {
 			if sk.DirName() != c.name {
@@ -195,7 +217,7 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 
 	if io.DryRun {
 		rep.Notes = append(rep.Notes, i18n.Text("dry-run: no files were written"))
-		return rep, nil
+		return rep, partialError(rep, conflicts, skip)
 	}
 
 	finalize, err := applyInstallsWithMode(plans, e.Config.InstallMode)
@@ -216,25 +238,19 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 			io.printf("%s: %s", en.Name, en.Note)
 		}
 	}
-	return rep, nil
+	return rep, partialError(rep, conflicts, skip)
 }
 
 func updateRepositories(targets []modfile.ModSkill) ([]string, error) {
-	seen := make(map[string]bool, len(targets))
 	repositories := make([]string, 0, len(targets))
 	for _, skill := range targets {
 		repo, _, err := splitSource(skill.Source)
 		if err != nil {
 			return nil, err
 		}
-		identity := source.RepoIdentity(repo)
-		if seen[identity] {
-			continue
-		}
-		seen[identity] = true
 		repositories = append(repositories, repo)
 	}
-	return repositories, nil
+	return uniqueRepositories(repositories), nil
 }
 
 func (e *Engine) loadRefsConcurrently(ctx context.Context, repositories []string, memo *operationMemo) error {
@@ -280,4 +296,50 @@ func (e *Engine) loadRefsConcurrently(ctx context.Context, repositories []string
 		memo.refs[source.RepoIdentity(repo)] = results[i]
 	}
 	return nil
+}
+
+func (e *Engine) loadRefsBestEffort(ctx context.Context, repositories []string, memo *operationMemo, timeout time.Duration) {
+	repositories = uniqueRepositories(repositories)
+	fetchCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	results := make([]refsResult, len(repositories))
+	limit := min(maxConcurrentRefQueries, len(repositories))
+	semaphore := make(chan struct{}, limit)
+	var wait sync.WaitGroup
+	for i, repo := range repositories {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			select {
+			case semaphore <- struct{}{}:
+				defer func() { <-semaphore }()
+			case <-fetchCtx.Done():
+				results[i].err = fetchCtx.Err()
+				return
+			}
+			refs, err := e.Source.Refs(fetchCtx, repo)
+			if err == nil && e.Store != nil {
+				err = e.Store.PutRepoRefs(repo, refs)
+			}
+			results[i] = refsResult{refs: refs, err: err}
+		}()
+	}
+	wait.Wait()
+	for i, repo := range repositories {
+		memo.refs[source.RepoIdentity(repo)] = results[i]
+	}
+}
+
+func uniqueRepositories(repositories []string) []string {
+	seen := make(map[string]bool, len(repositories))
+	unique := make([]string, 0, len(repositories))
+	for _, repo := range repositories {
+		identity := source.RepoIdentity(repo)
+		if seen[identity] {
+			continue
+		}
+		seen[identity] = true
+		unique = append(unique, repo)
+	}
+	return unique
 }

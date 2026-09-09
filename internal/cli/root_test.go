@@ -6,9 +6,11 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +18,7 @@ import (
 
 	"github.com/huija/skillmod/internal/engine"
 	"github.com/huija/skillmod/internal/i18n"
+	"github.com/huija/skillmod/internal/install"
 	"github.com/huija/skillmod/internal/modfile"
 	"github.com/huija/skillmod/internal/store"
 	"github.com/huija/skillmod/internal/testutil"
@@ -150,6 +153,18 @@ func TestJSONCommandsReturnOutputErrors(t *testing.T) {
 	}
 }
 
+func TestExitCodePrefersOutputFailure(t *testing.T) {
+	rep := &engine.Report{Action: engine.Action("sync")}
+	partial := &engine.PartialError{Report: rep}
+	if got := exitCode(errors.Join(partial, &outputError{err: errTestOutput})); got != ExitError {
+		t.Fatalf("partial plus output failure exit = %d, want %d", got, ExitError)
+	}
+	drift := &engine.DriftError{Report: rep}
+	if got := exitCode(errors.Join(drift, &outputError{err: errTestOutput})); got != ExitError {
+		t.Fatalf("drift plus output failure exit = %d, want %d", got, ExitError)
+	}
+}
+
 func TestCommandWiring(t *testing.T) {
 	preserveFlags(t)
 	isolateCLI(t)
@@ -178,7 +193,9 @@ func TestCommandWiring(t *testing.T) {
 		{"get", "github.com/acme/skills@"},
 		{"sync"},
 		{"list"},
+		{"why", "missing"},
 		{"update"},
+		{"remove", "missing"},
 		{"prune"},
 		{"verify"},
 	} {
@@ -214,6 +231,40 @@ func TestExecuteExitCodes(t *testing.T) {
 	os.Args = []string{"skillmod", "verify"}
 	if got := Execute(); got != ExitDrift {
 		t.Fatalf("drift verify exit = %d, want %d", got, ExitDrift)
+	}
+
+	partialProject, partialStore := isolateCLI(t)
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(partialStore, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if entry.IsDir() {
+				return os.Chmod(path, 0o700)
+			}
+			return os.Chmod(path, 0o600)
+		})
+	})
+	r := testutil.NewRepo(t)
+	r.WriteSkill("", "partial")
+	r.CommitAll("init")
+	r.Tag("v1.0.0")
+	r.Finish()
+	eng, err := newEngine()
+	if err != nil {
+		t.Fatalf("newEngine(): %v", err)
+	}
+	eng.Config.InstallMode = install.Copy
+	if _, err := eng.Get(context.Background(), r.URL+"@v1.0.0", "", engine.IO{Yes: true, Out: io.Discard}); err != nil {
+		t.Fatalf("Get(%q): %v", r.URL+"@v1.0.0", err)
+	}
+	target := filepath.Join(partialProject, ".agents", "skills", "partial", "SKILL.md")
+	if err := os.WriteFile(target, []byte("local edit\n"), 0o644); err != nil {
+		t.Fatalf("modify %q: %v", target, err)
+	}
+	os.Args = []string{"skillmod", "--yes", "sync"}
+	if got := Execute(); got != ExitPartial {
+		t.Fatalf("partial sync exit = %d, want %d", got, ExitPartial)
 	}
 }
 

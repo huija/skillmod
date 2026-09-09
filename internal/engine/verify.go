@@ -49,17 +49,17 @@ func (e *Engine) Verify(ctx context.Context, io IO) (*Report, error) {
 			h, err := dirhash.HashDir(dst)
 			switch {
 			case err != nil:
-				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "drift", Note: i18n.Text("missing: ") + dst, Targets: []string{dst}})
+				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "drift", Note: i18n.Text("missing: ") + dst, Targets: []string{dst}, TargetResults: []TargetReport{{Path: dst, Action: "missing"}}})
 				drift = true
 			case h != lk.Dirhash:
 				kind := i18n.Text("contents do not match the lock")
 				if sk.Local {
 					kind = i18n.Text("local entry contents do not match the baseline (local changes)")
 				}
-				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "drift", Note: kind, Targets: []string{dst}})
+				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "drift", Note: kind, Targets: []string{dst}, TargetResults: []TargetReport{{Path: dst, Action: "drift"}}})
 				drift = true
 			default:
-				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "ok", Version: lk.Version, Targets: []string{dst}})
+				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "ok", Version: lk.Version, Targets: []string{dst}, TargetResults: []TargetReport{{Path: dst, Action: "installed"}}})
 			}
 		}
 	}

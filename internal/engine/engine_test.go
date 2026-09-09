@@ -185,6 +185,33 @@ func TestGet_Tag(t *testing.T) {
 	}
 }
 
+func TestGetReportsSkippedInstallationConflict(t *testing.T) {
+	r := newHelloRepo(t)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("first Get(%q): %v", r.URL+"@v1.0.0", err)
+	}
+	target := filepath.Join(installedDir(root, "hello"), "SKILL.md")
+	if err := os.WriteFile(target, []byte("local edit\n"), 0o644); err != nil {
+		t.Fatalf("modify %q: %v", target, err)
+	}
+	rep, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO())
+	var partial *engine.PartialError
+	if !errors.As(err, &partial) {
+		t.Fatalf("second Get conflict error = %v, want PartialError", err)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Action != engine.ActionConflict {
+		t.Fatalf("second Get conflict report = %+v, want conflict", rep.Entries)
+	}
+	if len(rep.Entries[0].TargetResults) != 1 || rep.Entries[0].TargetResults[0].Action != engine.ActionSkip {
+		t.Errorf("second Get target results = %+v, want skipped target", rep.Entries[0].TargetResults)
+	}
+	if got := readFileString(t, target); got != "local edit\n" {
+		t.Errorf("second Get target = %q, want local edit preserved", got)
+	}
+}
+
 func TestGet_RedundantAliasIsCanonical(t *testing.T) {
 	r := newHelloRepo(t)
 	root := t.TempDir()
@@ -976,8 +1003,9 @@ func TestSync_LocalModification(t *testing.T) {
 		t.Fatal(err)
 	}
 	rep, err := eng.Sync(ctx, false, testIO())
-	if err != nil {
-		t.Fatalf("Sync: %v", err)
+	var partial *engine.PartialError
+	if !errors.As(err, &partial) {
+		t.Fatalf("Sync error = %v, want PartialError", err)
 	}
 	found := false
 	for _, en := range rep.Entries {
@@ -1014,6 +1042,9 @@ func TestSync_OverwriteConflictReportsInstallation(t *testing.T) {
 	if len(rep.Entries) != 1 || rep.Entries[0].Action != "install" || len(rep.Entries[0].Targets) != 1 || rep.Entries[0].Targets[0] != installedDir(root, "hello") {
 		t.Errorf("Sync overwrite report = %+v, want one installed target", rep.Entries)
 	}
+	if len(rep.Entries[0].TargetResults) != 1 || rep.Entries[0].TargetResults[0].Action != engine.ActionInstall {
+		t.Errorf("Sync overwrite target results = %+v, want installed", rep.Entries[0].TargetResults)
+	}
 	if !strings.Contains(out.String(), "synchronized 1") {
 		t.Errorf("Sync overwrite output = %q, want synchronized count", out.String())
 	}
@@ -1046,11 +1077,15 @@ func TestSync_MixedInstallAndSkippedConflictReportsPartial(t *testing.T) {
 
 	var out bytes.Buffer
 	rep, err := eng.Sync(ctx, false, engine.IO{Out: &out, Yes: true})
-	if err != nil {
-		t.Fatalf("Sync mixed targets: %v", err)
+	var partial *engine.PartialError
+	if !errors.As(err, &partial) {
+		t.Fatalf("Sync mixed-target error = %v, want PartialError", err)
 	}
 	if len(rep.Entries) != 1 || rep.Entries[0].Action != "partial" || len(rep.Entries[0].Targets) != 1 || rep.Entries[0].Targets[0] != claudeTarget {
 		t.Errorf("Sync mixed-target report = %+v, want partial with only Claude target installed", rep.Entries)
+	}
+	if len(rep.Entries[0].TargetResults) != 2 {
+		t.Errorf("Sync mixed-target results = %+v, want two targets", rep.Entries[0].TargetResults)
 	}
 	if !strings.Contains(rep.Entries[0].Note, "kept and skipped") || !strings.Contains(out.String(), "synchronized 1") {
 		t.Errorf("Sync mixed-target note/output = %q / %q", rep.Entries[0].Note, out.String())
@@ -1406,6 +1441,80 @@ func TestUpdate(t *testing.T) {
 	}
 }
 
+func TestUpdateRequiresOptInForDowngrade(t *testing.T) {
+	r := newHelloRepo(t)
+	r.Write("v2.md", "v2\n")
+	r.CommitAll("v2")
+	r.Evolve("v2.0.0", false)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v2.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get(%q): %v", r.URL+"@v2.0.0", err)
+	}
+
+	deleteTag := exec.Command("git", "--git-dir="+r.Bare, "update-ref", "-d", "refs/tags/v2.0.0")
+	deleteTag.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull)
+	if out, err := deleteTag.CombinedOutput(); err != nil {
+		t.Fatalf("delete remote v2.0.0 tag: %v\n%s", err, out)
+	}
+	rep, err := eng.Update(ctx, nil, testIO())
+	if err != nil {
+		t.Fatalf("Update without downgrade opt-in: %v", err)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Action != engine.ActionKeep || !strings.Contains(rep.Entries[0].Note, "refusing to downgrade") {
+		t.Errorf("Update downgrade guard report = %+v, want kept v2.0.0", rep.Entries)
+	}
+	if got := loadLockSkill(t, root, "hello").Version; got != "v2.0.0" {
+		t.Errorf("version after guarded update = %q, want v2.0.0", got)
+	}
+
+	allow := testIO()
+	allow.AllowDowngrade = true
+	if _, err := eng.Update(ctx, nil, allow); err != nil {
+		t.Fatalf("Update with downgrade opt-in: %v", err)
+	}
+	if got := loadLockSkill(t, root, "hello").Version; got != "v1.0.0" {
+		t.Errorf("version after allowed downgrade = %q, want v1.0.0", got)
+	}
+	if _, err := os.Stat(filepath.Join(installedDir(root, "hello"), "v2.md")); !os.IsNotExist(err) {
+		t.Errorf("allowed downgrade retained v2-only file: %v", err)
+	}
+}
+
+func TestUpdateReportsSkippedInstallationConflict(t *testing.T) {
+	r := newHelloRepo(t)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get(%q): %v", r.URL+"@v1.0.0", err)
+	}
+	target := filepath.Join(installedDir(root, "hello"), "SKILL.md")
+	if err := os.WriteFile(target, []byte("local edit\n"), 0o644); err != nil {
+		t.Fatalf("modify %q: %v", target, err)
+	}
+	r.Write("v1.1.md", "new\n")
+	r.CommitAll("v1.1")
+	r.Evolve("v1.1.0", false)
+
+	rep, err := eng.Update(ctx, nil, testIO())
+	var partial *engine.PartialError
+	if !errors.As(err, &partial) {
+		t.Fatalf("Update conflict error = %v, want PartialError", err)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Action != engine.ActionPartial {
+		t.Fatalf("Update conflict report = %+v, want partial", rep.Entries)
+	}
+	if len(rep.Entries[0].TargetResults) != 1 || rep.Entries[0].TargetResults[0].Action != engine.ActionSkip {
+		t.Errorf("Update target results = %+v, want skipped target", rep.Entries[0].TargetResults)
+	}
+	if got := loadLockSkill(t, root, "hello").Version; got != "v1.1.0" {
+		t.Errorf("locked version after partial update = %q, want desired v1.1.0", got)
+	}
+	if got := readFileString(t, target); got != "local edit\n" {
+		t.Errorf("partial Update target = %q, want local edit preserved", got)
+	}
+}
+
 func TestUpdate_RepairsRedundantLockDirectory(t *testing.T) {
 	r := newHelloRepo(t)
 	root := t.TempDir()
@@ -1642,6 +1751,51 @@ func TestPrune(t *testing.T) {
 		if lk.Name == "bb" {
 			t.Error("lock still contains the stale entry")
 		}
+	}
+}
+
+func TestRemoveDeletesDeclarationAndCleanInstallation(t *testing.T) {
+	r := newHelloRepo(t)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get(%q): %v", r.URL+"@v1.0.0", err)
+	}
+	rep, err := eng.Remove(ctx, []string{"hello"}, testIO())
+	if err != nil {
+		t.Fatalf("Remove(hello): %v", err)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Action != engine.ActionRemove {
+		t.Errorf("Remove report = %+v, want one remove entry", rep.Entries)
+	}
+	assertStateDirs(t, root)
+	if _, err := os.Lstat(installedDir(root, "hello")); !os.IsNotExist(err) {
+		t.Errorf("removed installation error = %v, want not exist", err)
+	}
+}
+
+func TestRemoveKeepsModifiedInstallationAndReportsPartial(t *testing.T) {
+	r := newHelloRepo(t)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get(%q): %v", r.URL+"@v1.0.0", err)
+	}
+	target := filepath.Join(installedDir(root, "hello"), "SKILL.md")
+	if err := os.WriteFile(target, []byte("local edit\n"), 0o644); err != nil {
+		t.Fatalf("modify %q: %v", target, err)
+	}
+	rep, err := eng.Remove(ctx, []string{"hello"}, testIO())
+	var partial *engine.PartialError
+	if !errors.As(err, &partial) {
+		t.Fatalf("Remove modified installation error = %v, want PartialError", err)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Action != engine.ActionPartial || !strings.Contains(rep.Entries[0].Note, "locally modified") {
+		t.Errorf("Remove modified report = %+v, want partial local-modification note", rep.Entries)
+	}
+	assertStateDirs(t, root)
+	if got := readFileString(t, target); got != "local edit\n" {
+		t.Errorf("modified installation = %q, want preserved local edit", got)
 	}
 }
 
@@ -1910,5 +2064,33 @@ func TestList(t *testing.T) {
 	}
 	if !strings.Contains(rep.Entries[0].Note, i18n.Text("upgrade available → ")) {
 		t.Errorf("list did not report an available upgrade: %+v", rep.Entries[0])
+	}
+}
+
+func TestWhyReportsImmutableProvenanceAndTargets(t *testing.T) {
+	r := newHelloRepo(t)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "hello-alias", testIO()); err != nil {
+		t.Fatalf("Get(%q): %v", r.URL+"@v1.0.0", err)
+	}
+	for _, selector := range []string{"hello", "hello-alias"} {
+		rep, err := eng.Why(ctx, selector, testIO())
+		if err != nil {
+			t.Fatalf("Why(%q): %v", selector, err)
+		}
+		if len(rep.Entries) != 1 {
+			t.Fatalf("Why(%q) entries = %+v, want one", selector, rep.Entries)
+		}
+		entry := rep.Entries[0]
+		if entry.Source != r.URL || entry.Version != "v1.0.0" || entry.Commit == "" || entry.Dirhash == "" || entry.Directory != "hello-alias" {
+			t.Errorf("Why(%q) entry = %+v, want immutable aliased provenance", selector, entry)
+		}
+		if len(entry.TargetResults) != 1 || entry.TargetResults[0].Action != "installed" {
+			t.Errorf("Why(%q) target results = %+v, want installed", selector, entry.TargetResults)
+		}
+	}
+	if _, err := eng.Why(ctx, "missing", testIO()); err == nil {
+		t.Error("Why(missing) succeeded")
 	}
 }

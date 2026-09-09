@@ -235,4 +235,10 @@ func IsPseudoVersion(v string) bool {
 	return pseudoVersionRe.MatchString(v)
 }
 
+// CompareVersions compares root or monorepo-prefixed semantic-version tags.
+// It has the same result convention as semver.Compare.
+func CompareVersions(a, b string) int {
+	return semver.Compare(stripPrefix(a), stripPrefix(b))
+}
+
 var pseudoVersionRe = regexp.MustCompile(`^v0\.0\.0-\d{14}-[0-9a-f]{12}$`)
