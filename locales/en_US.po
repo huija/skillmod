@@ -20,8 +20,16 @@ msgid "%d blobs are still missing after batch fetch (stdout=%q stderr=%q)"
 msgstr "%d blobs are still missing after batch fetch (stdout=%q stderr=%q)"
 
 #, go-format
+msgid "%d skills had known but unresolved sources; those entries were retained as local baselines and can be retried later"
+msgstr "%d skills had known but unresolved sources; those entries were retained as local baselines and can be retried later"
+
+#, go-format
 msgid "%s (%v)"
 msgstr "%s (%v)"
+
+#, go-format
+msgid "%s (unreadable or broken directory link: %v)"
+msgstr "%s (unreadable or broken directory link: %v)"
 
 #, go-format
 msgid "%s already exists\nAdvice: review it, then use --force to regenerate it (the original is backed up as SKILL.mod.bak)"
@@ -131,8 +139,8 @@ msgstr "SKILL.mod not found\nAdvice: run skillmod init or skillmod get first"
 msgid "SKILL.mod schemaversion=%d is unsupported; expected %d"
 msgstr "SKILL.mod schemaversion=%d is unsupported; expected %d"
 
-msgid "Scan each platform's skill directory, match sources using git ls-remote, confirm each entry, and generate SKILL.mod. An existing SKILL.mod is rejected unless --force rebuilds it after backing it up as SKILL.mod.bak."
-msgstr "Scan each platform's skill directory, match sources using git ls-remote, confirm each entry, and generate SKILL.mod. An existing SKILL.mod is rejected unless --force rebuilds it after backing it up as SKILL.mod.bak."
+msgid "Scan existing skill directories and directory links, verify source provenance, and generate SKILL.mod and SKILL.lock without changing installed files. Unknown sources remain local. Use --global for user-wide skills; --force backs up an existing SKILL.mod before rebuilding."
+msgstr "Scan existing skill directories and directory links, verify source provenance, and generate SKILL.mod and SKILL.lock without changing installed files. Unknown sources remain local. Use --global for user-wide skills; --force backs up an existing SKILL.mod before rebuilding."
 
 #, go-format
 msgid "VCS cache identity conflict: %s"
@@ -175,6 +183,10 @@ msgid "already up to date"
 msgstr "already up to date"
 
 #, go-format
+msgid "ambiguous previous installer records for directory %q and skill name %q; retained as a local baseline"
+msgstr "ambiguous previous installer records for directory %q and skill name %q; retained as a local baseline"
+
+#, go-format
 msgid "backing up the existing directory failed: %w"
 msgstr "backing up the existing directory failed: %w"
 
@@ -201,11 +213,23 @@ msgid "cancelled by user; no files were deleted"
 msgstr "cancelled by user; no files were deleted"
 
 #, go-format
+msgid "cannot identify a unique repository path for imported skill %q"
+msgstr "cannot identify a unique repository path for imported skill %q"
+
+#, go-format
+msgid "cannot import different skills at %s and %s under the same directory name; reconcile them or rename one first"
+msgstr "cannot import different skills at %s and %s under the same directory name; reconcile them or rename one first"
+
+#, go-format
 msgid "cannot parse version metadata %s: %w"
 msgstr "cannot parse version metadata %s: %w"
 
 msgid "cannot parse version metadata: "
 msgstr "cannot parse version metadata: "
+
+#, go-format
+msgid "cannot read previous installer lock %s: %w"
+msgstr "cannot read previous installer lock %s: %w"
 
 #, go-format
 msgid "cat-file --batch-check returned %d lines; expected %d"
@@ -258,10 +282,6 @@ msgstr "contents do not match the baseline (local changes)"
 
 msgid "contents do not match the lock"
 msgstr "contents do not match the lock"
-
-#, go-format
-msgid "copy to temporary directory failed: %w"
-msgstr "copy to temporary directory failed: %w"
 
 #, go-format
 msgid "delete %s: %w"
@@ -423,6 +443,13 @@ msgstr "installation directory alias (resolves name conflicts)"
 msgid "installation directory contains a symlink and cannot be verified: %s"
 msgstr "installation directory contains a symlink and cannot be verified: %s"
 
+msgid "installation mode: auto or copy (overrides config)"
+msgstr "installation mode: auto or copy (overrides config)"
+
+#, go-format
+msgid "installation source and target must not overlap: %s and %s"
+msgstr "installation source and target must not overlap: %s and %s"
+
 msgid "installed"
 msgstr "installed"
 
@@ -430,12 +457,35 @@ msgstr "installed"
 msgid "installed %s %s; SKILL.mod and SKILL.lock were updated"
 msgstr "installed %s %s; SKILL.mod and SKILL.lock were updated"
 
+msgid "installed contents differ from the recorded source revision; the recorded source version was retained; run skillmod sync to align"
+msgstr "installed contents differ from the recorded source revision; the recorded source version was retained; run skillmod sync to align"
+
+#, go-format
+msgid "installed provenance could not be recovered: %v"
+msgstr "installed provenance could not be recovered: %v"
+
 #, go-format
 msgid "internal error: missing blob %s"
 msgstr "internal error: missing blob %s"
 
+#, go-format
+msgid "invalid Git commit hash: %q"
+msgstr "invalid Git commit hash: %q"
+
+#, go-format
+msgid "invalid Git tree hash: %q"
+msgstr "invalid Git tree hash: %q"
+
 msgid "invalid choice; try again"
 msgstr "invalid choice; try again"
+
+#, go-format
+msgid "invalid legacy Git tree hash: %q"
+msgstr "invalid legacy Git tree hash: %q"
+
+#, go-format
+msgid "invalid previous installer repository: %q"
+msgstr "invalid previous installer repository: %q"
 
 #, go-format
 msgid "invalid source in SKILL.mod: %w"
@@ -468,6 +518,9 @@ msgstr "malformed cat-file --batch-check output: %q"
 #, go-format
 msgid "malformed ls-tree output: %q"
 msgstr "malformed ls-tree output: %q"
+
+msgid "manage user-wide skills instead of the current project"
+msgstr "manage user-wide skills instead of the current project"
 
 msgid "matching the requested skill name"
 msgstr "matching the requested skill name"
@@ -560,9 +613,16 @@ msgstr "no skills selected"
 msgid "no stale entries"
 msgstr "no stale entries"
 
+msgid "no verifiable source record found; retained as a local baseline"
+msgstr "no verifiable source record found; retained as a local baseline"
+
 #, go-format
 msgid "non-canonical subdirectory path: %q (expected %q without '.', '..', or redundant slashes)"
 msgstr "non-canonical subdirectory path: %q (expected %q without '.', '..', or redundant slashes)"
+
+#, go-format
+msgid "not a skill directory: %s"
+msgstr "not a skill directory: %s"
 
 msgid "not confirmed in a non-interactive environment; rerun with --yes to accept all entries"
 msgstr "not confirmed in a non-interactive environment; rerun with --yes to accept all entries"
@@ -605,6 +665,16 @@ msgstr "path component %q is invalid: %w"
 msgid "path contains a backslash: %q"
 msgstr "path contains a backslash: %q"
 
+msgid "previous installer record has no immutable tag or commit SHA"
+msgstr "previous installer record has no immutable tag or commit SHA"
+
+msgid "previous installer recorded a tree hash without its repository path"
+msgstr "previous installer recorded a tree hash without its repository path"
+
+#, go-format
+msgid "previous installer source type %q is not a supported Git source"
+msgstr "previous installer source type %q is not a supported Git source"
+
 msgid "print the execution plan without writing files"
 msgstr "print the execution plan without writing files"
 
@@ -625,8 +695,23 @@ msgstr "reading skill metadata"
 msgid "reading the local repository cache"
 msgstr "reading the local repository cache"
 
+#, go-format
+msgid "recorded source path contains skill %q, not installed skill %q"
+msgstr "recorded source path contains skill %q, not installed skill %q"
+
+#, go-format
+msgid "recorded tree %s does not match repository tree at %s (%s)"
+msgstr "recorded tree %s does not match repository tree at %s (%s)"
+
+#, go-format
+msgid "recovering installed skill provenance: %s"
+msgstr "recovering installed skill provenance: %s"
+
 msgid "regenerate an existing SKILL.mod after backing it up as SKILL.mod.bak"
 msgstr "regenerate an existing SKILL.mod after backing it up as SKILL.mod.bak"
+
+msgid "reinstall matching remote skills using the configured install mode"
+msgstr "reinstall matching remote skills using the configured install mode"
 
 #, go-format
 msgid "remote contents do not match the lock and may have been modified: %s\nlock:     %s\ncomputed: %s\nVerify that the source has not been tampered with; if it is valid, use skillmod get to lock it again"
@@ -756,6 +841,14 @@ msgid "snapshot root"
 msgstr "snapshot root"
 
 #, go-format
+msgid "source could not be verified; kept as local: %v"
+msgstr "source could not be verified; kept as local: %v"
+
+#, go-format
+msgid "stage installation failed: %w"
+msgstr "stage installation failed: %w"
+
+#, go-format
 msgid "start git cat-file: %w"
 msgstr "start git cat-file: %w"
 
@@ -791,6 +884,10 @@ msgstr "treehash mismatch: recorded %s, computed %s"
 #, go-format
 msgid "treehash verification failed before writing version snapshot: expected %s, computed %s"
 msgstr "treehash verification failed before writing version snapshot: expected %s, computed %s"
+
+#, go-format
+msgid "unknown install mode %q; expected auto or copy"
+msgstr "unknown install mode %q; expected auto or copy"
 
 msgid "unlocked"
 msgstr "unlocked"

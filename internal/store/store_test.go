@@ -168,6 +168,38 @@ func TestSnapshot_CorruptionDetected(t *testing.T) {
 	}
 }
 
+func TestSnapshotLocatorVerifiesSnapshotOnce(t *testing.T) {
+	s := New(t.TempDir())
+	files := []source.File{
+		{Path: "skills/alpha/SKILL.md", Data: []byte("---\nname: alpha\n---\n# alpha\n")},
+		{Path: "skills/beta/SKILL.md", Data: []byte("---\nname: beta\n---\n# beta\n")},
+	}
+	info := SnapshotInfo{
+		Repo:     "https://example.com/acme/skills",
+		Version:  "v1.0.0",
+		Commit:   strings.Repeat("d", 40),
+		Treehash: hashFiles(t, files),
+	}
+	snap, err := s.PutSnapshot(info, files)
+	if err != nil {
+		t.Fatalf("PutSnapshot(%s@%s): %v", info.Repo, info.Version, err)
+	}
+
+	locator := s.NewSnapshotLocator()
+	if _, subdir, err := locator.SnapshotForDir(filepath.Join(snap.ContentDir, "skills", "alpha")); err != nil || subdir != "skills/alpha" {
+		t.Fatalf("SnapshotForDir(alpha) = subdir %q, err %v, want skills/alpha, nil", subdir, err)
+	}
+	if err := os.WriteFile(filepath.Join(snap.ContentDir, "skills", "beta", "SKILL.md"), []byte("tampered\n"), 0o644); err != nil {
+		t.Fatalf("tamper beta snapshot: %v", err)
+	}
+	if _, subdir, err := locator.SnapshotForDir(filepath.Join(snap.ContentDir, "skills", "beta")); err != nil || subdir != "skills/beta" {
+		t.Errorf("memoized SnapshotForDir(beta) = subdir %q, err %v, want skills/beta, nil", subdir, err)
+	}
+	if _, _, err := s.NewSnapshotLocator().SnapshotForDir(filepath.Join(snap.ContentDir, "skills", "beta")); err == nil {
+		t.Error("new SnapshotLocator accepted a snapshot corrupted after the prior command scope")
+	}
+}
+
 func TestOpen_CreatesReadOnlySnapshots(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "store")
 	t.Setenv(HomeEnv, root)

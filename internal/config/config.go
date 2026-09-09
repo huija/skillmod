@@ -13,11 +13,14 @@ import (
 	"path/filepath"
 
 	"github.com/huija/skillmod/internal/i18n"
+	"github.com/huija/skillmod/internal/install"
 	"github.com/pelletier/go-toml/v2"
 )
 
 // Config contains machine-level settings.
 type Config struct {
+	// InstallMode is auto (default) or copy; it is not written to mod/lock.
+	InstallMode install.Mode `toml:"install_mode"`
 	// Agents lists installation target platforms; empty means ["agents"].
 	Agents []string `toml:"agents"`
 	// KnownSources lists repositories used by init for ls-remote matching and by list for discovery.
@@ -57,6 +60,9 @@ func Load() (*Config, error) {
 	}
 	if len(cfg.Agents) == 0 {
 		cfg.Agents = Default().Agents
+	}
+	if err := install.ValidateMode(cfg.InstallMode); err != nil {
+		return nil, err
 	}
 	return &cfg, nil
 }

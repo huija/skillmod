@@ -20,8 +20,16 @@ msgid "%d blobs are still missing after batch fetch (stdout=%q stderr=%q)"
 msgstr "批量 fetch 后仍缺少 %d 个 blob（stdout=%q stderr=%q）"
 
 #, go-format
+msgid "%d skills had known but unresolved sources; those entries were retained as local baselines and can be retried later"
+msgstr "有 %d 个技能的来源已知但暂时无法解析；这些条目已保留为本地基线，之后可以重试"
+
+#, go-format
 msgid "%s (%v)"
 msgstr "%s (%v)"
+
+#, go-format
+msgid "%s (unreadable or broken directory link: %v)"
+msgstr "%s（不可读取或目录链接已失效：%v）"
 
 #, go-format
 msgid "%s already exists\nAdvice: review it, then use --force to regenerate it (the original is backed up as SKILL.mod.bak)"
@@ -131,8 +139,8 @@ msgstr "未找到 SKILL.mod\n建议先执行 skillmod init 或 skillmod get"
 msgid "SKILL.mod schemaversion=%d is unsupported; expected %d"
 msgstr "SKILL.mod schemaversion=%d 不受支持；应为 %d"
 
-msgid "Scan each platform's skill directory, match sources using git ls-remote, confirm each entry, and generate SKILL.mod. An existing SKILL.mod is rejected unless --force rebuilds it after backing it up as SKILL.mod.bak."
-msgstr "扫描各平台 skill 目录，经 git ls-remote 匹配来源，逐项确认后生成 SKILL.mod；已有 SKILL.mod 时拒绝执行，--force 可重建（备份为 SKILL.mod.bak）。"
+msgid "Scan existing skill directories and directory links, verify source provenance, and generate SKILL.mod and SKILL.lock without changing installed files. Unknown sources remain local. Use --global for user-wide skills; --force backs up an existing SKILL.mod before rebuilding."
+msgstr "扫描现有技能目录和目录链接，验证来源并生成 SKILL.mod 与 SKILL.lock，不修改已安装文件。无法确认来源的技能保留为本地条目。使用 --global 管理用户级技能；--force 在重建前备份已有 SKILL.mod。"
 
 #, go-format
 msgid "VCS cache identity conflict: %s"
@@ -175,6 +183,10 @@ msgid "already up to date"
 msgstr "已是最新"
 
 #, go-format
+msgid "ambiguous previous installer records for directory %q and skill name %q; retained as a local baseline"
+msgstr "旧安装器中目录 %q 与 skill 名称 %q 的记录有歧义；保留为本地基线"
+
+#, go-format
 msgid "backing up the existing directory failed: %w"
 msgstr "备份既有目录失败: %w"
 
@@ -201,11 +213,23 @@ msgid "cancelled by user; no files were deleted"
 msgstr "用户取消，未删除任何文件"
 
 #, go-format
+msgid "cannot identify a unique repository path for imported skill %q"
+msgstr "无法确定导入技能 %q 的唯一仓库路径"
+
+#, go-format
+msgid "cannot import different skills at %s and %s under the same directory name; reconcile them or rename one first"
+msgstr "无法将 %s 和 %s 中内容不同的技能导入为同一个目录名；请先统一内容或重命名其中一个"
+
+#, go-format
 msgid "cannot parse version metadata %s: %w"
 msgstr "版本元数据无法解析 %s: %w"
 
 msgid "cannot parse version metadata: "
 msgstr "版本元数据无法解析: "
+
+#, go-format
+msgid "cannot read previous installer lock %s: %w"
+msgstr "无法读取旧安装器锁文件 %s：%w"
 
 #, go-format
 msgid "cat-file --batch-check returned %d lines; expected %d"
@@ -258,10 +282,6 @@ msgstr "内容与基线不符（本地改动）"
 
 msgid "contents do not match the lock"
 msgstr "内容与锁定不符"
-
-#, go-format
-msgid "copy to temporary directory failed: %w"
-msgstr "拷贝到临时目录失败: %w"
 
 #, go-format
 msgid "delete %s: %w"
@@ -423,6 +443,13 @@ msgstr "安装目录别名（解决同名冲突）"
 msgid "installation directory contains a symlink and cannot be verified: %s"
 msgstr "安装目录含 symlink，无法校验: %s"
 
+msgid "installation mode: auto or copy (overrides config)"
+msgstr "安装模式：auto 或 copy（覆盖配置）"
+
+#, go-format
+msgid "installation source and target must not overlap: %s and %s"
+msgstr "安装源与目标目录不能重叠：%s 和 %s"
+
 msgid "installed"
 msgstr "已安装"
 
@@ -430,12 +457,35 @@ msgstr "已安装"
 msgid "installed %s %s; SKILL.mod and SKILL.lock were updated"
 msgstr "已安装 %s %s，SKILL.mod 与 SKILL.lock 已更新"
 
+msgid "installed contents differ from the recorded source revision; the recorded source version was retained; run skillmod sync to align"
+msgstr "已安装内容与记录的来源版本不同；已保留记录的来源版本，请运行 skillmod sync 对齐"
+
+#, go-format
+msgid "installed provenance could not be recovered: %v"
+msgstr "无法恢复已安装内容的来源：%v"
+
 #, go-format
 msgid "internal error: missing blob %s"
 msgstr "内部错误：缺少 blob %s"
 
+#, go-format
+msgid "invalid Git commit hash: %q"
+msgstr "无效的 Git commit 哈希：%q"
+
+#, go-format
+msgid "invalid Git tree hash: %q"
+msgstr "无效的 Git 树哈希：%q"
+
 msgid "invalid choice; try again"
 msgstr "无效选择，请重试"
+
+#, go-format
+msgid "invalid legacy Git tree hash: %q"
+msgstr "旧 Git tree 哈希无效：%q"
+
+#, go-format
+msgid "invalid previous installer repository: %q"
+msgstr "旧安装器仓库地址无效：%q"
 
 #, go-format
 msgid "invalid source in SKILL.mod: %w"
@@ -468,6 +518,9 @@ msgstr "cat-file --batch-check 输出畸形: %q"
 #, go-format
 msgid "malformed ls-tree output: %q"
 msgstr "ls-tree 输出畸形: %q"
+
+msgid "manage user-wide skills instead of the current project"
+msgstr "管理用户级技能，而非当前项目"
 
 msgid "matching the requested skill name"
 msgstr "正在匹配请求的 skill 名称"
@@ -560,9 +613,16 @@ msgstr "未选择任何 skill"
 msgid "no stale entries"
 msgstr "无过期条目"
 
+msgid "no verifiable source record found; retained as a local baseline"
+msgstr "没有找到可验证的来源记录；保留为本地基线"
+
 #, go-format
 msgid "non-canonical subdirectory path: %q (expected %q without '.', '..', or redundant slashes)"
 msgstr "子目录路径不规范: %q（应为 %q 形式，不含 . / .. / 多余斜杠）"
+
+#, go-format
+msgid "not a skill directory: %s"
+msgstr "不是技能目录：%s"
 
 msgid "not confirmed in a non-interactive environment; rerun with --yes to accept all entries"
 msgstr "非交互环境未确认：重跑加 --yes 全部采纳"
@@ -605,6 +665,16 @@ msgstr "路径组件 %q 不合法: %w"
 msgid "path contains a backslash: %q"
 msgstr "路径包含反斜杠: %q"
 
+msgid "previous installer record has no immutable tag or commit SHA"
+msgstr "旧安装器记录不含不可变 tag 或 commit SHA"
+
+msgid "previous installer recorded a tree hash without its repository path"
+msgstr "旧安装器记录了 tree 哈希，但缺少仓库路径"
+
+#, go-format
+msgid "previous installer source type %q is not a supported Git source"
+msgstr "旧安装器来源类型 %q 不是支持的 Git 来源"
+
 msgid "print the execution plan without writing files"
 msgstr "只输出执行计划，不写任何文件"
 
@@ -625,8 +695,23 @@ msgstr "正在读取 skill 元数据"
 msgid "reading the local repository cache"
 msgstr "正在读取本地仓库缓存"
 
+#, go-format
+msgid "recorded source path contains skill %q, not installed skill %q"
+msgstr "记录的源路径包含技能 %q，而不是已安装的技能 %q"
+
+#, go-format
+msgid "recorded tree %s does not match repository tree at %s (%s)"
+msgstr "记录的树 %s 与版本 %s 处的仓库树不匹配（%s）"
+
+#, go-format
+msgid "recovering installed skill provenance: %s"
+msgstr "正在恢复已安装技能来源：%s"
+
 msgid "regenerate an existing SKILL.mod after backing it up as SKILL.mod.bak"
 msgstr "已存在 SKILL.mod 时重新生成，原文件备份为 SKILL.mod.bak"
+
+msgid "reinstall matching remote skills using the configured install mode"
+msgstr "按配置的安装方式重新安装内容一致的远程技能"
 
 #, go-format
 msgid "remote contents do not match the lock and may have been modified: %s\nlock:     %s\ncomputed: %s\nVerify that the source has not been tampered with; if it is valid, use skillmod get to lock it again"
@@ -756,6 +841,14 @@ msgid "snapshot root"
 msgstr "快照根目录"
 
 #, go-format
+msgid "source could not be verified; kept as local: %v"
+msgstr "无法验证来源，保留为本地技能：%v"
+
+#, go-format
+msgid "stage installation failed: %w"
+msgstr "准备临时安装失败：%w"
+
+#, go-format
 msgid "start git cat-file: %w"
 msgstr "启动 git cat-file: %w"
 
@@ -791,6 +884,10 @@ msgstr "treehash 不符，记录 %s，实算 %s"
 #, go-format
 msgid "treehash verification failed before writing version snapshot: expected %s, computed %s"
 msgstr "写入版本快照前 treehash 校验失败: 期望 %s，实算 %s"
+
+#, go-format
+msgid "unknown install mode %q; expected auto or copy"
+msgstr "未知安装模式 %q；应为 auto 或 copy"
 
 msgid "unlocked"
 msgstr "未锁定"

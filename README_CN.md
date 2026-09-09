@@ -41,7 +41,8 @@ skillmod 通过系统 `git` 可执行文件获取源码，因此必须安装 Git
 - **源直接走 git**（对应 go 的 direct 模式）：skill = 带 tag 的 repo 或 monorepo 子目录（`<repo>//<subdir>`），打 tag 即发布；无服务端、无 registry
 - **版本三种形态**：semver tag / commit SHA / 伪版本（无 tag 仓兜底）；分支名拒绝——可变引用不可锁定
 - **共享持久存储**：`~/.agents/skillmod/pkg/mod/<域名>/<组织>/<repo>@<版本>` 保存可读、只读的整仓版本快照；bare Git、refs 与解析元数据位于 `pkg/mod/cache`，HTTPS / 默认端口 SSH / `.git` 变体共享；可用 `SKILLMOD_HOME` 覆盖
-- **拷贝安装**：字节级拷贝（Windows 兼容），sync 永不自动删除文件，清理走确认制 `prune`
+- **优先链接安装**：默认 `auto` 链接到共享只读快照；系统不支持软链接时自动拷贝，Windows 无链接权限也可使用。需要独立目录时使用 `copy`
+- **接管已有技能**：`init` 扫描普通目录与目录链接；`--global` 管理用户级技能，项目和全局复用同一份缓存
 - **扁平 1:1**：无传递依赖解析，无约束求解器
 - **零遥测**
 
@@ -85,6 +86,42 @@ skillmod verify                                        # CI 校验，漂移退�
 
 耗时较长的 `get` 和 `update` 会在交互式终端显示紧凑的动态状态区：主阶段显示在 spinner 旁，同时存在的子状态以弱色拼接在第二行。远程版本检查只请求 HEAD、分支和 tag refs；`update` 会合并同一仓库的等价 URL，并最多并发检查四个不同仓库。同一命令内，仓库缓存快照只做一次完整性校验，skill 名发现和批量选择会复用该结果。
 
+### 接管已有目录：项目与全局
+
+```bash
+skillmod init --yes --dry-run          # 预览当前项目的导入结果
+skillmod init --yes                    # 登记当前项目已有技能
+skillmod --global init --yes           # 登记用户已有技能
+skillmod --global list
+skillmod --global verify
+```
+
+`init` 扫描所选范围的 `.agents/skills/` 和 `.claude/skills/`，保留原有目录、链接和文件。有效目录链接会跟随到内容进行校验；失效链接、不可校验内容和非法目录名会列出并跳过。同名目录在两个平台中内容不一致时，需要先整理或重命名，避免登记错误的基线。
+
+来源恢复优先使用匹配的旧锁记录或经过校验的 skillmod 缓存快照（包括 monorepo 子目录与 alias）。`init --global` 还会导入上游安装器的 `.skill-lock.json`，项目初始化会读取 `skills-lock.json`。只要旧记录中的 Git 来源和版本可以解析，即使已安装目录发生漂移，init 仍以该来源版本为准写入清单，同时报告漂移并建议运行 `skillmod sync`。无法解析的来源会保留为本地基线，单个条目失败不会丢弃本次导入的其他结果。导入同时生成 `SKILL.mod` 和 `SKILL.lock`；已有声明需要 `--force`，写入前会备份为 `SKILL.mod.bak`。
+
+| 范围 | 声明与锁文件位置 | 默认技能安装位置 |
+| --- | --- | --- |
+| 项目（默认） | 当前目录的 `SKILL.mod`、`SKILL.lock` | 当前目录的 `.agents/skills/` |
+| 全局（`--global`） | `$SKILLMOD_HOME/global/`，默认 `~/.agents/skillmod/global/` | `~/.agents/skills/` |
+
+**缓存只有一份**：两个范围都使用 `$SKILLMOD_HOME/pkg/mod/`（默认 `~/.agents/skillmod/pkg/mod/`）。`global/` 仅存清单，不包含另一份快照缓存。启用 Claude Code 时，全局安装目录为 `~/.claude/skills/`。所有七个命令都支持 `--global`；默认命令不会自动合并项目与全局清单。`--dry-run` 不写清单或安装目录，远程来源校验可能填充共享缓存。
+
+### 安装方式与旧拷贝迁移
+
+```bash
+skillmod sync --relink --dry-run       # 预览已锁定远程技能的重新安装
+skillmod sync --relink                 # 把内容一致的旧拷贝转为链接，不能链接则拷贝
+skillmod --global sync --relink        # 同样适用于全局
+skillmod sync --relink --install-mode=copy  # 转成独立、可编辑的目录
+```
+
+普通 `sync` 保留内容已一致的安装，维持幂等；`--relink` 显式按所选安装方式重装远程条目。两者都遵守本地修改的冲突处理规则，`--yes` 不会强制覆盖冲突；本地条目只登记和校验，不会自动迁移。
+
+`auto` 优先使用系统目录软链接，创建失败时回退为字节级拷贝；`copy` 始终创建独立目录。可通过 `--install-mode` 临时覆盖配置中的 `install_mode`。链接指向共享只读快照，需要编辑时先使用 `copy` 模式分离目录。技能内部的符号链接仍不支持。
+
+安装方式、缓存绝对路径和作用范围均不写入 `SKILL.mod` / `SKILL.lock`，因此相同声明与版本在不同系统、不同安装模式下仍产生相同的清单与锁文件。更新只切换当前范围的安装入口；`prune` 删除被移除条目的安装入口，不删除链接目标或共享缓存。缓存目前不会自动回收；手动清理快照前须确认没有安装链接使用它。
+
 ### 命令输出语言
 
 命令帮助、执行摘要、交互提示、错误信息及 JSON 中的人类可读说明优先采用显式设置的 `SKILLMOD_LANG`。未设置时，skillmod 按 `LC_ALL` → `LC_MESSAGES` → `LANG` 读取第一个非空的系统 locale。目前识别英文和中文 locale；未设置或无法识别时回退到英文。可用 `SKILLMOD_LANG=zh` 显式选择中文；也支持 `en_US.UTF-8`、`zh_CN.UTF-8` 这类 locale 值。
@@ -122,6 +159,7 @@ go generate ./internal/i18n
 
 ```toml
 agents = ["agents", "claude-code"]
+install_mode = "auto" # auto / copy
 ```
 
 安装目录是由 lock 重建的产物，建议项目 `.gitignore` 忽略 `.agents/skills/`

@@ -26,10 +26,23 @@ func HashBlobs(files []string, open func(string) (io.ReadCloser, error)) (string
 }
 
 // HashDir recomputes an h1: hash for a directory by walking regular files and slash-normalizing paths.
-// Installation directories must not contain symlinks because v0.0.1 rejects skills that contain them.
+// A directory link at the installation root is followed. Links within the skill
+// remain unsupported so hashes retain portable, repository-relative semantics.
 func HashDir(dir string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", err
+	}
+	st, err := os.Stat(resolved)
+	if err != nil {
+		return "", err
+	}
+	if !st.IsDir() {
+		return "", fmt.Errorf(i18n.Text("not a skill directory: %s"), dir)
+	}
+	dir = resolved
 	var files []string
-	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

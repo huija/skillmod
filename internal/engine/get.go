@@ -220,14 +220,14 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 		plans = append(plans, plannedInstall{name: entry.dir, contentDir: entry.mat.contentDir, targets: entry.targets})
 	}
 	// Phase 2 installs first and writes mod and lock only on success; restore old directories if writing fails.
-	finalize, err := applyInstalls(plans)
+	finalize, err := applyInstallsWithMode(plans, e.Config.InstallMode)
 	if err != nil {
 		return nil, err
 	}
-	if err := modfile.SaveMod(e.Root, m); err != nil {
+	if err := e.saveMod(m); err != nil {
 		return nil, errors.Join(err, finalize(false))
 	}
-	if err := modfile.SaveLock(e.Root, lock); err != nil {
+	if err := modfile.SaveLock(e.manifestRoot(), lock); err != nil {
 		return nil, errors.Join(err, finalize(false))
 	}
 	if err := finalize(true); err != nil {

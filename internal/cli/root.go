@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -18,6 +19,7 @@ import (
 	"github.com/huija/skillmod/internal/config"
 	"github.com/huija/skillmod/internal/engine"
 	"github.com/huija/skillmod/internal/i18n"
+	"github.com/huija/skillmod/internal/install"
 	"github.com/huija/skillmod/internal/source"
 	"github.com/huija/skillmod/internal/store"
 	"github.com/huija/skillmod/internal/ui"
@@ -32,9 +34,11 @@ const (
 
 // Global flags.
 var (
-	flagJSON   bool
-	flagYes    bool
-	flagDryRun bool
+	flagInstallMode string
+	flagGlobal      bool
+	flagJSON        bool
+	flagYes         bool
+	flagDryRun      bool
 
 	// Version is set by main from the build-time version metadata.
 	Version = "dev"
@@ -53,6 +57,8 @@ ensuring every machine gets exactly the same set of skills.`),
 		SilenceErrors: true,
 	}
 	pf := root.PersistentFlags()
+	pf.StringVar(&flagInstallMode, "install-mode", "", i18n.Text("installation mode: auto or copy (overrides config)"))
+	pf.BoolVar(&flagGlobal, "global", false, i18n.Text("manage user-wide skills instead of the current project"))
 	pf.BoolVar(&flagJSON, "json", false, i18n.Text("output structured results as JSON"))
 	pf.BoolVar(&flagYes, "yes", false, i18n.Text("skip interactive confirmation (for CI)"))
 	pf.BoolVar(&flagDryRun, "dry-run", false, i18n.Text("print the execution plan without writing files"))
@@ -82,9 +88,15 @@ func Execute() int {
 	return ExitOK
 }
 
-// newEngine creates an engine using the current working directory as the project root.
+// newEngine selects declarations and installation roots while sharing one user store.
 func newEngine() (*engine.Engine, error) {
-	root, err := os.Getwd()
+	var root string
+	var err error
+	if flagGlobal {
+		root, err = os.UserHomeDir()
+	} else {
+		root, err = os.Getwd()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -96,11 +108,22 @@ func newEngine() (*engine.Engine, error) {
 	if err != nil {
 		return nil, err
 	}
+	if flagInstallMode != "" {
+		cfg.InstallMode = install.Mode(flagInstallMode)
+	}
+	if err := install.ValidateMode(cfg.InstallMode); err != nil {
+		return nil, err
+	}
+	manifestRoot := ""
+	if flagGlobal {
+		manifestRoot = filepath.Join(s.Root(), "global")
+	}
 	return &engine.Engine{
-		Root:   root,
-		Source: &source.Source{VCSRoot: s.VCSRoot()},
-		Store:  s,
-		Config: cfg,
+		ManifestRoot: manifestRoot,
+		Root:         root,
+		Source:       &source.Source{VCSRoot: s.VCSRoot()},
+		Store:        s,
+		Config:       cfg,
 	}, nil
 }
 

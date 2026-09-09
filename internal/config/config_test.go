@@ -115,3 +115,26 @@ func isolatedConfigPath(t *testing.T) string {
 	}
 	return p
 }
+
+func TestLoadInstallMode(t *testing.T) {
+	p := isolatedConfigPath(t)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("install_mode = \"copy\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.InstallMode != "copy" {
+		t.Errorf("Load install mode = %q, want copy", cfg.InstallMode)
+	}
+	if err := os.WriteFile(p, []byte("install_mode = \"unknown\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(); err == nil {
+		t.Error("Load accepted invalid install mode")
+	}
+}

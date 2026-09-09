@@ -60,7 +60,11 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 		conflictsBefore := len(conflicts)
 		for _, a := range adapters {
 			dst := adapterDir(a, e.Root, en.skill.DirName())
-			switch classifyTarget(dst, en.dirhash, prevHash) {
+			action := classifyTarget(dst, en.dirhash, prevHash)
+			if action == "keep" && io.Relink {
+				action = "install"
+			}
+			switch action {
 			case "install":
 				targets = append(targets, dst)
 			case "conflict":
@@ -160,7 +164,7 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 		return rep, nil
 	}
 
-	finalize, err := applyInstalls(plans)
+	finalize, err := applyInstallsWithMode(plans, e.Config.InstallMode)
 	if err != nil {
 		return nil, err
 	}

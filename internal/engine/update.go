@@ -193,14 +193,14 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 		return rep, nil
 	}
 
-	finalize, err := applyInstalls(plans)
+	finalize, err := applyInstallsWithMode(plans, e.Config.InstallMode)
 	if err != nil {
 		return nil, err
 	}
-	if err := modfile.SaveMod(e.Root, m); err != nil {
+	if err := e.saveMod(m); err != nil {
 		return nil, errors.Join(err, finalize(false))
 	}
-	if err := modfile.SaveLock(e.Root, lock); err != nil {
+	if err := modfile.SaveLock(e.manifestRoot(), lock); err != nil {
 		return nil, errors.Join(err, finalize(false))
 	}
 	if err := finalize(true); err != nil {

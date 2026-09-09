@@ -41,7 +41,8 @@ skillmod invokes the system `git` executable to fetch sources, so Git must be in
 - **Direct Git sources**, analogous to Go's direct mode: a skill is either a tagged repository or a monorepo subdirectory (`<repo>//<subdir>`). Publishing means creating a tag; no server or registry is required.
 - **Three version forms**: semantic-version tags, commit SHAs, and pseudo-versions for repositories without tags. Branch names are rejected because mutable references cannot be locked.
 - **Shared persistent storage**: readable, immutable full-repository snapshots are stored at `~/.agents/skillmod/pkg/mod/<host>/<owner>/<repo>@<version>`. Bare Git repositories, refs, and resolution metadata live under `pkg/mod/cache`. HTTPS, default-port SSH, and `.git` URL variants share storage. Set `SKILLMOD_HOME` to override the location.
-- **Copy-based installation**: byte-for-byte copies with Windows support. `sync` never deletes files automatically; confirmed cleanup is handled by `prune`.
+- **Link-first installation**: `auto` links to shared read-only snapshots, falling back to byte-for-byte copies when links are unavailable, including Windows without link privileges. Use `copy` for an independent directory.
+- **Adopt existing skills**: `init` discovers directories and directory links. `--global` manages user-wide skills using the same shared cache as projects.
 - **Flat 1:1 dependencies**: no transitive dependency resolution and no constraint solver.
 - **Zero telemetry**
 
@@ -85,6 +86,42 @@ When different sources publish the same skill name, install the additional entry
 
 Long-running `get` and `update` operations show a compact animated status block on interactive terminals: the primary stage appears beside the spinner, with simultaneous detail states on a muted second line. Remote version checks request only HEAD, branch, and tag refs; `update` deduplicates equivalent repository URLs and checks up to four distinct repositories concurrently. Cached repository snapshots are integrity-checked once per command and reused across skill-name discovery and batch selection.
 
+### Adopt existing directories: project and global scopes
+
+```bash
+skillmod init --yes --dry-run          # Preview the current project's import
+skillmod init --yes                    # Adopt existing project skills
+skillmod --global init --yes           # Adopt existing user-wide skills
+skillmod --global list
+skillmod --global verify
+```
+
+`init` scans `.agents/skills/` and `.claude/skills/` in the selected scope without changing existing directories, links, or files. Directory links are followed for content verification. Broken links, unverifiable contents, and invalid directory names are reported and skipped. Different contents at the same directory name across platforms must be reconciled or renamed first.
+
+Provenance is recovered from matching existing lock records or verified skillmod snapshots, including monorepo subdirectories and aliases. `init --global` also imports the upstream installer's `.skill-lock.json`, while project init reads `skills-lock.json`. A recorded Git source and revision remain authoritative even when the installed directory has drifted; init records that revision, reports the drift, and recommends `skillmod sync`. Sources that cannot be resolved are retained as local baselines so one unresolved entry does not discard the rest of the import. Import writes both `SKILL.mod` and `SKILL.lock`; replacing an existing declaration requires `--force`, which first backs it up as `SKILL.mod.bak`.
+
+| Scope | Declaration and lock location | Default installation directory |
+| --- | --- | --- |
+| Project (default) | `SKILL.mod` and `SKILL.lock` in the current directory | `.agents/skills/` in the current directory |
+| Global (`--global`) | `$SKILLMOD_HOME/global/`, default `~/.agents/skillmod/global/` | `~/.agents/skills/` |
+
+**There is only one cache**: both scopes use `$SKILLMOD_HOME/pkg/mod/`, defaulting to `~/.agents/skillmod/pkg/mod/`. The `global/` directory contains manifests, not another snapshot cache. With the Claude Code adapter enabled, global installations use `~/.claude/skills/`. All seven commands support `--global`; project commands do not automatically merge the global manifest. `--dry-run` leaves manifests and installations untouched, though remote provenance verification may populate the shared cache.
+
+### Installation modes and migrating existing copies
+
+```bash
+skillmod sync --relink --dry-run       # Preview reinstalling locked remote skills
+skillmod sync --relink                 # Convert matching copies to links, with copy fallback
+skillmod --global sync --relink        # The same operation for global skills
+skillmod sync --relink --install-mode=copy  # Detach into independent, editable directories
+```
+
+Ordinary `sync` preserves matching installations and remains idempotent. `--relink` explicitly reinstalls remote entries using the selected mode. Both respect local-modification conflict handling; `--yes` does not force conflicting files to be overwritten. Local entries are recorded and verified without automatic migration.
+
+`auto` prefers native directory symlinks and falls back to copies if link creation fails; `copy` always creates an independent directory. `--install-mode` overrides the machine configuration's `install_mode` setting. Links point at shared read-only snapshots; detach with `copy` before editing. Symlinks inside skill contents remain unsupported.
+
+Installation mode, absolute cache paths, and scope are excluded from `SKILL.mod` and `SKILL.lock`. Identical declarations and versions therefore produce identical manifests and locks across systems and installation modes. Updating switches only the selected scope's installation entry. `prune` removes stale installation entries without deleting link targets or shared snapshots. There is no automatic cache eviction; before manually deleting a snapshot, ensure that no installed link uses it.
+
 ### Command output language
 
 Command help, summaries, prompts, errors, and human-readable JSON notes follow `SKILLMOD_LANG` when it is explicitly set. Otherwise, skillmod reads the first non-empty system locale in `LC_ALL` → `LC_MESSAGES` → `LANG`. English and Chinese locale values are recognized; missing or unsupported locales fall back to English. Use `SKILLMOD_LANG=zh` to select Chinese explicitly. Locale-style values such as `en_US.UTF-8` and `zh_CN.UTF-8` are also accepted.
@@ -122,6 +159,7 @@ Skills are installed into the project's `.agents/skills/` directory by default. 
 
 ```toml
 agents = ["agents", "claude-code"]
+install_mode = "auto" # auto / copy
 ```
 
 Installation directories are artifacts reconstructed from the lock file. Projects should add `.agents/skills/` to `.gitignore` and, when the Claude adapter is enabled, also ignore `.claude/skills/`. Commit only `SKILL.mod` and `SKILL.lock`.

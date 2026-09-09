@@ -4,7 +4,7 @@
 
 // Package engine orchestrates transactional logic for get, sync, verify, update, prune, list, and init.
 // Its core principle is validate before writing in two phases: phase 1 never writes project files,
-// so network, hash, and conflict failures happen before phase 2 performs only local copies.
+// so network, hash, and conflict failures happen before phase 2 installs local links or copies.
 package engine
 
 import (
@@ -34,10 +34,11 @@ import (
 
 // Engine is the business core; the CLI layer only handles I/O.
 type Engine struct {
-	Root   string         // project root directory
-	Source *source.Source // Git interactions
-	Store  *store.Store   // persistent version snapshots and resolution index
-	Config *config.Config // machine-level settings such as platform selection
+	Root         string         // installation scope root: project directory or user home
+	ManifestRoot string         // declaration directory; empty uses Root
+	Source       *source.Source // Git interactions
+	Store        *store.Store   // persistent version snapshots and resolution index
+	Config       *config.Config // machine-level settings such as platform selection
 }
 
 // IO contains the input, output, and confirmation channels for one command run.
@@ -46,6 +47,7 @@ type IO struct {
 	Confirm  ui.Confirmer // nil means non-interactive and applies safe conflict defaults
 	Progress ui.Progress  // nil disables interactive activity updates
 	Yes      bool         // skip confirmation in CI
+	Relink   bool         // explicitly convert matching remote installations using the configured mode
 	DryRun   bool         // report the plan without writing files
 }
 
@@ -122,8 +124,24 @@ func (e *Engine) adapters() ([]install.Adapter, error) {
 	return install.ByNames(e.Config.Agents)
 }
 
+func (e *Engine) manifestRoot() string {
+	if e.ManifestRoot != "" {
+		return e.ManifestRoot
+	}
+	return e.Root
+}
+
+func (e *Engine) saveMod(m *modfile.Mod) error {
+	if e.ManifestRoot != "" {
+		if err := os.MkdirAll(e.ManifestRoot, 0o755); err != nil {
+			return err
+		}
+	}
+	return modfile.SaveMod(e.manifestRoot(), m)
+}
+
 func (e *Engine) loadMod() (*modfile.Mod, error) {
-	m, err := modfile.LoadMod(e.Root)
+	m, err := modfile.LoadMod(e.manifestRoot())
 	if os.IsNotExist(err) {
 		return nil, fmt.Errorf("%s", i18n.Text("SKILL.mod not found\nAdvice: run skillmod init or skillmod get first"))
 	}
@@ -132,7 +150,7 @@ func (e *Engine) loadMod() (*modfile.Mod, error) {
 
 // loadModOrEmpty returns an empty declaration when none exists so get can create it automatically.
 func (e *Engine) loadModOrEmpty() (*modfile.Mod, error) {
-	m, err := modfile.LoadMod(e.Root)
+	m, err := modfile.LoadMod(e.manifestRoot())
 	if os.IsNotExist(err) {
 		return &modfile.Mod{SchemaVersion: modfile.SchemaVersion}, nil
 	}
@@ -145,7 +163,7 @@ func (e *Engine) loadModOrEmpty() (*modfile.Mod, error) {
 // which would make sync/prune act on an empty lock and quietly discard data.
 // Validation failures are wrapped with a remediation hint.
 func (e *Engine) loadLock() (*modfile.Lock, error) {
-	l, err := modfile.LoadLock(e.Root)
+	l, err := modfile.LoadLock(e.manifestRoot())
 	if os.IsNotExist(err) {
 		return &modfile.Lock{}, nil
 	}
@@ -199,11 +217,11 @@ func (e *Engine) saveLockIfChanged(lock *modfile.Lock) error {
 	if err != nil {
 		return err
 	}
-	old, err := os.ReadFile(filepath.Join(e.Root, modfile.LockFileName))
+	old, err := os.ReadFile(filepath.Join(e.manifestRoot(), modfile.LockFileName))
 	if err == nil && bytes.Equal(old, newBytes) {
 		return nil
 	}
-	return modfile.SaveLock(e.Root, lock)
+	return modfile.SaveLock(e.manifestRoot(), lock)
 }
 
 func upsertLock(l *modfile.Lock, e modfile.LockSkill) {
@@ -687,6 +705,10 @@ type plannedInstall struct {
 // or finalize(false) on a write failure to restore old directories and keep declarations aligned with the filesystem.
 // finalize(false) describes any rollback failure, which callers join with the error that triggered it.
 func applyInstalls(plans []plannedInstall) (finalize func(ok bool) error, err error) {
+	return applyInstallsWithMode(plans, install.Auto)
+}
+
+func applyInstallsWithMode(plans []plannedInstall, mode install.Mode) (finalize func(ok bool) error, err error) {
 	type applied struct {
 		restore func() error
 		commit  func()
@@ -706,7 +728,7 @@ func applyInstalls(plans []plannedInstall) (finalize func(ok bool) error, err er
 	}
 	for _, p := range plans {
 		for _, tgt := range p.targets {
-			restore, commit, err := install.Install(p.contentDir, tgt)
+			restore, commit, err := install.InstallWithMode(p.contentDir, tgt, mode)
 			if err != nil {
 				primary := fmt.Errorf(i18n.Text("install %s to %s (rolling back changes): %w"), p.name, tgt, err)
 				return nil, errors.Join(primary, rollback())

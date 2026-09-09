@@ -6,7 +6,9 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -21,15 +23,22 @@ import (
 	"github.com/huija/skillmod/internal/modfile"
 	"github.com/huija/skillmod/internal/resolve"
 	"github.com/huija/skillmod/internal/source"
+	"github.com/huija/skillmod/internal/store"
 )
 
 // Init implements skillmod init by scanning existing skills and drafting SKILL.mod (PRD §3.1).
 // It only reads existing skill files, refuses to run when SKILL.mod exists, and backs up and rebuilds with --force.
 func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
-	modPath := filepath.Join(e.Root, modfile.ModFileName)
+	modPath := filepath.Join(e.manifestRoot(), modfile.ModFileName)
 	if _, err := os.Stat(modPath); err == nil && !force {
 		return nil, fmt.Errorf(i18n.Text("%s already exists\nAdvice: review it, then use --force to regenerate it (the original is backed up as SKILL.mod.bak)"), modPath)
 	}
+
+	legacy, legacyErr := e.legacySkills()
+	if legacyErr != nil {
+		legacy = nil
+	}
+	defer io.stopProgress()
 
 	// init is the migration and discovery entry point; scan all known platform directories independently of configured installation targets.
 	adapters := install.All()
@@ -38,8 +47,9 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 	type scanned struct {
 		name    string // SKILL.md frontmatter name; use the directory name as a placeholder on parse failure
 		dirName string
-		srcDir  string
+		srcDirs []string // every identical installation found across platform adapters
 		note    string
+		hash    string
 	}
 	// The installation directory, not frontmatter name, identifies an entry.
 	// The same directory is intentionally merged across platform adapters,
@@ -49,18 +59,26 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 	for _, a := range adapters {
 		base := a.SkillsDir(e.Root)
 		dents, err := os.ReadDir(base)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
 		if err != nil {
-			continue // The platform directory does not exist.
+			return nil, err
 		}
 		for _, d := range dents {
-			if !d.IsDir() {
+			dir := filepath.Join(base, d.Name())
+			st, statErr := os.Stat(dir)
+			if statErr != nil {
+				skipped = append(skipped, i18n.Format("%s (unreadable or broken directory link: %v)", dir, statErr))
 				continue
 			}
-			dir := filepath.Join(base, d.Name())
+			if !st.IsDir() {
+				continue
+			}
 			if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil {
 				continue
 			}
-			s := &scanned{dirName: d.Name(), srcDir: dir}
+			s := &scanned{dirName: d.Name(), srcDirs: []string{dir}}
 			name, err := source.SkillNameFromDir(dir)
 			if err != nil {
 				// Use the directory name as specified by the PRD §3.1 error table,
@@ -80,8 +98,18 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 					}
 				}
 			}
+			h, err := dirhash.HashDir(dir)
+			if err != nil {
+				skipped = append(skipped, i18n.Format("%s (%v)", dir, err))
+				continue
+			}
+			s.hash = h
 			if prev, ok := seen[s.dirName]; ok {
-				prev.note = i18n.Text("a skill with the same name appears in multiple platform directories; merged into one entry")
+				if prev.hash != h || prev.name != s.name {
+					return nil, fmt.Errorf(i18n.Text("cannot import different skills at %s and %s under the same directory name; reconcile them or rename one first"), prev.srcDirs[0], dir)
+				}
+				prev.srcDirs = append(prev.srcDirs, dir)
+				prev.note = appendInitNote(prev.note, i18n.Text("a skill with the same name appears in multiple platform directories; merged into one entry"))
 				continue // Treat the same installation directory as one skill.
 			}
 			seen[s.dirName] = s
@@ -93,7 +121,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 	for _, s := range seen {
 		key := fsutil.FoldKey(s.dirName)
 		if prev, ok := folded[key]; ok {
-			return nil, fmt.Errorf(i18n.Text("init found skills %q (in %s) and %q (in %s) that differ only in letter case and would map to the same installation directory; rename one of them"), prev, seen[prev].srcDir, s.dirName, s.srcDir)
+			return nil, fmt.Errorf(i18n.Text("init found skills %q (in %s) and %q (in %s) that differ only in letter case and would map to the same installation directory; rename one of them"), prev, seen[prev].srcDirs[0], s.dirName, s.srcDirs[0])
 		}
 		folded[key] = s.dirName
 	}
@@ -127,6 +155,33 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 		return nil, err
 	}
 	rep := &Report{Action: "init"}
+	if legacyErr != nil {
+		rep.Notes = append(rep.Notes, legacyErr.Error())
+	}
+	memo := newOperationMemo(io.Progress)
+	var locator *store.SnapshotLocator
+	if e.Store != nil {
+		locator = e.Store.NewSnapshotLocator()
+	}
+	importer := &legacyImporter{engine: e, records: make(map[string]legacySkill), ambiguous: make(map[string]string), memo: memo}
+	for _, dirName := range names {
+		name := seen[dirName].name
+		dirRecord, hasDirRecord := legacy[dirName]
+		nameRecord, hasNameRecord := legacy[name]
+		// A legacy map normally uses the published name as its key, while an
+		// alias uses the installation directory. Prefer the directory key for
+		// an exact slot match; if both keys exist with different records, do
+		// not guess which source belongs to the installed files.
+		switch {
+		case hasDirRecord && hasNameRecord && dirName != name && dirRecord != nameRecord:
+			importer.ambiguous[dirName] = i18n.Format("ambiguous previous installer records for directory %q and skill name %q; retained as a local baseline", dirName, name)
+		case hasDirRecord:
+			importer.records[dirName] = dirRecord
+		case hasNameRecord:
+			importer.records[dirName] = nameRecord
+		}
+	}
+	unresolved := 0
 	if len(skipped) > 0 {
 		rep.Notes = append(rep.Notes, i18n.Text("the following directories were skipped because they cannot be represented as valid SKILL.mod entries:"))
 		for _, msg := range skipped {
@@ -141,44 +196,140 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 			alias = s.dirName
 		}
 		entry := EntryReport{Name: name}
-		var matched *modfile.ModSkill
-		for _, sr := range sources {
-			// Monorepo convention: match a <directory-name>/v* tag prefix.
-			if r, err := resolve.Resolve(resolve.Request{Repo: sr.repo, Subdir: s.dirName}, sr.refs); err == nil && r.Kind == resolve.KindTag && hasPrefixTag(sr.refs, s.dirName+"/") {
-				matched = &modfile.ModSkill{Name: name, Source: sr.repo + "//" + s.dirName, Version: r.Version, Alias: alias}
-				break
-			}
-			// Single-repository convention: the repository name equals the directory name and has a root tag.
-			if strings.TrimSuffix(path.Base(sr.repo), ".git") == s.dirName {
-				if r, err := resolve.Resolve(resolve.Request{Repo: sr.repo}, sr.refs); err == nil && r.Kind == resolve.KindTag {
-					matched = &modfile.ModSkill{Name: name, Source: sr.repo, Version: r.Version, Alias: alias}
-					break
+		matched, matchedLock, identifyErr := e.identifyInstalled(s.srcDirs, name, alias, s.hash, lock, locator)
+		if identifyErr != nil {
+			entry.Note = i18n.Format("installed provenance could not be recovered: %v", identifyErr)
+		}
+		previous, recorded := importer.records[dirName]
+		// An ambiguous legacy slot never contributes provenance. Its diagnostic
+		// only describes a local baseline, so it is appended after matching has
+		// decided the entry's final action.
+		var ambiguity string
+		if message, isAmbiguous := importer.ambiguous[dirName]; isAmbiguous {
+			recorded = true
+			ambiguity = message
+		} else if matched == nil && recorded && previous.SourceType != "local" {
+			io.setProgress(i18n.Format("recovering installed skill provenance: %s", name))
+			rctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+			matched, matchedLock, err = importer.match(rctx, previous, name, alias)
+			cancel()
+			if err != nil {
+				entry.Action = "unresolved"
+				entry.Source = previous.Source
+				if repo, subdir, locationErr := previous.location(); locationErr == nil {
+					entry.Source = source.RepoIdentity(repo)
+					if subdir != "" {
+						entry.Source += subdirSuffix(subdir)
+					}
 				}
+				entry.Note = appendInitNote(entry.Note, err.Error())
+				entry.Targets = append([]string(nil), s.srcDirs...)
+				// Preserve a usable declaration and baseline even when the old
+				// installer record cannot be verified today. The source is kept in
+				// the report so the user can retry or repair it later; treating this
+				// one entry as local must not discard all successfully recovered
+				// entries from the same import.
+				m.Skills = append(m.Skills, modfile.ModSkill{Name: name, Alias: alias, Local: true})
+				upsertLock(lock, modfile.LockSkill{Name: name, Dirhash: s.hash, Dir: alias})
+				rep.Entries = append(rep.Entries, entry)
+				unresolved++
+				continue
 			}
 		}
+		for _, sr := range sources {
+			if recorded {
+				break
+			} // Explicit legacy provenance wins over directory-name heuristics.
+			if matched != nil {
+				break
+			}
+			var subdir string
+			var candidate *resolve.Resolution
+			// Monorepo convention: match a <directory-name>/v* tag prefix.
+			if r, err := resolve.Resolve(resolve.Request{Repo: sr.repo, Subdir: s.dirName}, sr.refs); err == nil && r.Kind == resolve.KindTag && hasPrefixTag(sr.refs, s.dirName+"/") {
+				subdir, candidate = s.dirName, r
+			}
+			// Single-repository convention: the repository name equals the directory name and has a root tag.
+			if candidate == nil && strings.TrimSuffix(path.Base(sr.repo), ".git") == s.dirName {
+				if r, err := resolve.Resolve(resolve.Request{Repo: sr.repo}, sr.refs); err == nil && r.Kind == resolve.KindTag {
+					candidate = r
+				}
+			}
+			if candidate == nil {
+				continue
+			}
+			rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			mat, matchErr := e.materialize(rctx, sr.repo, subdir, *candidate, "", memo)
+			cancel()
+			if matchErr != nil {
+				entry.Note = appendInitNote(entry.Note, i18n.Format("source could not be verified; kept as local: %v", matchErr))
+				continue
+			}
+			if mat.dirhash != s.hash {
+				continue
+			}
+			src := sr.repo
+			if subdir != "" {
+				src += subdirSuffix(subdir)
+			}
+			matched = &modfile.ModSkill{Name: name, Source: src, Version: mat.version, Alias: alias}
+			matchedLock = &modfile.LockSkill{Name: name, Source: src, Version: mat.version, Commit: mat.commit, Dirhash: mat.dirhash, Dir: alias}
+		}
 		if matched != nil {
+			upsertLock(lock, *matchedLock)
 			entry.Source = matched.Source
 			entry.Version = matched.Version
 			entry.Action = "matched"
+			if identifyErr != nil {
+				// A legacy record or known-source match supersedes a corrupt
+				// snapshot provenance lookup; do not report the intermediate
+				// failure after recovery has succeeded.
+				entry.Note = ""
+			}
+			if recorded && matchedLock.Dirhash != s.hash {
+				entry.Note = appendInitNote(entry.Note, i18n.Text("installed contents differ from the recorded source revision; the recorded source version was retained; run skillmod sync to align"))
+			}
 			m.Skills = append(m.Skills, *matched)
 		} else {
 			// For a local entry, record its name and baseline content dirhash (PRD §3.1 rule 2).
-			h, err := dirhash.HashDir(s.srcDir)
-			if err != nil {
-				return nil, err
-			}
 			m.Skills = append(m.Skills, modfile.ModSkill{Name: name, Alias: alias, Local: true})
-			upsertLock(lock, modfile.LockSkill{Name: name, Dirhash: h, Dir: alias})
+			upsertLock(lock, modfile.LockSkill{Name: name, Dirhash: s.hash, Dir: alias})
 			entry.Action = "local"
+			if ambiguity != "" {
+				entry.Note = appendInitNote(entry.Note, ambiguity)
+			} else if !recorded && entry.Note == "" {
+				entry.Note = i18n.Text("no verifiable source record found; retained as a local baseline")
+			}
 		}
 		if s.note != "" {
-			entry.Note = s.note
+			entry.Note = appendInitNote(entry.Note, s.note)
 		}
 		rep.Entries = append(rep.Entries, entry)
 	}
 
 	if len(rep.Entries) == 0 {
 		rep.Notes = append(rep.Notes, i18n.Text("no skills found; generated an empty manifest—use skillmod get to add one"))
+	}
+	if unresolved > 0 {
+		rep.Notes = append(rep.Notes, i18n.Format("%d skills had known but unresolved sources; those entries were retained as local baselines and can be retried later", unresolved))
+	}
+
+	io.stopProgress()
+	for _, entry := range rep.Entries {
+		summary := entry.Name + ": " + entry.Action
+		if entry.Source != "" {
+			summary += " " + entry.Source
+		}
+		if entry.Version != "" {
+			summary += " " + entry.Version
+		}
+		io.printf("  %s", summary)
+		if entry.Note != "" {
+			io.printf("    %s", entry.Note)
+		}
+	}
+	for _, note := range rep.Notes {
+		io.printf("%s", note)
 	}
 
 	// Confirm each entry individually as required by the PRD interaction flow.
@@ -221,13 +372,11 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 			return nil, fmt.Errorf(i18n.Text("backup failed: %w"), err)
 		}
 	}
-	if err := modfile.SaveMod(e.Root, m); err != nil {
+	if err := e.saveMod(m); err != nil {
 		return nil, err
 	}
-	if len(lock.Skills) > 0 {
-		if err := modfile.SaveLock(e.Root, lock); err != nil {
-			return nil, err
-		}
+	if err := modfile.SaveLock(e.manifestRoot(), lock); err != nil {
+		return nil, err
 	}
 	io.printf(i18n.Text("generated %s (%d entries) without changing the original files"), modPath, len(m.Skills))
 	io.printf(i18n.Text("next: run skillmod sync to align the locked state, then commit SKILL.mod and SKILL.lock"))
@@ -241,6 +390,16 @@ func hasPrefixTag(refs *resolve.Refs, prefix string) bool {
 		}
 	}
 	return false
+}
+
+func appendInitNote(existing, note string) string {
+	if existing == "" {
+		return note
+	}
+	if note == "" {
+		return existing
+	}
+	return existing + "; " + note
 }
 
 func copyFile(src, dst string) error {

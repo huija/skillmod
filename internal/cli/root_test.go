@@ -226,14 +226,17 @@ func isolateCLI(t *testing.T) (project, storeRoot string) {
 	configRoot := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configRoot)
 	t.Setenv("HOME", configRoot)
+	t.Setenv("USERPROFILE", configRoot)
 	t.Setenv("AppData", configRoot)
 	return project, storeRoot
 }
 
 func preserveFlags(t *testing.T) {
 	t.Helper()
-	jsonFlag, yesFlag, dryRunFlag := flagJSON, flagYes, flagDryRun
+	jsonFlag, yesFlag, dryRunFlag, globalFlag := flagJSON, flagYes, flagDryRun, flagGlobal
+	installMode := flagInstallMode
 	t.Cleanup(func() {
-		flagJSON, flagYes, flagDryRun = jsonFlag, yesFlag, dryRunFlag
+		flagJSON, flagYes, flagDryRun, flagGlobal = jsonFlag, yesFlag, dryRunFlag, globalFlag
+		flagInstallMode = installMode
 	})
 }

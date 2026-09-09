@@ -8,6 +8,7 @@
 package install
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -119,25 +120,92 @@ func CopyDir(src, dst string) error {
 	})
 }
 
-// Install atomically installs srcDir at dst by copying to a sibling temporary directory, backing up dst
-// at a unique sibling path, and renaming. It returns restore, which swaps the backup back in, and
-// commit, which removes the backup. The unique backup path never deletes an unrelated directory.
+// Install uses Auto mode. srcDir must be a persistent immutable snapshot.
+// It returns restore, which swaps the backup back in, and commit, which removes
+// the backup. Neither operation follows the installation link into the snapshot.
 func Install(srcDir, dst string) (restore func() error, commit func(), err error) {
+	return InstallWithMode(srcDir, dst, Auto)
+}
+
+// Mode controls machine-local installation representation, never manifest data.
+type Mode string
+
+const (
+	// Auto prefers a directory symlink and falls back to a byte-preserving copy.
+	Auto Mode = "auto"
+	// Copy installs an independent writable directory.
+	Copy Mode = "copy"
+)
+
+// ValidateMode rejects unknown modes before any installation changes are made.
+func ValidateMode(mode Mode) error {
+	switch mode {
+	case "", Auto, Copy:
+		return nil
+	default:
+		return fmt.Errorf(i18n.Text("unknown install mode %q; expected auto or copy"), mode)
+	}
+}
+
+// InstallWithMode installs through a sibling temporary link or directory and
+// preserves the existing target until commit. Directory links point to an
+// absolute immutable snapshot path. Go uses native symlinks on Unix and Windows;
+// Auto falls back to Copy when Windows privileges or the filesystem forbid links.
+func InstallWithMode(srcDir, dst string, mode Mode) (restore func() error, commit func(), err error) {
+	return installWithLink(srcDir, dst, mode, os.Symlink)
+}
+
+func installWithLink(srcDir, dst string, mode Mode, link func(string, string) error) (restore func() error, commit func(), err error) {
+	if err := ValidateMode(mode); err != nil {
+		return nil, nil, err
+	}
+	srcDir, err = filepath.Abs(srcDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	srcDir, err = filepath.EvalSymlinks(srcDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := validateSource(srcDir); err != nil {
+		return nil, nil, err
+	}
 	parent := filepath.Dir(dst)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return nil, nil, err
+	}
+	resolvedParent, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		return nil, nil, err
+	}
+	resolvedParent, err = filepath.Abs(resolvedParent)
+	if err != nil {
+		return nil, nil, err
+	}
+	target := filepath.Join(resolvedParent, filepath.Base(dst))
+	insideSource, sourceErr := filepath.Rel(srcDir, target)
+	insideTarget, targetErr := filepath.Rel(target, srcDir)
+	if (sourceErr == nil && filepath.IsLocal(insideSource)) || (targetErr == nil && filepath.IsLocal(insideTarget)) {
+		return nil, nil, fmt.Errorf(i18n.Text("installation source and target must not overlap: %s and %s"), srcDir, dst)
 	}
 	tmp, err := os.MkdirTemp(parent, ".skillmod-tmp-*")
 	if err != nil {
 		return nil, nil, err
 	}
-	// MkdirTemp created the directory, but CopyDir requires it not to exist, so remove it first.
-	if err := os.RemoveAll(tmp); err != nil {
+	// Both the link and CopyDir need a nonexistent destination.
+	if err := os.Remove(tmp); err != nil {
 		return nil, nil, err
 	}
-	if err := CopyDir(srcDir, tmp); err != nil {
+	var stageErr error
+	if mode != Copy {
+		stageErr = link(srcDir, tmp)
+	}
+	if mode == Copy || stageErr != nil {
+		stageErr = CopyDir(srcDir, tmp)
+	}
+	if stageErr != nil {
 		_ = os.RemoveAll(tmp)
-		return nil, nil, fmt.Errorf(i18n.Text("copy to temporary directory failed: %w"), err)
+		return nil, nil, fmt.Errorf(i18n.Text("stage installation failed: %w"), stageErr)
 	}
 
 	// A unique backup path never collides with a user skill whose name merely
@@ -161,11 +229,12 @@ func Install(srcDir, dst string) (restore func() error, commit func(), err error
 		}
 	}
 	if err := os.Rename(tmp, dst); err != nil {
+		var restoreErr error
 		if bak != "" {
-			_ = os.Rename(bak, dst) // Best-effort restoration.
+			restoreErr = os.Rename(bak, dst)
 		}
 		_ = os.RemoveAll(tmp)
-		return nil, nil, fmt.Errorf(i18n.Text("writing to disk failed: %w"), err)
+		return nil, nil, errors.Join(fmt.Errorf(i18n.Text("writing to disk failed: %w"), err), restoreErr)
 	}
 
 	restore = func() error {
@@ -183,4 +252,20 @@ func Install(srcDir, dst string) (restore func() error, commit func(), err error
 		}
 	}
 	return restore, commit, nil
+}
+
+// validateSource applies the same tree rules to linked and copied installations.
+func validateSource(src string) error {
+	return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if p == src && !d.IsDir() {
+			return fmt.Errorf(i18n.Text("not a skill directory: %s"), src)
+		}
+		if !d.IsDir() && !d.Type().IsRegular() {
+			return fmt.Errorf(i18n.Text("version snapshot contains an irregular file: %s"), p)
+		}
+		return nil
+	})
 }

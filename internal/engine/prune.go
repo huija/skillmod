@@ -6,7 +6,9 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 
 	"github.com/huija/skillmod/internal/dirhash"
@@ -59,7 +61,15 @@ func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
 			dst := adapterDir(a, e.Root, dirName)
 			h, err := dirhash.HashDir(dst)
 			if err != nil {
-				continue // Nothing to clean when the target does not exist.
+				// A dangling installation link has no target contents to preserve.
+				// Remove only that entry, never its missing destination.
+				if st, statErr := os.Lstat(dst); errors.Is(err, fs.ErrNotExist) && statErr == nil && st.Mode()&fs.ModeSymlink != 0 {
+					if _, targetErr := os.Stat(dst); errors.Is(targetErr, fs.ErrNotExist) {
+						deletable = append(deletable, dst)
+						entry.Targets = append(entry.Targets, dst)
+					}
+				}
+				continue
 			}
 			if h == lk.Dirhash {
 				deletable = append(deletable, dst)
@@ -102,7 +112,7 @@ func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
 			return nil, fmt.Errorf(i18n.Text("delete %s: %w"), d, err)
 		}
 	}
-	if err := modfile.SaveLock(e.Root, newLock); err != nil {
+	if err := modfile.SaveLock(e.manifestRoot(), newLock); err != nil {
 		return nil, err
 	}
 	io.printf(i18n.Text("pruned %d stale entries"), len(stale))

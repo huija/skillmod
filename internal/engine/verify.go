@@ -21,7 +21,7 @@ func (e *Engine) Verify(ctx context.Context, io IO) (*Report, error) {
 	if err != nil {
 		return nil, err
 	}
-	lock, err := loadLockStrict(e.Root)
+	lock, err := loadLockStrict(e.manifestRoot())
 	if err != nil {
 		return nil, err
 	}

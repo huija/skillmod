@@ -23,6 +23,7 @@ import (
 	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/engine"
 	"github.com/huija/skillmod/internal/i18n"
+	"github.com/huija/skillmod/internal/install"
 	"github.com/huija/skillmod/internal/modfile"
 	"github.com/huija/skillmod/internal/resolve"
 	"github.com/huija/skillmod/internal/source"
@@ -42,7 +43,7 @@ func newEngine(t *testing.T, root, storeDir string) *engine.Engine {
 		Root:   root,
 		Source: &source.Source{VCSRoot: s.VCSRoot()},
 		Store:  s,
-		Config: &config.Config{Agents: []string{"agents"}},
+		Config: &config.Config{Agents: []string{"agents"}, InstallMode: install.Copy},
 	}
 }
 
@@ -1074,7 +1075,7 @@ func TestInit_ScanAndMatch(t *testing.T) {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"),
-			[]byte("---\nname: "+d+"\n---\n# "+d+"\n"), 0o644); err != nil {
+			[]byte("---\nname: "+d+"\ndescription: test skill\n---\n# "+d+"\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

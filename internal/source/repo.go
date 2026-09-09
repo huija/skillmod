@@ -16,7 +16,9 @@ import (
 	"strings"
 
 	"github.com/huija/skillmod/internal/filelock"
+	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
+	"github.com/huija/skillmod/internal/resolve"
 )
 
 func vcsKey(repo string) string {
@@ -184,6 +186,42 @@ func (s *Source) fetchTarget(ctx context.Context, dir, commit, fetchRef string) 
 		return fmt.Errorf(i18n.Text("commit %s is not in the history of the remote's public heads or tags"), commit)
 	}
 	return nil
+}
+
+// TreeHash returns the Git tree object ID for subdir at an immutable commit.
+func (s *Source) TreeHash(ctx context.Context, repo, commit, fetchRef, subdir string) (string, error) {
+	if !resolve.IsSHA(commit) {
+		return "", fmt.Errorf(i18n.Text("invalid Git commit hash: %q"), commit)
+	}
+	if subdir != "" {
+		if err := fsutil.ValidPath(subdir); err != nil {
+			return "", err
+		}
+	}
+	dir, cleanup, err := s.openRepo(ctx, repo)
+	if err != nil {
+		return "", err
+	}
+	defer cleanup()
+	if err := s.fetchTarget(ctx, dir, commit, fetchRef); err != nil {
+		return "", err
+	}
+	object := commit + "^{tree}"
+	if subdir != "" {
+		object += ":" + subdir
+	}
+	out, err := s.run(ctx, dir, "rev-parse", "--verify", object)
+	if err != nil {
+		return "", err
+	}
+	hash := strings.TrimSpace(out)
+	if !resolve.IsSHA(hash) {
+		return "", fmt.Errorf(i18n.Text("invalid Git tree hash: %q"), hash)
+	}
+	if _, err := s.run(ctx, dir, "cat-file", "-e", hash+"^{tree}"); err != nil {
+		return "", err
+	}
+	return hash, nil
 }
 
 // isShallow reports whether the bare repository truncates history at shallow

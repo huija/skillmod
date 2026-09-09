@@ -12,7 +12,7 @@ import (
 )
 
 func newSyncCmd() *cobra.Command {
-	var check bool
+	var check, relink bool
 	cmd := &cobra.Command{
 		Use:   "sync",
 		Short: i18n.Text("align local skill directories with the state pinned in SKILL.lock"),
@@ -23,10 +23,14 @@ func newSyncCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			rep, err := eng.Sync(cmd.Context(), check, newIO(cmd))
+			io := newIO(cmd)
+			io.Relink = relink
+			rep, err := eng.Sync(cmd.Context(), check, io)
 			return errors.Join(err, output(cmd, rep))
 		},
 	}
 	cmd.Flags().BoolVar(&check, "check", false, i18n.Text("verify without modifying anything (alias for skillmod verify)"))
+	cmd.Flags().BoolVar(&relink, "relink", false, i18n.Text("reinstall matching remote skills using the configured install mode"))
+	cmd.MarkFlagsMutuallyExclusive("check", "relink")
 	return cmd
 }
