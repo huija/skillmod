@@ -29,6 +29,11 @@ import (
 // Init implements skillmod init by scanning existing skills and drafting SKILL.mod (PRD §3.1).
 // It only reads existing skill files, refuses to run when SKILL.mod exists, and backs up and rebuilds with --force.
 func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
+	unlock, err := e.lockState()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	modPath := filepath.Join(e.manifestRoot(), modfile.ModFileName)
 	if _, err := os.Stat(modPath); err == nil && !force {
 		return nil, fmt.Errorf(i18n.Text("%s already exists\nAdvice: review it, then use --force to regenerate it (the original is backed up as SKILL.mod.bak)"), modPath)
@@ -372,10 +377,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 			return nil, fmt.Errorf(i18n.Text("backup failed: %w"), err)
 		}
 	}
-	if err := e.saveMod(m); err != nil {
-		return nil, err
-	}
-	if err := modfile.SaveLock(e.manifestRoot(), lock); err != nil {
+	if err := e.saveState(m, lock); err != nil {
 		return nil, err
 	}
 	io.printf(i18n.Text("generated %s (%d entries) without changing the original files"), modPath, len(m.Skills))

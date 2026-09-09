@@ -10,7 +10,9 @@ package modfile
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -294,6 +296,77 @@ func SaveLock(dir string, l *Lock) error {
 		return err
 	}
 	return atomicWrite(filepath.Join(dir, LockFileName), data)
+}
+
+// SaveState writes SKILL.mod and SKILL.lock as one recoverable state change.
+// Each file replacement is atomic; if either replacement fails, both files
+// are restored to the bytes (or absence) observed before the operation.
+func SaveState(dir string, m *Mod, l *Lock) error {
+	if err := ValidateMod(m); err != nil {
+		return err
+	}
+	if err := ValidateLock(l); err != nil {
+		return err
+	}
+	modData, err := MarshalMod(m)
+	if err != nil {
+		return err
+	}
+	lockData, err := MarshalLock(l)
+	if err != nil {
+		return err
+	}
+	return saveState(dir, modData, lockData, fsutil.WriteFile)
+}
+
+type stateFile struct {
+	path    string
+	data    []byte
+	existed bool
+}
+
+type writeFileFunc func(string, []byte, fs.FileMode) error
+
+func saveState(dir string, modData, lockData []byte, writeFile writeFileFunc) error {
+	previous := make([]stateFile, 0, 2)
+	for _, name := range []string{ModFileName, LockFileName} {
+		path := filepath.Join(dir, name)
+		data, err := os.ReadFile(path)
+		switch {
+		case err == nil:
+			previous = append(previous, stateFile{path: path, data: data, existed: true})
+		case errors.Is(err, fs.ErrNotExist):
+			previous = append(previous, stateFile{path: path})
+		default:
+			return err
+		}
+	}
+	restore := func() error {
+		var restoreErrs []error
+		for _, file := range previous {
+			if file.existed {
+				if err := writeFile(file.path, file.data, 0o644); err != nil {
+					restoreErrs = append(restoreErrs, err)
+				}
+				continue
+			}
+			if err := os.Remove(file.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				restoreErrs = append(restoreErrs, err)
+			}
+		}
+		if err := errors.Join(restoreErrs...); err != nil {
+			return fmt.Errorf(i18n.Text("restore manifest state: %w"), err)
+		}
+		return nil
+	}
+
+	if err := writeFile(previous[0].path, modData, 0o644); err != nil {
+		return errors.Join(err, restore())
+	}
+	if err := writeFile(previous[1].path, lockData, 0o644); err != nil {
+		return errors.Join(err, restore())
+	}
+	return nil
 }
 
 func atomicWrite(path string, data []byte) error {

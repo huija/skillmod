@@ -20,6 +20,11 @@ import (
 // Prune implements skillmod prune by cleaning installed files for stale entries present in the lock but absent from the mod.
 // It lists and confirms changes first; locally modified files are kept while only their lock records are removed (PRD §3.6).
 func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
+	unlock, err := e.lockState()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	m, err := e.loadMod()
 	if err != nil {
 		return nil, err
@@ -107,12 +112,14 @@ func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
 		}
 	}
 
-	for _, d := range deletable {
-		if err := os.RemoveAll(d); err != nil {
-			return nil, fmt.Errorf(i18n.Text("delete %s: %w"), d, err)
-		}
+	finalize, err := applyRemovals(deletable)
+	if err != nil {
+		return nil, err
 	}
 	if err := modfile.SaveLock(e.manifestRoot(), newLock); err != nil {
+		return nil, errors.Join(err, finalize(false))
+	}
+	if err := finalize(true); err != nil {
 		return nil, err
 	}
 	io.printf(i18n.Text("pruned %d stale entries"), len(stale))

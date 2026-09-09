@@ -7,6 +7,10 @@ builds:
     binary: skillmod
     env:
       - CGO_ENABLED=0
+    # .Version omits the leading "v"; .Tag is the exact release tag and is
+    # injected so the CLI and SKILL store use the same canonical version.
+    ldflags:
+      - -X main.version={{ .Tag }}
     goos:
       - linux
       - darwin

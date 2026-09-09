@@ -6,11 +6,14 @@ package modfile
 
 import (
 	"bytes"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/testutil"
 )
 
@@ -282,6 +285,56 @@ func TestSaveAndLoad_Atomic(t *testing.T) {
 	}
 	if _, err := LoadMod(dir); !os.IsNotExist(err) {
 		t.Errorf("missing SKILL.mod error = %v, want ErrNotExist", err)
+	}
+}
+
+func TestSaveStateRestoresBothFilesWhenSecondWriteFails(t *testing.T) {
+	dir := t.TempDir()
+	oldMod := &Mod{SchemaVersion: SchemaVersion, Skills: []ModSkill{{Name: "old", Local: true}}}
+	oldLock := &Lock{Skills: []LockSkill{{Name: "old", Dirhash: "h1:old"}}}
+	if err := SaveState(dir, oldMod, oldLock); err != nil {
+		t.Fatalf("SaveState(old): %v", err)
+	}
+	wantMod, err := os.ReadFile(filepath.Join(dir, ModFileName))
+	if err != nil {
+		t.Fatalf("ReadFile(%s): %v", ModFileName, err)
+	}
+	wantLock, err := os.ReadFile(filepath.Join(dir, LockFileName))
+	if err != nil {
+		t.Fatalf("ReadFile(%s): %v", LockFileName, err)
+	}
+
+	errWriteLock := errors.New("test lock write failure")
+	writes := 0
+	writeFile := func(path string, data []byte, perm fs.FileMode) error {
+		writes++
+		if writes == 2 {
+			return errWriteLock
+		}
+		return fsutil.WriteFile(path, data, perm)
+	}
+	newMod, err := MarshalMod(&Mod{SchemaVersion: SchemaVersion, Skills: []ModSkill{{Name: "new", Local: true}}})
+	if err != nil {
+		t.Fatalf("MarshalMod(new): %v", err)
+	}
+	newLock, err := MarshalLock(&Lock{Skills: []LockSkill{{Name: "new", Dirhash: "h1:new"}}})
+	if err != nil {
+		t.Fatalf("MarshalLock(new): %v", err)
+	}
+	if err := saveState(dir, newMod, newLock, writeFile); !errors.Is(err, errWriteLock) {
+		t.Fatalf("saveState(new) error = %v, want errors.Is(errWriteLock)", err)
+	}
+
+	gotMod, err := os.ReadFile(filepath.Join(dir, ModFileName))
+	if err != nil {
+		t.Fatalf("ReadFile(%s) after rollback: %v", ModFileName, err)
+	}
+	gotLock, err := os.ReadFile(filepath.Join(dir, LockFileName))
+	if err != nil {
+		t.Fatalf("ReadFile(%s) after rollback: %v", LockFileName, err)
+	}
+	if !bytes.Equal(gotMod, wantMod) || !bytes.Equal(gotLock, wantLock) {
+		t.Errorf("saveState rollback =\nmod:  %q\nlock: %q\nwant mod:  %q\nwant lock: %q", gotMod, gotLock, wantMod, wantLock)
 	}
 }
 

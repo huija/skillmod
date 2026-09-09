@@ -17,6 +17,11 @@ import (
 // Verify checks every installation against SKILL.lock (PRD §3.4).
 // It is read-only and never modifies files; detected drift returns DriftError, mapped to exit code 2 for AC-12.
 func (e *Engine) Verify(ctx context.Context, io IO) (*Report, error) {
+	unlock, err := e.lockState()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	m, err := e.loadMod()
 	if err != nil {
 		return nil, err

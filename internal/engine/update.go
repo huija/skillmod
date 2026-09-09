@@ -26,6 +26,11 @@ const maxConcurrentRefQueries = 4
 // advance to a new pseudo-version at default-branch HEAD (PRD §3.6).
 func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, error) {
 	defer io.stopProgress()
+	unlock, err := e.lockState()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	m, err := e.loadMod()
 	if err != nil {
 		return nil, err
@@ -197,10 +202,7 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 	if err != nil {
 		return nil, err
 	}
-	if err := e.saveMod(m); err != nil {
-		return nil, errors.Join(err, finalize(false))
-	}
-	if err := modfile.SaveLock(e.manifestRoot(), lock); err != nil {
+	if err := e.saveState(m, lock); err != nil {
 		return nil, errors.Join(err, finalize(false))
 	}
 	if err := finalize(true); err != nil {

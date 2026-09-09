@@ -36,6 +36,13 @@ func resolveConflicts(io IO, conflicts []conflict) (skip map[string]bool, err er
 	if len(conflicts) == 0 {
 		return skip, nil
 	}
+	if io.Yes {
+		for _, c := range conflicts {
+			skip[c.dir] = true
+			io.printf(i18n.Text("conflict (--yes automatically kept and skipped): %s"), c.dir)
+		}
+		return skip, nil
+	}
 	if io.Confirm != nil {
 		for _, c := range conflicts {
 			choice := io.Confirm.Choose(
@@ -55,13 +62,6 @@ func resolveConflicts(io IO, conflicts []conflict) (skip map[string]bool, err er
 		}
 		return skip, nil
 	}
-	if io.Yes {
-		for _, c := range conflicts {
-			skip[c.dir] = true
-			io.printf(i18n.Text("conflict (--yes automatically kept and skipped): %s"), c.dir)
-		}
-		return skip, nil
-	}
 	msg := i18n.Text("Conflicts detected (targets exist and their contents do not match the lock):")
 	for _, c := range conflicts {
 		msg += "\n  " + c.dir
@@ -77,6 +77,11 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 	if err != nil {
 		return nil, err
 	}
+	unlock, err := e.lockState()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	m, err := e.loadModOrEmpty()
 	if err != nil {
 		return nil, err
@@ -224,10 +229,7 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 	if err != nil {
 		return nil, err
 	}
-	if err := e.saveMod(m); err != nil {
-		return nil, errors.Join(err, finalize(false))
-	}
-	if err := modfile.SaveLock(e.manifestRoot(), lock); err != nil {
+	if err := e.saveState(m, lock); err != nil {
 		return nil, errors.Join(err, finalize(false))
 	}
 	if err := finalize(true); err != nil {

@@ -12,12 +12,52 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/modfile"
 	"github.com/huija/skillmod/internal/source"
 	"github.com/huija/skillmod/internal/store"
 )
+
+func TestLockStateSerializesManifestScope(t *testing.T) {
+	e := &Engine{Root: t.TempDir(), Store: store.New(t.TempDir())}
+	unlock, err := e.lockState()
+	if err != nil {
+		t.Fatalf("first lockState(): %v", err)
+	}
+	released := false
+	defer func() {
+		if !released {
+			unlock()
+		}
+	}()
+
+	acquired := make(chan error, 1)
+	go func() {
+		secondUnlock, err := e.lockState()
+		if err == nil {
+			secondUnlock()
+		}
+		acquired <- err
+	}()
+	select {
+	case err := <-acquired:
+		t.Fatalf("second lockState() returned before unlock: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	unlock()
+	released = true
+	select {
+	case err := <-acquired:
+		if err != nil {
+			t.Errorf("second lockState(): %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("second lockState() did not acquire after unlock")
+	}
+}
 
 // loadLock must treat an absent lock as empty but propagate validation errors
 // (for example, a lock whose name is not portable), so sync/prune never act on
@@ -295,6 +335,11 @@ func TestResolveConflicts(t *testing.T) {
 	if err != nil || !skip["/skills/a"] || !skip["/skills/b"] || !strings.Contains(out.String(), "/skills/a") {
 		t.Fatalf("--yes conflicts = %v, %v, output %q", skip, err, out.String())
 	}
+	neverPrompt := &choiceConfirmer{choices: []int{2}}
+	skip, err = resolveConflicts(IO{Yes: true, Confirm: neverPrompt}, conflicts)
+	if err != nil || !skip["/skills/a"] || neverPrompt.calls != 0 {
+		t.Fatalf("--yes with confirmer = %v, %v, confirmer calls %d; want skips, nil, 0", skip, err, neverPrompt.calls)
+	}
 
 	chooser := &choiceConfirmer{choices: []int{0, 1}}
 	skip, err = resolveConflicts(IO{Confirm: chooser}, conflicts)
@@ -445,6 +490,53 @@ func TestApplyInstallsCommitAndRollback(t *testing.T) {
 			t.Fatalf("applyInstalls error = %v", err)
 		}
 		assertInstallationContent(t, target, "old")
+	})
+}
+
+func TestApplyRemovalsTransaction(t *testing.T) {
+	t.Run("rollback", func(t *testing.T) {
+		target := newInstallationTarget(t, "kept")
+		finalize, err := applyRemovals([]string{target})
+		if err != nil {
+			t.Fatalf("applyRemovals(%q): %v", target, err)
+		}
+		if _, err := os.Lstat(target); !os.IsNotExist(err) {
+			t.Fatalf("staged removal target error = %v, want not exist", err)
+		}
+		if err := finalize(false); err != nil {
+			t.Fatalf("rollback removal %q: %v", target, err)
+		}
+		assertInstallationContent(t, target, "kept")
+	})
+
+	t.Run("commit", func(t *testing.T) {
+		target := newInstallationTarget(t, "removed")
+		finalize, err := applyRemovals([]string{target})
+		if err != nil {
+			t.Fatalf("applyRemovals(%q): %v", target, err)
+		}
+		if err := finalize(true); err != nil {
+			t.Fatalf("commit removal %q: %v", target, err)
+		}
+		if _, err := os.Lstat(target); !os.IsNotExist(err) {
+			t.Errorf("committed removal target error = %v, want not exist", err)
+		}
+		matches, err := filepath.Glob(filepath.Join(filepath.Dir(target), ".skillmod-prune-*"))
+		if err != nil {
+			t.Fatalf("Glob prune backups: %v", err)
+		}
+		if len(matches) != 0 {
+			t.Errorf("committed removal left backups: %v", matches)
+		}
+	})
+
+	t.Run("later failure rolls back earlier path", func(t *testing.T) {
+		target := newInstallationTarget(t, "kept")
+		missing := filepath.Join(t.TempDir(), "missing")
+		if _, err := applyRemovals([]string{target, missing}); err == nil {
+			t.Fatal("applyRemovals accepted a missing later path")
+		}
+		assertInstallationContent(t, target, "kept")
 	})
 }
 

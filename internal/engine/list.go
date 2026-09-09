@@ -16,6 +16,11 @@ import (
 // List implements skillmod list by reporting every declared entry as installed, missing, drifted, or upgradable.
 // It is read-only. Upgrade detection calls ls-remote once per unique repository and skips failures.
 func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
+	unlock, err := e.lockState()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	m, err := e.loadMod()
 	if err != nil {
 		return nil, err

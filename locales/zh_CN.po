@@ -20,6 +20,10 @@ msgid "%d blobs are still missing after batch fetch (stdout=%q stderr=%q)"
 msgstr "批量 fetch 后仍缺少 %d 个 blob（stdout=%q stderr=%q）"
 
 #, go-format
+msgid "%d conflicting targets were kept and skipped"
+msgstr "已保留并跳过 %d 个冲突目标"
+
+#, go-format
 msgid "%d skills had known but unresolved sources; those entries were retained as local baselines and can be retried later"
 msgstr "有 %d 个技能的来源已知但暂时无法解析；这些条目已保留为本地基线，之后可以重试"
 
@@ -284,10 +288,6 @@ msgid "contents do not match the lock"
 msgstr "内容与锁定不符"
 
 #, go-format
-msgid "delete %s: %w"
-msgstr "删除 %s: %w"
-
-#, go-format
 msgid "delete the %d directories listed above?"
 msgstr "确认删除以上 %d 个目录？"
 
@@ -512,6 +512,10 @@ msgid "locally modified; kept files and removed only the lock record: "
 msgstr "本地被修改过，保留文件、仅清 lock 记录: "
 
 #, go-format
+msgid "lock manifest state: %w"
+msgstr "锁定清单状态失败：%w"
+
+#, go-format
 msgid "malformed cat-file --batch-check output: %q"
 msgstr "cat-file --batch-check 输出畸形: %q"
 
@@ -717,6 +721,10 @@ msgstr "按配置的安装方式重新安装内容一致的远程技能"
 msgid "remote contents do not match the lock and may have been modified: %s\nlock:     %s\ncomputed: %s\nVerify that the source has not been tampered with; if it is valid, use skillmod get to lock it again"
 msgstr "远程内容与锁定不符，可能被改动: %s\nlock 记录: %s\n实算:     %s\n建议核对来源是否被篡改；确认无误后用 skillmod get 重新锁定"
 
+#, go-format
+msgid "remove backup for %s: %w"
+msgstr "删除 %s 的备份失败：%w"
+
 msgid "remove installed files left by stale entries (list and confirm before deleting)"
 msgstr "清理过期条目的残留安装文件（前列清单，确认后才删除）"
 
@@ -784,11 +792,27 @@ msgstr "解析缓存索引身份不匹配: %s"
 msgid "resolution cache index is corrupt %s: %w"
 msgstr "解析缓存索引损坏 %s: %w"
 
+#, go-format
+msgid "resolve manifest parent: %w"
+msgstr "解析清单父目录失败：%w"
+
+#, go-format
+msgid "resolve manifest root: %w"
+msgstr "解析清单根目录失败：%w"
+
 msgid "resolve the latest versions, update the lock, and install"
 msgstr "重新解析最新版本，更新 lock 并安装"
 
 msgid "resolved using the same-repository reference cache; remote was not refreshed"
 msgstr "使用同仓引用缓存解析，未刷新远端"
+
+#, go-format
+msgid "restore %s: %w"
+msgstr "恢复 %s 失败：%w"
+
+#, go-format
+msgid "restore manifest state: %w"
+msgstr "恢复清单状态失败：%w"
 
 #, go-format
 msgid "rollback also failed: %w"
@@ -847,6 +871,10 @@ msgstr "无法验证来源，保留为本地技能：%v"
 #, go-format
 msgid "stage installation failed: %w"
 msgstr "准备临时安装失败：%w"
+
+#, go-format
+msgid "stage removal of %s: %w"
+msgstr "暂存删除 %s 失败：%w"
 
 #, go-format
 msgid "start git cat-file: %w"

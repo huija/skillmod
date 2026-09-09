@@ -20,6 +20,10 @@ msgid "%d blobs are still missing after batch fetch (stdout=%q stderr=%q)"
 msgstr "%d blobs are still missing after batch fetch (stdout=%q stderr=%q)"
 
 #, go-format
+msgid "%d conflicting targets were kept and skipped"
+msgstr "%d conflicting targets were kept and skipped"
+
+#, go-format
 msgid "%d skills had known but unresolved sources; those entries were retained as local baselines and can be retried later"
 msgstr "%d skills had known but unresolved sources; those entries were retained as local baselines and can be retried later"
 
@@ -284,10 +288,6 @@ msgid "contents do not match the lock"
 msgstr "contents do not match the lock"
 
 #, go-format
-msgid "delete %s: %w"
-msgstr "delete %s: %w"
-
-#, go-format
 msgid "delete the %d directories listed above?"
 msgstr "delete the %d directories listed above?"
 
@@ -512,6 +512,10 @@ msgid "locally modified; kept files and removed only the lock record: "
 msgstr "locally modified; kept files and removed only the lock record: "
 
 #, go-format
+msgid "lock manifest state: %w"
+msgstr "lock manifest state: %w"
+
+#, go-format
 msgid "malformed cat-file --batch-check output: %q"
 msgstr "malformed cat-file --batch-check output: %q"
 
@@ -717,6 +721,10 @@ msgstr "reinstall matching remote skills using the configured install mode"
 msgid "remote contents do not match the lock and may have been modified: %s\nlock:     %s\ncomputed: %s\nVerify that the source has not been tampered with; if it is valid, use skillmod get to lock it again"
 msgstr "remote contents do not match the lock and may have been modified: %s\nlock:     %s\ncomputed: %s\nVerify that the source has not been tampered with; if it is valid, use skillmod get to lock it again"
 
+#, go-format
+msgid "remove backup for %s: %w"
+msgstr "remove backup for %s: %w"
+
 msgid "remove installed files left by stale entries (list and confirm before deleting)"
 msgstr "remove installed files left by stale entries (list and confirm before deleting)"
 
@@ -784,11 +792,27 @@ msgstr "resolution cache index identity mismatch: %s"
 msgid "resolution cache index is corrupt %s: %w"
 msgstr "resolution cache index is corrupt %s: %w"
 
+#, go-format
+msgid "resolve manifest parent: %w"
+msgstr "resolve manifest parent: %w"
+
+#, go-format
+msgid "resolve manifest root: %w"
+msgstr "resolve manifest root: %w"
+
 msgid "resolve the latest versions, update the lock, and install"
 msgstr "resolve the latest versions, update the lock, and install"
 
 msgid "resolved using the same-repository reference cache; remote was not refreshed"
 msgstr "resolved using the same-repository reference cache; remote was not refreshed"
+
+#, go-format
+msgid "restore %s: %w"
+msgstr "restore %s: %w"
+
+#, go-format
+msgid "restore manifest state: %w"
+msgstr "restore manifest state: %w"
 
 #, go-format
 msgid "rollback also failed: %w"
@@ -847,6 +871,10 @@ msgstr "source could not be verified; kept as local: %v"
 #, go-format
 msgid "stage installation failed: %w"
 msgstr "stage installation failed: %w"
+
+#, go-format
+msgid "stage removal of %s: %w"
+msgstr "stage removal of %s: %w"
 
 #, go-format
 msgid "start git cat-file: %w"

@@ -140,7 +140,7 @@ func newIO(cmd *cobra.Command) engine.IO {
 		Yes:    flagYes,
 		DryRun: flagDryRun,
 	}
-	if isTerminal(os.Stdin) {
+	if !flagYes && isTerminal(os.Stdin) {
 		io.Confirm = ui.Interactive(os.Stdin, cmd.ErrOrStderr())
 	}
 	if isTerminal(os.Stderr) {

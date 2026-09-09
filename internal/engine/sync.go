@@ -26,6 +26,11 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 	if checkOnly {
 		return e.Verify(ctx, io) // sync --check is an alias for verify and uses the same implementation.
 	}
+	unlock, err := e.lockState()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	m, err := e.loadMod()
 	if err != nil {
 		return nil, err
@@ -57,7 +62,6 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 			prevHash = old.Dirhash // The pre-alignment lock hash allows a clean old version to be overwritten.
 		}
 		var targets []string
-		conflictsBefore := len(conflicts)
 		for _, a := range adapters {
 			dst := adapterDir(a, e.Root, en.skill.DirName())
 			action := classifyTarget(dst, en.dirhash, prevHash)
@@ -76,7 +80,7 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 		if len(targets) > 0 {
 			action = "install"
 		}
-		if len(conflicts) > conflictsBefore {
+		if len(conflictsByEntry[i]) > 0 {
 			action = "conflict"
 		}
 		rep.Entries = append(rep.Entries, EntryReport{
@@ -136,13 +140,35 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 	}
 	for i := range entries {
 		var overwrite []string
+		skipped := 0
 		for _, dst := range conflictsByEntry[i] {
-			if !skip[dst] {
-				overwrite = append(overwrite, dst)
+			if skip[dst] {
+				skipped++
+				continue
 			}
+			overwrite = append(overwrite, dst)
 		}
 		if len(overwrite) > 0 {
 			plans = append(plans, plannedInstall{name: entries[i].skill.DirName(), contentDir: entries[i].contentDir, targets: overwrite})
+			rep.Entries[i].Targets = append(rep.Entries[i].Targets, overwrite...)
+		}
+		switch {
+		case len(rep.Entries[i].Targets) > 0 && skipped > 0:
+			rep.Entries[i].Action = "partial"
+		case len(rep.Entries[i].Targets) > 0:
+			rep.Entries[i].Action = "install"
+		case skipped > 0:
+			rep.Entries[i].Action = "conflict"
+		default:
+			rep.Entries[i].Action = "keep"
+		}
+		if skipped > 0 {
+			note := i18n.Format("%d conflicting targets were kept and skipped", skipped)
+			if rep.Entries[i].Note == "" {
+				rep.Entries[i].Note = note
+			} else {
+				rep.Entries[i].Note += "; " + note
+			}
 		}
 	}
 
@@ -151,7 +177,7 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 		// before returning; nothing is written in dry-run mode.
 		planned := 0
 		for _, en := range rep.Entries {
-			if en.Action == "install" {
+			if en.Action == "install" || en.Action == "partial" {
 				planned++
 			}
 		}
@@ -177,7 +203,7 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 
 	changed := 0
 	for _, en := range rep.Entries {
-		if en.Action == "install" {
+		if en.Action == "install" || en.Action == "partial" {
 			changed++
 		}
 	}

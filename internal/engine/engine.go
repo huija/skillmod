@@ -131,13 +131,13 @@ func (e *Engine) manifestRoot() string {
 	return e.Root
 }
 
-func (e *Engine) saveMod(m *modfile.Mod) error {
+func (e *Engine) saveState(m *modfile.Mod, lock *modfile.Lock) error {
 	if e.ManifestRoot != "" {
 		if err := os.MkdirAll(e.ManifestRoot, 0o755); err != nil {
 			return err
 		}
 	}
-	return modfile.SaveMod(e.manifestRoot(), m)
+	return modfile.SaveState(e.manifestRoot(), m, lock)
 }
 
 func (e *Engine) loadMod() (*modfile.Mod, error) {

@@ -994,6 +994,79 @@ func TestSync_LocalModification(t *testing.T) {
 	}
 }
 
+func TestSync_OverwriteConflictReportsInstallation(t *testing.T) {
+	r := newHelloRepo(t)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get(%q): %v", r.URL+"@v1.0.0", err)
+	}
+	target := filepath.Join(installedDir(root, "hello"), "SKILL.md")
+	if err := os.WriteFile(target, []byte("user modified\n"), 0o644); err != nil {
+		t.Fatalf("modify %q: %v", target, err)
+	}
+
+	var out bytes.Buffer
+	rep, err := eng.Sync(ctx, false, engine.IO{Out: &out, Confirm: &getSkillChooser{}})
+	if err != nil {
+		t.Fatalf("Sync overwrite: %v", err)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Action != "install" || len(rep.Entries[0].Targets) != 1 || rep.Entries[0].Targets[0] != installedDir(root, "hello") {
+		t.Errorf("Sync overwrite report = %+v, want one installed target", rep.Entries)
+	}
+	if !strings.Contains(out.String(), "synchronized 1") {
+		t.Errorf("Sync overwrite output = %q, want synchronized count", out.String())
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", target, err)
+	}
+	if string(data) == "user modified\n" {
+		t.Error("interactive overwrite kept the conflicting contents")
+	}
+}
+
+func TestSync_MixedInstallAndSkippedConflictReportsPartial(t *testing.T) {
+	r := newHelloRepo(t)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get(%q): %v", r.URL+"@v1.0.0", err)
+	}
+	agentTarget := filepath.Join(installedDir(root, "hello"), "SKILL.md")
+	if err := os.WriteFile(agentTarget, []byte("user modified\n"), 0o644); err != nil {
+		t.Fatalf("modify %q: %v", agentTarget, err)
+	}
+	eng.Config.Agents = []string{"agents", "claude-code"}
+	claude, err := install.ByName("claude-code")
+	if err != nil {
+		t.Fatalf("install.ByName(claude-code): %v", err)
+	}
+	claudeTarget := filepath.Join(claude.SkillsDir(root), "hello")
+
+	var out bytes.Buffer
+	rep, err := eng.Sync(ctx, false, engine.IO{Out: &out, Yes: true})
+	if err != nil {
+		t.Fatalf("Sync mixed targets: %v", err)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Action != "partial" || len(rep.Entries[0].Targets) != 1 || rep.Entries[0].Targets[0] != claudeTarget {
+		t.Errorf("Sync mixed-target report = %+v, want partial with only Claude target installed", rep.Entries)
+	}
+	if !strings.Contains(rep.Entries[0].Note, "kept and skipped") || !strings.Contains(out.String(), "synchronized 1") {
+		t.Errorf("Sync mixed-target note/output = %q / %q", rep.Entries[0].Note, out.String())
+	}
+	data, err := os.ReadFile(agentTarget)
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", agentTarget, err)
+	}
+	if string(data) != "user modified\n" {
+		t.Errorf("skipped agent target = %q, want user modification", data)
+	}
+	if _, err := os.Stat(filepath.Join(claudeTarget, "SKILL.md")); err != nil {
+		t.Errorf("Claude target was not installed: %v", err)
+	}
+}
+
 // AC-10: the lock is authoritative and does not upgrade when a new remote tag appears.
 func TestSync_LockWins(t *testing.T) {
 	r := newHelloRepo(t)
