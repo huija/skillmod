@@ -15,6 +15,35 @@ skillmod applies the Go module model to skills: declarations in `SKILL.mod`, con
 
 ## Install
 
+### Agent-guided installation (recommended)
+
+With Node.js/npm available, install the companion Agent Skill globally so your
+coding agent can set up and operate skillmod from any project:
+
+```bash
+npx skills add huija/skillmod --skill skillmod --global
+```
+
+Then ask your agent:
+
+```text
+Install skillmod and make it available on PATH.
+```
+
+The skill checks the Git prerequisite and any existing skillmod installation,
+selects the release binary for the current operating system and architecture,
+verifies it against the published SHA-256 checksums, installs it in a
+user-writable directory on `PATH`, and verifies the result. It also covers
+project/global workflows, CI, troubleshooting, and sanitized GitHub issue
+reports. Omit `--global` when the guidance should be available only in the
+current project.
+
+### Manual installation
+
+Without Go, download the archive for your platform and `checksums.txt` from
+[GitHub Releases](https://github.com/huija/skillmod/releases), verify the
+archive, extract it, and put `skillmod` on your `PATH`.
+
 With Go 1.26.1 or later:
 
 ```bash
@@ -28,8 +57,6 @@ make install
 ```
 
 This installs `skillmod` into `go env GOBIN`, or the first `GOPATH/bin` entry (`%GOPATH%\bin` on Windows) when `GOBIN` is unset, and embeds the current Git revision as the development version. On Windows, run the Makefile from Git Bash (which provides `sh`) or override the destination, for example with `make install INSTALL_DIR=/usr/local/bin`. The selected directory must be on `PATH`.
-
-Without Go, download the archive for your platform from [GitHub Releases](https://github.com/huija/skillmod/releases), extract it, and put `skillmod` on your `PATH`.
 
 ## Prerequisites
 

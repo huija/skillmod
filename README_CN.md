@@ -15,6 +15,33 @@ skillmod 用 go mod 的同构方案解决：`SKILL.mod` 声明 + `SKILL.lock` �
 
 ## 安装
 
+### 使用 Agent 引导安装（推荐）
+
+准备好 Node.js/npm 后，全局安装仓库内附带的 Agent Skill，让编码 Agent 可以在
+任意项目中安装和使用 skillmod：
+
+```bash
+npx skills add huija/skillmod --skill skillmod --global
+```
+
+然后告诉 Agent：
+
+```text
+安装 skillmod，并确保它可以从 PATH 调用。
+```
+
+该 Skill 会检查 Git 前置条件和已有的 skillmod 安装，识别当前操作系统与架构，
+选择对应的 Release Binary，使用发布的 SHA-256 校验和进行验证，将可执行文件安装
+到 `PATH` 中用户可写的目录，并验证安装结果。它还提供项目/全局工作流、CI、故障
+诊断，以及经过脱敏的 GitHub Issue 报告流程。如果只希望当前项目使用这份引导，
+请省略 `--global`。
+
+### 手动安装
+
+不使用 Go 时，从 [GitHub Releases](https://github.com/huija/skillmod/releases)
+下载对应平台的压缩包和 `checksums.txt`，校验压缩包后解压，并将 `skillmod` 放入
+`PATH`。
+
 使用 Go 1.26.1 或更高版本：
 
 ```bash
@@ -28,8 +55,6 @@ make install
 ```
 
 该命令会把 `skillmod` 安装到 `go env GOBIN`；若未设置 `GOBIN`，则安装到第一个 `GOPATH/bin`（Windows 下为 `%GOPATH%\bin`），并将当前 Git revision 写入开发版本号。Windows 下请在 Git Bash（提供 `sh`）中运行 Makefile，或用 `make install INSTALL_DIR=/usr/local/bin` 覆盖安装目录；所选目录需位于 `PATH` 中。
-
-不使用 Go 时，从 [GitHub Releases](https://github.com/huija/skillmod/releases) 下载对应平台的压缩包，解压后将 `skillmod` 放入 `PATH`。
 
 ## 前置条件
 
