@@ -58,7 +58,7 @@ func (e *Engine) Remove(_ context.Context, names []string, io IO) (*Report, erro
 	}
 	for _, name := range names {
 		if !found[name] {
-			return nil, fmt.Errorf(i18n.Text("entry %q is not in SKILL.mod"), name)
+			return nil, fmt.Errorf(i18n.Text("engine.remove.entry_skill_mod"), name)
 		}
 	}
 
@@ -95,12 +95,12 @@ func (e *Engine) Remove(_ context.Context, names []string, io IO) (*Report, erro
 				partial = true
 				entryPartial = true
 				setTargetResult(&entry, dst, ActionKeep)
-				entry.Note = appendNote(entry.Note, i18n.Format("could not verify %s; kept installed files: %v", dst, hashErr))
+				entry.Note = appendNote(entry.Note, i18n.Format("engine.remove.could_verify_kept_installed", dst, hashErr))
 			case locked == nil || hash != locked.Dirhash:
 				partial = true
 				entryPartial = true
 				setTargetResult(&entry, dst, ActionKeep)
-				entry.Note = appendNote(entry.Note, i18n.Text("locally modified; kept installed files: ")+dst)
+				entry.Note = appendNote(entry.Note, i18n.Text("engine.remove.locally_modified_kept")+dst)
 			default:
 				deletable = append(deletable, dst)
 				entry.Targets = append(entry.Targets, dst)
@@ -114,13 +114,13 @@ func (e *Engine) Remove(_ context.Context, names []string, io IO) (*Report, erro
 	}
 
 	if len(deletable) > 0 {
-		io.printf(i18n.Text("the following directories will be deleted:"))
+		io.printf(i18n.Text("engine.prune.following_directories_deleted"))
 		for _, dir := range deletable {
 			io.printf("  %s", dir)
 		}
 	}
 	if io.DryRun {
-		rep.Notes = append(rep.Notes, i18n.Text("dry-run: no files were deleted"))
+		rep.Notes = append(rep.Notes, i18n.Text("engine.prune.dry_run_files_deleted"))
 		if partial {
 			return rep, &PartialError{Report: rep}
 		}
@@ -139,7 +139,7 @@ func (e *Engine) Remove(_ context.Context, names []string, io IO) (*Report, erro
 	if err := finalize(true); err != nil {
 		return nil, err
 	}
-	io.printf(i18n.Format("removed %d declarations and %d clean installation directories", len(rep.Entries), len(deletable)))
+	io.printf(i18n.Format("engine.remove.removed_declarations_clean", len(rep.Entries), len(deletable)))
 	if partial {
 		return rep, &PartialError{Report: rep}
 	}

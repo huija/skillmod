@@ -14,9 +14,9 @@ import (
 func newUpdateCmd() *cobra.Command {
 	var allowDowngrade bool
 	cmd := &cobra.Command{
-		Use:   i18n.Text("update [names…]"),
-		Short: i18n.Text("resolve the latest versions, update the lock, and install"),
-		Long:  i18n.Text("With no names, update every entry. Commit-pinned entries, including pseudo-versions, advance to a new pseudo-version at default-branch HEAD."),
+		Use:   i18n.Text("cli.update.use"),
+		Short: i18n.Text("cli.update.short"),
+		Long:  i18n.Text("cli.update.long"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			eng, err := newEngine()
 			if err != nil {
@@ -28,6 +28,6 @@ func newUpdateCmd() *cobra.Command {
 			return errors.Join(err, output(cmd, rep))
 		},
 	}
-	cmd.Flags().BoolVar(&allowDowngrade, "allow-downgrade", false, i18n.Text("allow update to select a lower semantic version when newer tags disappeared"))
+	cmd.Flags().BoolVar(&allowDowngrade, "allow-downgrade", false, i18n.Text("cli.update.flag_allow_downgrade"))
 	return cmd
 }

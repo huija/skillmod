@@ -3,7 +3,9 @@
 // SPDX-License-Identifier: MIT
 
 // Package i18n selects user-facing text for skillmod commands from the shared
-// gettext catalogs in the repository-level locales directory.
+// gettext catalogs in the repository-level locales directory. Call sites pass
+// short message keys (see locales/README.md); the wording lives in the catalogs,
+// with en_US.po holding the English source text.
 package i18n
 
 import (
@@ -49,18 +51,27 @@ func normalizeLanguage(locale string) string {
 	return "en_US"
 }
 
-// Text returns the active locale catalog's translation for msgid. A missing
-// entry falls back to the msgid so catalog mistakes never hide the message.
-func Text(msgid string) string {
-	if translated := catalogs[Language()][msgid]; translated != "" {
-		return translated
-	}
-	return msgid
+// Text returns the active locale catalog's text for a message key such as
+// "cli.get.long". Keys missing from the active locale fall back to the English
+// catalog, and keys missing everywhere fall back to the key itself, so catalog
+// mistakes never hide the message entirely.
+func Text(key string) string {
+	return lookup(catalogs, Language(), key)
 }
 
-// Format formats the translation for the active language.
-func Format(msgid string, args ...any) string {
-	return fmt.Sprintf(Text(msgid), args...)
+// Format formats the text for the active language.
+func Format(key string, args ...any) string {
+	return fmt.Sprintf(Text(key), args...)
+}
+
+func lookup(all map[string]map[string]string, language, key string) string {
+	if translated := all[language][key]; translated != "" {
+		return translated
+	}
+	if english := all["en_US"][key]; english != "" {
+		return english
+	}
+	return key
 }
 
 func mustCatalogs() map[string]map[string]string {

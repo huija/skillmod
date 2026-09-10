@@ -35,8 +35,8 @@ func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
 	stale := staleEntries(m, lock)
 	rep := &Report{Action: "prune"}
 	if len(stale) == 0 {
-		rep.Notes = append(rep.Notes, i18n.Text("no stale entries"))
-		io.printf(i18n.Text("no stale entries"))
+		rep.Notes = append(rep.Notes, i18n.Text("engine.prune.stale_entries"))
+		io.printf(i18n.Text("engine.prune.stale_entries"))
 		return rep, nil
 	}
 
@@ -79,7 +79,7 @@ func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
 				deletable = append(deletable, dst)
 				entry.Targets = append(entry.Targets, dst)
 			} else {
-				entry.Note = i18n.Text("locally modified; kept files and removed only the lock record: ") + dst
+				entry.Note = i18n.Text("engine.prune.locally_modified_kept_files") + dst
 			}
 		}
 		entry.Action = "prune"
@@ -87,7 +87,7 @@ func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
 	}
 
 	if len(deletable) > 0 {
-		io.printf(i18n.Text("the following directories will be deleted:"))
+		io.printf(i18n.Text("engine.prune.following_directories_deleted"))
 		for _, d := range deletable {
 			io.printf("  %s", d)
 		}
@@ -95,7 +95,7 @@ func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
 	if io.DryRun {
 		// dry-run must never require confirmation: the flag promises to list
 		// what would happen, so the gate below is skipped entirely.
-		rep.Notes = append(rep.Notes, i18n.Text("dry-run: no files were deleted"))
+		rep.Notes = append(rep.Notes, i18n.Text("engine.prune.dry_run_files_deleted"))
 		return rep, nil
 	}
 	if err := confirmRemovals(io, deletable); err != nil {
@@ -112,6 +112,6 @@ func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
 	if err := finalize(true); err != nil {
 		return nil, err
 	}
-	io.printf(i18n.Text("pruned %d stale entries"), len(stale))
+	io.printf(i18n.Text("engine.prune.pruned_stale_entries"), len(stale))
 	return rep, nil
 }

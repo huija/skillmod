@@ -13,8 +13,8 @@ import (
 
 func newWhyCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   i18n.Text("why <name-or-alias>"),
-		Short: i18n.Text("explain an entry's declaration, immutable provenance, and installation status"),
+		Use:   i18n.Text("cli.why.use"),
+		Short: i18n.Text("cli.why.short"),
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			eng, err := newEngine()

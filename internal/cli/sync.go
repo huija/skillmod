@@ -15,8 +15,8 @@ func newSyncCmd() *cobra.Command {
 	var check, relink bool
 	cmd := &cobra.Command{
 		Use:   "sync",
-		Short: i18n.Text("align local skill directories with the state pinned in SKILL.lock"),
-		Long:  i18n.Text("Idempotent and verifiable, with rollback on failure. Installed files are never deleted automatically; use prune to clean them. --check only verifies and is an alias for verify."),
+		Short: i18n.Text("cli.sync.short"),
+		Long:  i18n.Text("cli.sync.long"),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			eng, err := newEngine()
@@ -29,8 +29,8 @@ func newSyncCmd() *cobra.Command {
 			return errors.Join(err, output(cmd, rep))
 		},
 	}
-	cmd.Flags().BoolVar(&check, "check", false, i18n.Text("verify without modifying anything (alias for skillmod verify)"))
-	cmd.Flags().BoolVar(&relink, "relink", false, i18n.Text("reinstall matching remote skills using the configured install mode"))
+	cmd.Flags().BoolVar(&check, "check", false, i18n.Text("cli.sync.flag_check"))
+	cmd.Flags().BoolVar(&relink, "relink", false, i18n.Text("cli.sync.flag_relink"))
 	cmd.MarkFlagsMutuallyExclusive("check", "relink")
 	return cmd
 }

@@ -98,7 +98,7 @@ func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 				latestCache[key] = latest
 			}
 			if latest != "" && resolve.CompareVersions(latest, sk.Version) > 0 {
-				entry.Note = i18n.Text("upgrade available → ") + latest
+				entry.Note = i18n.Text("engine.list.upgrade_available") + latest
 			}
 		}
 		rep.Entries = append(rep.Entries, entry)
@@ -107,7 +107,7 @@ func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 	for _, en := range rep.Entries {
 		note := ""
 		if en.Note != "" {
-			note = i18n.Format(" (%s)", en.Note)
+			note = i18n.Format("engine.list.list", en.Note)
 		}
 		io.printf("%-24s %-28s %s%s", en.Name, en.Version, displayListAction(en.Action), note)
 	}
@@ -117,13 +117,13 @@ func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 func displayListAction(action Action) string {
 	switch action {
 	case ActionInstalled:
-		return i18n.Text("installed")
+		return i18n.Text("engine.list.installed")
 	case ActionUnlocked:
-		return i18n.Text("unlocked")
+		return i18n.Text("engine.list.unlocked")
 	case ActionMissing:
-		return i18n.Text("missing")
+		return i18n.Text("engine.list.missing")
 	case ActionDrift:
-		return i18n.Text("drift")
+		return i18n.Text("engine.list.drift")
 	default:
 		return string(action)
 	}

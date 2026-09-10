@@ -45,7 +45,7 @@ var registry = map[string]Adapter{
 func ByName(name string) (Adapter, error) {
 	a, ok := registry[name]
 	if !ok {
-		return nil, fmt.Errorf(i18n.Text("unsupported platform %q; supported platforms: %s"), name, strings.Join(Names(), ", "))
+		return nil, fmt.Errorf(i18n.Text("install.unsupported_platform"), name, strings.Join(Names(), ", "))
 	}
 	return a, nil
 }
@@ -102,7 +102,7 @@ func CopyDir(src, dst string) error {
 			return os.MkdirAll(to, 0o755)
 		}
 		if !d.Type().IsRegular() {
-			return fmt.Errorf(i18n.Text("version snapshot contains an irregular file: %s"), p)
+			return fmt.Errorf(i18n.Text("install.snapshot_irregular_file"), p)
 		}
 		data, err := os.ReadFile(p)
 		if err != nil {
@@ -143,7 +143,7 @@ func ValidateMode(mode Mode) error {
 	case "", Auto, Copy:
 		return nil
 	default:
-		return fmt.Errorf(i18n.Text("unknown install mode %q; expected auto or copy"), mode)
+		return fmt.Errorf(i18n.Text("install.unknown_install_mode"), mode)
 	}
 }
 
@@ -186,7 +186,7 @@ func installWithLink(srcDir, dst string, mode Mode, link func(string, string) er
 	insideSource, sourceErr := filepath.Rel(srcDir, target)
 	insideTarget, targetErr := filepath.Rel(target, srcDir)
 	if (sourceErr == nil && filepath.IsLocal(insideSource)) || (targetErr == nil && filepath.IsLocal(insideTarget)) {
-		return nil, nil, fmt.Errorf(i18n.Text("installation source and target must not overlap: %s and %s"), srcDir, dst)
+		return nil, nil, fmt.Errorf(i18n.Text("install.source_target_overlap"), srcDir, dst)
 	}
 	tmp, err := os.MkdirTemp(parent, ".skillmod-tmp-*")
 	if err != nil {
@@ -205,7 +205,7 @@ func installWithLink(srcDir, dst string, mode Mode, link func(string, string) er
 	}
 	if stageErr != nil {
 		_ = os.RemoveAll(tmp)
-		return nil, nil, fmt.Errorf(i18n.Text("stage installation failed: %w"), stageErr)
+		return nil, nil, fmt.Errorf(i18n.Text("install.stage_installation_failed"), stageErr)
 	}
 
 	// A unique backup path never collides with a user skill whose name merely
@@ -225,7 +225,7 @@ func installWithLink(srcDir, dst string, mode Mode, link func(string, string) er
 		bak = b
 		if err := os.Rename(dst, bak); err != nil {
 			_ = os.RemoveAll(tmp)
-			return nil, nil, fmt.Errorf(i18n.Text("backing up the existing directory failed: %w"), err)
+			return nil, nil, fmt.Errorf(i18n.Text("install.backing_up_existing_directory"), err)
 		}
 	}
 	if err := os.Rename(tmp, dst); err != nil {
@@ -234,7 +234,7 @@ func installWithLink(srcDir, dst string, mode Mode, link func(string, string) er
 			restoreErr = os.Rename(bak, dst)
 		}
 		_ = os.RemoveAll(tmp)
-		return nil, nil, errors.Join(fmt.Errorf(i18n.Text("writing to disk failed: %w"), err), restoreErr)
+		return nil, nil, errors.Join(fmt.Errorf(i18n.Text("install.write_disk_failed"), err), restoreErr)
 	}
 
 	restore = func() error {
@@ -261,10 +261,10 @@ func validateSource(src string) error {
 			return err
 		}
 		if p == src && !d.IsDir() {
-			return fmt.Errorf(i18n.Text("not a skill directory: %s"), src)
+			return fmt.Errorf(i18n.Text("dirhash.not_skill_directory"), src)
 		}
 		if !d.IsDir() && !d.Type().IsRegular() {
-			return fmt.Errorf(i18n.Text("version snapshot contains an irregular file: %s"), p)
+			return fmt.Errorf(i18n.Text("install.snapshot_irregular_file"), p)
 		}
 		return nil
 	})

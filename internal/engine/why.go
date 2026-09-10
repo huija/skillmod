@@ -80,22 +80,22 @@ func (e *Engine) Why(_ context.Context, name string, io IO) (*Report, error) {
 		rep.Entries = append(rep.Entries, entry)
 	}
 	if len(rep.Entries) == 0 {
-		return nil, fmt.Errorf(i18n.Text("entry %q is not in SKILL.mod"), name)
+		return nil, fmt.Errorf(i18n.Text("engine.remove.entry_skill_mod"), name)
 	}
 	for _, entry := range rep.Entries {
 		source := entry.Source
 		if source == "" {
-			source = i18n.Text("local")
+			source = i18n.Text("engine.why.local")
 		}
-		io.printf(i18n.Text("%s (directory %s): %s %s"), entry.Name, entry.Directory, source, entry.Version)
+		io.printf(i18n.Text("engine.why.directory"), entry.Name, entry.Directory, source, entry.Version)
 		if entry.Commit != "" {
-			io.printf(i18n.Text("  commit: %s"), entry.Commit)
+			io.printf(i18n.Text("engine.why.commit"), entry.Commit)
 		}
 		if entry.Dirhash != "" {
-			io.printf(i18n.Text("  dirhash: %s"), entry.Dirhash)
+			io.printf(i18n.Text("engine.why.dirhash"), entry.Dirhash)
 		}
 		for _, target := range entry.TargetResults {
-			io.printf(i18n.Text("  %s: %s"), target.Path, target.Action)
+			io.printf(i18n.Text("engine.why.why"), target.Path, target.Action)
 		}
 	}
 	return rep, nil

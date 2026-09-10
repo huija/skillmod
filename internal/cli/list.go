@@ -14,7 +14,7 @@ import (
 func newListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
-		Short: i18n.Text("list all declared entries and their status (installed / missing / upgradable)"),
+		Short: i18n.Text("cli.list.short"),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			eng, err := newEngine()

@@ -38,7 +38,7 @@ func HashDir(dir string) (string, error) {
 		return "", err
 	}
 	if !st.IsDir() {
-		return "", fmt.Errorf(i18n.Text("not a skill directory: %s"), dir)
+		return "", fmt.Errorf(i18n.Text("dirhash.not_skill_directory"), dir)
 	}
 	dir = resolved
 	var files []string
@@ -50,7 +50,7 @@ func HashDir(dir string) (string, error) {
 			return nil
 		}
 		if d.Type()&fs.ModeSymlink != 0 {
-			return fmt.Errorf(i18n.Text("installation directory contains a symlink and cannot be verified: %s"), p)
+			return fmt.Errorf(i18n.Text("dirhash.installation_symlink"), p)
 		}
 		if !d.Type().IsRegular() {
 			return nil // Exclude special files such as FIFOs and sockets from the hash.
@@ -66,7 +66,7 @@ func HashDir(dir string) (string, error) {
 		return "", err
 	}
 	if len(files) == 0 {
-		return "", fmt.Errorf(i18n.Text("directory is empty or does not exist: %s"), dir)
+		return "", fmt.Errorf(i18n.Text("dirhash.directory_empty_or_missing"), dir)
 	}
 	return HashBlobs(files, func(name string) (io.ReadCloser, error) {
 		return os.Open(filepath.Join(dir, filepath.FromSlash(name)))
@@ -76,7 +76,7 @@ func HashDir(dir string) (string, error) {
 // Validate checks the h1: prefix format at lock-file boundaries.
 func Validate(h string) error {
 	if !strings.HasPrefix(h, "h1:") {
-		return fmt.Errorf(i18n.Text("dirhash is missing the h1: prefix: %q"), h)
+		return fmt.Errorf(i18n.Text("dirhash.missing_h1_prefix"), h)
 	}
 	return nil
 }

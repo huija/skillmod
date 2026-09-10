@@ -14,8 +14,8 @@ import (
 func newVerifyCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "verify",
-		Short: i18n.Text("verify every installation against SKILL.lock (read-only, with CI-friendly exit codes)"),
-		Long:  i18n.Text("Exit with status 2 when drift is detected. Uses the same implementation as sync --check."),
+		Short: i18n.Text("cli.verify.short"),
+		Long:  i18n.Text("cli.verify.long"),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			eng, err := newEngine()

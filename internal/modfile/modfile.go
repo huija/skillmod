@@ -88,7 +88,7 @@ func (s LockSkill) InstallDir() string {
 func ParseMod(data []byte) (*Mod, error) {
 	var m Mod
 	if err := toml.NewDecoder(bytes.NewReader(data)).DisallowUnknownFields().Decode(&m); err != nil {
-		return nil, fmt.Errorf(i18n.Text("parse SKILL.mod: %w"), err)
+		return nil, fmt.Errorf(i18n.Text("modfile.parse_mod"), err)
 	}
 	if err := ValidateMod(&m); err != nil {
 		return nil, err
@@ -100,7 +100,7 @@ func ParseMod(data []byte) (*Mod, error) {
 func ParseLock(data []byte) (*Lock, error) {
 	var l Lock
 	if err := toml.NewDecoder(bytes.NewReader(data)).DisallowUnknownFields().Decode(&l); err != nil {
-		return nil, fmt.Errorf(i18n.Text("parse SKILL.lock: %w"), err)
+		return nil, fmt.Errorf(i18n.Text("modfile.parse_lock"), err)
 	}
 	normalizeLock(&l)
 	if err := ValidateLock(&l); err != nil {
@@ -116,27 +116,27 @@ func ParseLock(data []byte) (*Lock, error) {
 // aliases give them distinct installation directories.
 func ValidateMod(m *Mod) error {
 	if m.SchemaVersion != SchemaVersion {
-		return fmt.Errorf(i18n.Text("SKILL.mod schemaversion=%d is unsupported; expected %d"), m.SchemaVersion, SchemaVersion)
+		return fmt.Errorf(i18n.Text("modfile.mod_unsupported_schemaversion"), m.SchemaVersion, SchemaVersion)
 	}
 	seenEntry := map[string]bool{}
 	seenDir := map[string]string{}
 	for i := range m.Skills {
 		sk := &m.Skills[i]
 		if err := fsutil.ValidName(sk.Name); err != nil {
-			return fmt.Errorf(i18n.Text("SKILL.mod declares skill %q with an invalid name: %w"), sk.Name, err)
+			return fmt.Errorf(i18n.Text("modfile.mod_invalid_name"), sk.Name, err)
 		}
 		if sk.Alias != "" {
 			if err := fsutil.ValidAlias(sk.Alias); err != nil {
-				return fmt.Errorf(i18n.Text("SKILL.mod declares skill %q with an invalid alias: %w"), sk.Name, err)
+				return fmt.Errorf(i18n.Text("modfile.mod_invalid_alias"), sk.Name, err)
 			}
 		}
 		entryKey := sk.Name + "\x00" + sk.Source + "\x00" + sk.Alias
 		if seenEntry[entryKey] {
-			return fmt.Errorf(i18n.Text("SKILL.mod declares skill %q more than once"), sk.Name)
+			return fmt.Errorf(i18n.Text("modfile.mod_duplicate_skill"), sk.Name)
 		}
 		seenEntry[entryKey] = true
 		if prev, ok := seenDir[fsutil.FoldKey(sk.DirName())]; ok {
-			return fmt.Errorf(i18n.Text("SKILL.mod entries %q and %q differ only in letter case and map to the same installation directory; rename one or set an alias"), prev, sk.DirName())
+			return fmt.Errorf(i18n.Text("modfile.mod_case_conflict"), prev, sk.DirName())
 		}
 		seenDir[fsutil.FoldKey(sk.DirName())] = sk.DirName()
 	}
@@ -151,36 +151,36 @@ func ValidateLock(l *Lock) error {
 	for i := range l.Skills {
 		sk := &l.Skills[i]
 		if err := fsutil.ValidName(sk.Name); err != nil {
-			return fmt.Errorf(i18n.Text("SKILL.lock declares skill %q with an invalid name: %w"), sk.Name, err)
+			return fmt.Errorf(i18n.Text("modfile.lock_invalid_name"), sk.Name, err)
 		}
 		if sk.Dir != "" {
 			if err := fsutil.ValidAlias(sk.Dir); err != nil {
-				return fmt.Errorf(i18n.Text("SKILL.lock declares skill %q with an invalid installation directory: %w"), sk.Name, err)
+				return fmt.Errorf(i18n.Text("modfile.lock_invalid_directory"), sk.Name, err)
 			}
 		}
 		if sk.Dirhash == "" {
-			return fmt.Errorf(i18n.Text("SKILL.lock declares skill %q without a dirhash"), sk.Name)
+			return fmt.Errorf(i18n.Text("modfile.lock_missing_dirhash"), sk.Name)
 		}
 		if sk.Source == "" {
 			if sk.Version != "" || sk.Commit != "" {
-				return fmt.Errorf(i18n.Text("SKILL.lock declares local skill %q with remote-only version or commit fields"), sk.Name)
+				return fmt.Errorf(i18n.Text("modfile.lock_local_with_remote_version"), sk.Name)
 			}
 		} else {
 			if sk.Version == "" {
-				return fmt.Errorf(i18n.Text("SKILL.lock declares remote skill %q without a version"), sk.Name)
+				return fmt.Errorf(i18n.Text("modfile.lock_missing_version"), sk.Name)
 			}
 			if !resolve.IsSHA(sk.Commit) {
-				return fmt.Errorf(i18n.Text("SKILL.lock declares remote skill %q without a valid 40-character commit SHA"), sk.Name)
+				return fmt.Errorf(i18n.Text("modfile.lock_invalid_commit"), sk.Name)
 			}
 		}
 		entryKey := sk.Name + "\x00" + sk.Source + "\x00" + sk.Dir
 		if seenEntry[entryKey] {
-			return fmt.Errorf(i18n.Text("SKILL.lock declares skill %q more than once"), sk.Name)
+			return fmt.Errorf(i18n.Text("modfile.lock_duplicate_skill"), sk.Name)
 		}
 		seenEntry[entryKey] = true
 		dir := sk.InstallDir()
 		if prev, ok := seenDir[fsutil.FoldKey(dir)]; ok {
-			return fmt.Errorf(i18n.Text("SKILL.lock entries %q and %q differ only in letter case and map to the same installation directory"), prev, dir)
+			return fmt.Errorf(i18n.Text("modfile.lock_case_conflict"), prev, dir)
 		}
 		seenDir[fsutil.FoldKey(dir)] = dir
 	}
@@ -355,7 +355,7 @@ func saveState(dir string, modData, lockData []byte, writeFile writeFileFunc) er
 			}
 		}
 		if err := errors.Join(restoreErrs...); err != nil {
-			return fmt.Errorf(i18n.Text("restore manifest state: %w"), err)
+			return fmt.Errorf(i18n.Text("modfile.restore_manifest_state"), err)
 		}
 		return nil
 	}

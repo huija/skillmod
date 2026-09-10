@@ -25,16 +25,16 @@ import (
 func (e *Engine) lockState() (func(), error) {
 	root, err := filepath.Abs(e.manifestRoot())
 	if err != nil {
-		return nil, fmt.Errorf(i18n.Text("resolve manifest root: %w"), err)
+		return nil, fmt.Errorf(i18n.Text("engine.state.resolve_manifest_root"), err)
 	}
 	if resolved, resolveErr := filepath.EvalSymlinks(root); resolveErr == nil {
 		root = resolved
 	} else if !os.IsNotExist(resolveErr) {
-		return nil, fmt.Errorf(i18n.Text("resolve manifest root: %w"), resolveErr)
+		return nil, fmt.Errorf(i18n.Text("engine.state.resolve_manifest_root"), resolveErr)
 	} else if parent, parentErr := filepath.EvalSymlinks(filepath.Dir(root)); parentErr == nil {
 		root = filepath.Join(parent, filepath.Base(root))
 	} else if !errors.Is(parentErr, fs.ErrNotExist) {
-		return nil, fmt.Errorf(i18n.Text("resolve manifest parent: %w"), parentErr)
+		return nil, fmt.Errorf(i18n.Text("engine.state.resolve_manifest_parent"), parentErr)
 	}
 
 	// Fold case for Windows/macOS aliases and put the lock directly below the
@@ -44,7 +44,7 @@ func (e *Engine) lockState() (func(), error) {
 	path := filepath.Join(os.TempDir(), "skillmod-state-"+hex.EncodeToString(sum[:])+".lock")
 	unlock, err := filelock.Lock(path)
 	if err != nil {
-		return nil, fmt.Errorf(i18n.Text("lock manifest state: %w"), err)
+		return nil, fmt.Errorf(i18n.Text("engine.state.lock_manifest_state"), err)
 	}
 	return unlock, nil
 }
@@ -61,7 +61,7 @@ func applyRemovals(paths []string) (finalize func(bool) error, err error) {
 		var rollbackErrs []error
 		for i := len(applied) - 1; i >= 0; i-- {
 			if err := os.Rename(applied[i].backup, applied[i].path); err != nil {
-				rollbackErrs = append(rollbackErrs, fmt.Errorf(i18n.Text("restore %s: %w"), applied[i].path, err))
+				rollbackErrs = append(rollbackErrs, fmt.Errorf(i18n.Text("engine.state.restore"), applied[i].path, err))
 			}
 		}
 		return errors.Join(rollbackErrs...)
@@ -75,7 +75,7 @@ func applyRemovals(paths []string) (finalize func(bool) error, err error) {
 			return nil, errors.Join(err, os.RemoveAll(backup), rollback())
 		}
 		if err := os.Rename(path, backup); err != nil {
-			return nil, errors.Join(fmt.Errorf(i18n.Text("stage removal of %s: %w"), path, err), rollback())
+			return nil, errors.Join(fmt.Errorf(i18n.Text("engine.state.stage_removal"), path, err), rollback())
 		}
 		applied = append(applied, removal{path: path, backup: backup})
 	}
@@ -86,7 +86,7 @@ func applyRemovals(paths []string) (finalize func(bool) error, err error) {
 		var cleanupErrs []error
 		for _, removal := range applied {
 			if err := os.RemoveAll(removal.backup); err != nil {
-				cleanupErrs = append(cleanupErrs, fmt.Errorf(i18n.Text("remove backup for %s: %w"), removal.path, err))
+				cleanupErrs = append(cleanupErrs, fmt.Errorf(i18n.Text("engine.state.remove_backup"), removal.path, err))
 			}
 		}
 		return errors.Join(cleanupErrs...)
@@ -99,13 +99,13 @@ func confirmRemovals(io IO, paths []string) error {
 	}
 	ok := io.Yes
 	if !ok && io.Confirm != nil {
-		ok = io.Confirm.Confirm(i18n.Format("delete the %d directories listed above?", len(paths)))
+		ok = io.Confirm.Confirm(i18n.Format("engine.state.delete_directories_listed", len(paths)))
 	}
 	if !ok && io.Confirm == nil {
-		return fmt.Errorf("%s", i18n.Text("the deletion list requires confirmation: retry interactively, use --yes to skip confirmation, or use --dry-run to list only"))
+		return fmt.Errorf("%s", i18n.Text("engine.state.deletion_list_requires"))
 	}
 	if !ok {
-		return fmt.Errorf("%s", i18n.Text("cancelled by user; no files were deleted"))
+		return fmt.Errorf("%s", i18n.Text("engine.state.cancelled_user_files_deleted"))
 	}
 	return nil
 }

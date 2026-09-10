@@ -40,7 +40,7 @@ func (e *Engine) Verify(ctx context.Context, io IO) (*Report, error) {
 	for _, sk := range m.Skills {
 		lk := findLock(lock, sk)
 		if lk == nil {
-			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Source: sk.Source, Action: "drift", Note: i18n.Text("no record in SKILL.lock; run skillmod sync")})
+			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Source: sk.Source, Action: "drift", Note: i18n.Text("engine.verify.record_skill_lock_run")})
 			drift = true
 			continue
 		}
@@ -49,12 +49,12 @@ func (e *Engine) Verify(ctx context.Context, io IO) (*Report, error) {
 			h, err := dirhash.HashDir(dst)
 			switch {
 			case err != nil:
-				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "drift", Note: i18n.Text("missing: ") + dst, Targets: []string{dst}, TargetResults: []TargetReport{{Path: dst, Action: "missing"}}})
+				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "drift", Note: i18n.Text("engine.sync.missing") + dst, Targets: []string{dst}, TargetResults: []TargetReport{{Path: dst, Action: "missing"}}})
 				drift = true
 			case h != lk.Dirhash:
-				kind := i18n.Text("contents do not match the lock")
+				kind := i18n.Text("engine.verify.contents_match_lock")
 				if sk.Local {
-					kind = i18n.Text("local entry contents do not match the baseline (local changes)")
+					kind = i18n.Text("engine.verify.local_entry_contents_match")
 				}
 				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "drift", Note: kind, Targets: []string{dst}, TargetResults: []TargetReport{{Path: dst, Action: "drift"}}})
 				drift = true
@@ -66,14 +66,14 @@ func (e *Engine) Verify(ctx context.Context, io IO) (*Report, error) {
 	// Report stale entries without treating them as drift.
 	for _, lk := range staleEntries(m, lock) {
 		rep.Entries = append(rep.Entries, EntryReport{
-			Name: lk.Name, Action: "stale", Note: i18n.Text("removed from the mod; run skillmod prune to clean it")})
+			Name: lk.Name, Action: "stale", Note: i18n.Text("engine.verify.removed_mod_run_skillmod")})
 	}
 
 	if drift {
-		io.printf(i18n.Text("verification result: drift detected"))
+		io.printf(i18n.Text("engine.verify.verification_result_drift"))
 		return rep, &DriftError{Report: rep}
 	}
-	io.printf(i18n.Text("verification result: all entries are consistent"))
+	io.printf(i18n.Text("engine.verify.verification_result_all"))
 	return rep, nil
 }
 
@@ -81,10 +81,10 @@ func (e *Engine) Verify(ctx context.Context, io IO) (*Report, error) {
 func loadLockStrict(root string) (*modfile.Lock, error) {
 	l, err := modfile.LoadLock(root)
 	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("%s", i18n.Text("SKILL.lock not found\nAdvice: run skillmod sync first to generate the lock file"))
+		return nil, fmt.Errorf("%s", i18n.Text("engine.verify.skill_lock_found_advice"))
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%w\nAdvice: %s", err, i18n.Text("SKILL.lock is tool-maintained; repair the listed entry by hand, or back up and delete the file, then re-run skillmod sync to regenerate it"))
+		return nil, fmt.Errorf("%w\nAdvice: %s", err, i18n.Text("engine.skill_lock_tool_maintained"))
 	}
 	return l, nil
 }

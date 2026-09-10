@@ -48,21 +48,19 @@ var (
 // NewRootCmd assembles the root command and all subcommands.
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:     "skillmod",
-		Version: Version,
-		Short:   i18n.Text("go mod for Agent Skills: SKILL.mod declarations + SKILL.lock pinning + sync alignment"),
-		Long: i18n.Text(`skillmod manages Agent Skill dependencies using a workflow modeled after go mod:
-SKILL.mod declarations + SKILL.lock content pinning (dirhash) + idempotent skillmod sync,
-ensuring every machine gets exactly the same set of skills.`),
+		Use:           "skillmod",
+		Version:       Version,
+		Short:         i18n.Text("cli.root.short"),
+		Long:          i18n.Text("cli.root.long"),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
 	pf := root.PersistentFlags()
-	pf.StringVar(&flagInstallMode, "install-mode", "", i18n.Text("installation mode: auto or copy (overrides config)"))
-	pf.BoolVar(&flagGlobal, "global", false, i18n.Text("manage user-wide skills instead of the current project"))
-	pf.BoolVar(&flagJSON, "json", false, i18n.Text("output structured results as JSON"))
-	pf.BoolVar(&flagYes, "yes", false, i18n.Text("skip interactive confirmation (for CI)"))
-	pf.BoolVar(&flagDryRun, "dry-run", false, i18n.Text("print the execution plan without writing files"))
+	pf.StringVar(&flagInstallMode, "install-mode", "", i18n.Text("cli.root.flag_install_mode"))
+	pf.BoolVar(&flagGlobal, "global", false, i18n.Text("cli.root.flag_global"))
+	pf.BoolVar(&flagJSON, "json", false, i18n.Text("cli.root.flag_json"))
+	pf.BoolVar(&flagYes, "yes", false, i18n.Text("cli.root.flag_yes"))
+	pf.BoolVar(&flagDryRun, "dry-run", false, i18n.Text("cli.root.flag_dry_run"))
 
 	root.AddCommand(
 		newInitCmd(),

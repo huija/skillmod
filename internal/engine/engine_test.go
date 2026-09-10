@@ -22,7 +22,6 @@ import (
 	"github.com/huija/skillmod/internal/config"
 	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/engine"
-	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/install"
 	"github.com/huija/skillmod/internal/modfile"
 	"github.com/huija/skillmod/internal/resolve"
@@ -503,7 +502,9 @@ func TestGet_ExactSnapshotSkipsGit(t *testing.T) {
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("exact version snapshot hit still invoked git: %v", err)
 	}
-	if rep.Entries[0].Note != i18n.Text("from a local version snapshot; not verified online") {
+	// Note wording is a user-visible contract, pinned literally: reading it
+	// back from the catalog would make this assertion self-referential.
+	if rep.Entries[0].Note != "from a local version snapshot; not verified online" {
 		t.Fatalf("Note = %q", rep.Entries[0].Note)
 	}
 }
@@ -615,7 +616,7 @@ func TestGet_BranchRejected(t *testing.T) {
 	if !errors.As(err, &be) {
 		t.Fatalf("err = %v (%T), want BranchError", err, err)
 	}
-	wantMessage := i18n.Format("branches cannot be locked; use a tag or commit SHA (%q is a branch name)", "main")
+	wantMessage := `branches cannot be locked; use a tag or commit SHA ("main" is a branch name)`
 	if err.Error() != wantMessage {
 		t.Errorf("message = %q", err)
 	}
@@ -708,7 +709,7 @@ func TestGet_SameRepoVersionSecondSkillIsFullyLocal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second skill at the same repo@version did not use a local-only hit: %v", err)
 	}
-	if rep.Entries[0].Note != i18n.Text("from a local repository version snapshot; not verified online") {
+	if rep.Entries[0].Note != "from a local repository version snapshot; not verified online" {
 		t.Fatalf("same-repository cache note = %q", rep.Entries[0].Note)
 	}
 	if _, err := os.Stat(filepath.Join(installedDir(root, "beta"), "beta.txt")); err != nil {
@@ -759,7 +760,7 @@ func TestGet_SameRepoCommitSecondSkillIsFullyLocal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second skill at the same repo@commit did not use a local-only hit: %v", err)
 	}
-	if rep.Entries[0].Note != i18n.Text("from a local repository commit snapshot; not verified online") {
+	if rep.Entries[0].Note != "from a local repository commit snapshot; not verified online" {
 		t.Fatalf("commit cache note = %q", rep.Entries[0].Note)
 	}
 	alpha := loadLockSkill(t, root, "alpha")
@@ -1436,7 +1437,7 @@ func TestUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rep.Entries[0].Note != i18n.Text("already up to date") {
+	if rep.Entries[0].Note != "already up to date" {
 		t.Errorf("second update = %+v, want already up to date", rep.Entries[0])
 	}
 }
@@ -1987,7 +1988,7 @@ func TestGet_OfflineSnapshotHit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("offline get should hit the version snapshot: %v", err)
 	}
-	if rep.Entries[0].Note != i18n.Text("from a local version snapshot; not verified online") {
+	if rep.Entries[0].Note != "from a local version snapshot; not verified online" {
 		t.Errorf("Note = %q", rep.Entries[0].Note)
 	}
 	if _, err := os.Stat(installedDir(root2, "hello")); err != nil {
@@ -2062,7 +2063,7 @@ func TestList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(rep.Entries[0].Note, i18n.Text("upgrade available → ")) {
+	if !strings.Contains(rep.Entries[0].Note, "upgrade available → ") {
 		t.Errorf("list did not report an available upgrade: %+v", rep.Entries[0])
 	}
 }

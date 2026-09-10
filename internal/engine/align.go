@@ -54,7 +54,7 @@ func (e *Engine) align(ctx context.Context, m *modfile.Mod, lock *modfile.Lock) 
 		}
 		note := ""
 		if lk != nil {
-			note = i18n.Format("version changed %s → %s (manual mod edit triggered re-resolution)", lk.Version, mat.version)
+			note = i18n.Format("engine.align.version_changed", lk.Version, mat.version)
 		}
 		upsertLock(newLock, modfile.LockSkill{
 			Name: sk.Name, Source: sk.Source, Version: mat.version,

@@ -33,7 +33,7 @@ func WriteFile(path string, data []byte, perm fs.FileMode) error {
 	base := filepath.Base(path)
 	f, err := createTempFile(filepath.Dir(path), base, perm)
 	if err != nil {
-		return fmt.Errorf(i18n.Text("write %s: %w"), base, err)
+		return fmt.Errorf(i18n.Text("fsutil.write"), base, err)
 	}
 	tmpName := f.Name()
 	defer func() {
@@ -42,20 +42,20 @@ func WriteFile(path string, data []byte, perm fs.FileMode) error {
 	}()
 	if _, err = f.Write(data); err != nil {
 		_ = f.Close()
-		return fmt.Errorf(i18n.Text("write %s: %w"), base, err)
+		return fmt.Errorf(i18n.Text("fsutil.write"), base, err)
 	}
 	if err = f.Sync(); err != nil {
 		_ = f.Close()
-		return fmt.Errorf(i18n.Text("write %s: %w"), base, err)
+		return fmt.Errorf(i18n.Text("fsutil.write"), base, err)
 	}
 	if err = f.Close(); err != nil {
-		return fmt.Errorf(i18n.Text("write %s: %w"), base, err)
+		return fmt.Errorf(i18n.Text("fsutil.write"), base, err)
 	}
 	if err := Replace(tmpName, path); err != nil {
-		return fmt.Errorf(i18n.Text("commit %s to disk: %w"), base, err)
+		return fmt.Errorf(i18n.Text("fsutil.commit_disk"), base, err)
 	}
 	if err := syncDir(filepath.Dir(path)); err != nil {
-		return fmt.Errorf(i18n.Text("commit %s to disk: %w"), base, err)
+		return fmt.Errorf(i18n.Text("fsutil.commit_disk"), base, err)
 	}
 	return nil
 }

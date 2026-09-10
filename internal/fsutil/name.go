@@ -87,29 +87,29 @@ func IsReservedDeviceName(base string) bool {
 func ValidName(name string) error {
 	switch {
 	case name == "":
-		return fmt.Errorf("%s", i18n.Text("name must not be empty"))
+		return fmt.Errorf("%s", i18n.Text("fsutil.name.name_empty"))
 	case !utf8.ValidString(name):
-		return fmt.Errorf("%s", i18n.Text("name is not valid UTF-8"))
+		return fmt.Errorf("%s", i18n.Text("fsutil.name.name_valid_utf"))
 	case name == "." || name == "..":
-		return fmt.Errorf(i18n.Text("name must not be %q"), name)
+		return fmt.Errorf(i18n.Text("fsutil.name.name"), name)
 	case len(name) > maxNameBytes:
-		return fmt.Errorf(i18n.Text("name is longer than %d bytes"), maxNameBytes)
+		return fmt.Errorf(i18n.Text("fsutil.name.name_longer_than_bytes"), maxNameBytes)
 	}
 	for _, r := range name {
 		switch {
 		case r < 0x20 || r == 0x7F:
-			return fmt.Errorf("%s", i18n.Text("name contains a control character"))
+			return fmt.Errorf("%s", i18n.Text("fsutil.name.name_contains_control"))
 		case strings.ContainsRune(`/:*?"<>|\`, r):
-			return fmt.Errorf(i18n.Text("name contains a character that is illegal on Windows: %q"), r)
+			return fmt.Errorf(i18n.Text("fsutil.name.name_contains_character"), r)
 		}
 	}
 	base, _, _ := strings.Cut(name, ".")
 	base = strings.TrimRight(base, " .")
 	if IsReservedDeviceName(base) {
-		return fmt.Errorf(i18n.Text("name uses the reserved Windows device name %q"), base)
+		return fmt.Errorf(i18n.Text("fsutil.name.name_uses_reserved_windows"), base)
 	}
 	if last := name[len(name)-1]; last == '.' || last == ' ' {
-		return fmt.Errorf("%s", i18n.Text("name must not end with a dot or space"))
+		return fmt.Errorf("%s", i18n.Text("fsutil.name.name_end_dot_space"))
 	}
 	return nil
 }
@@ -119,13 +119,13 @@ func ValidName(name string) error {
 // [A-Za-z0-9._-] on top of the portable name rules.
 func ValidAlias(s string) error {
 	if s == "" {
-		return fmt.Errorf("%s", i18n.Text("name must not be empty"))
+		return fmt.Errorf("%s", i18n.Text("fsutil.name.name_empty"))
 	}
 	for _, c := range s {
 		ok := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
 			c == '.' || c == '_' || c == '-'
 		if !ok {
-			return fmt.Errorf(i18n.Text("alias %q contains invalid characters (only letters, digits, '.', '_', and '-' are allowed)"), s)
+			return fmt.Errorf(i18n.Text("fsutil.name.alias_contains_invalid"), s)
 		}
 	}
 	return ValidName(s)
@@ -137,11 +137,11 @@ func ValidAlias(s string) error {
 // trailing slash, and "." or ".." components).
 func ValidPath(p string) error {
 	if strings.Contains(p, `\`) {
-		return fmt.Errorf(i18n.Text("path contains a backslash: %q"), p)
+		return fmt.Errorf(i18n.Text("fsutil.name.path_contains_backslash"), p)
 	}
 	for comp := range strings.SplitSeq(p, "/") {
 		if err := ValidName(comp); err != nil {
-			return fmt.Errorf(i18n.Text("path component %q is invalid: %w"), comp, err)
+			return fmt.Errorf(i18n.Text("fsutil.name.path_component_invalid"), comp, err)
 		}
 	}
 	return nil

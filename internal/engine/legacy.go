@@ -44,7 +44,7 @@ func (e *Engine) legacySkills() (map[string]legacySkill, error) {
 		paths = []string{filepath.Join(e.Root, ".agents", ".skill-lock.json")}
 		if state := os.Getenv("XDG_STATE_HOME"); state != "" {
 			if !filepath.IsAbs(state) {
-				return nil, fmt.Errorf(i18n.Text("%s must be an absolute path: %q"), "XDG_STATE_HOME", state)
+				return nil, fmt.Errorf(i18n.Text("engine.legacy.absolute_path"), "XDG_STATE_HOME", state)
 			}
 			// Newer versions of the upstream installer use the XDG state path;
 			// retain the .agents fallback for existing installations and for
@@ -73,7 +73,7 @@ func (e *Engine) legacySkills() (map[string]legacySkill, error) {
 		Skills  map[string]legacySkill `json:"skills"`
 	}
 	if err := json.Unmarshal(data, &lock); err != nil {
-		return nil, fmt.Errorf(i18n.Text("cannot read previous installer lock %s: %w"), filename, err)
+		return nil, fmt.Errorf(i18n.Text("engine.legacy.cannot_read_previous_installer"), filename, err)
 	}
 	if lock.Version != version || lock.Skills == nil {
 		// An unknown lock belongs to another installer generation. Ignore it
@@ -88,7 +88,7 @@ func (sk legacySkill) location() (repo, subdir string, err error) {
 	switch sk.SourceType {
 	case "github", "git", "gitlab":
 	default:
-		return "", "", fmt.Errorf(i18n.Text("previous installer source type %q is not a supported Git source"), sk.SourceType)
+		return "", "", fmt.Errorf(i18n.Text("engine.legacy.previous_installer_source_type"), sk.SourceType)
 	}
 	raw := sk.SourceURL
 	if raw == "" {
@@ -98,14 +98,14 @@ func (sk legacySkill) location() (repo, subdir string, err error) {
 		}
 	}
 	if raw == "" || strings.ContainsAny(raw, "\r\n\x00") {
-		return "", "", fmt.Errorf(i18n.Text("invalid previous installer repository: %q"), raw)
+		return "", "", fmt.Errorf(i18n.Text("engine.legacy.invalid_previous_installer"), raw)
 	}
 	a, err := address.Parse(raw)
 	if err != nil {
 		return "", "", err
 	}
 	if a.Ref != "" || a.Subdir != "" {
-		return "", "", fmt.Errorf(i18n.Text("invalid previous installer repository: %q"), raw)
+		return "", "", fmt.Errorf(i18n.Text("engine.legacy.invalid_previous_installer"), raw)
 	}
 	// Only native Git transports are accepted, never executable remote helpers.
 	transport := a.Repo
@@ -114,7 +114,7 @@ func (sk legacySkill) location() (repo, subdir string, err error) {
 	}
 	u, err := url.Parse(transport)
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http" && u.Scheme != "ssh" && u.Scheme != "file") {
-		return "", "", fmt.Errorf(i18n.Text("invalid previous installer repository: %q"), raw)
+		return "", "", fmt.Errorf(i18n.Text("engine.legacy.invalid_previous_installer"), raw)
 	}
 	// Persisted Git paths are slash-separated even when imported on another OS.
 	subdir = strings.ReplaceAll(sk.SkillPath, "\\", "/")
@@ -129,11 +129,11 @@ func (sk legacySkill) location() (repo, subdir string, err error) {
 			}
 		}
 		if strings.Contains(subdir, "@") {
-			return "", "", fmt.Errorf(i18n.Text("subdirectory must not contain @: %q"), subdir)
+			return "", "", fmt.Errorf(i18n.Text("address.subdirectory_at_sign"), subdir)
 		}
 	}
 	if sk.SkillFolderHash != "" && !resolve.IsSHA(sk.SkillFolderHash) {
-		return "", "", fmt.Errorf(i18n.Text("invalid legacy Git tree hash: %q"), sk.SkillFolderHash)
+		return "", "", fmt.Errorf(i18n.Text("engine.legacy.invalid_legacy_git_tree"), sk.SkillFolderHash)
 	}
 	return a.Repo, subdir, nil
 }
@@ -155,7 +155,7 @@ func (im *legacyImporter) match(ctx context.Context, old legacySkill, name, alia
 		return nil, nil, err
 	}
 	if old.SkillFolderHash != "" && old.SkillPath == "" {
-		return nil, nil, fmt.Errorf("%s", i18n.Text("previous installer recorded a tree hash without its repository path"))
+		return nil, nil, fmt.Errorf("%s", i18n.Text("engine.legacy.previous_installer_recorded"))
 	}
 	if old.SkillPath == "" {
 		root, err := im.engine.materialize(ctx, repo, "", res, "", im.memo)
@@ -173,7 +173,7 @@ func (im *legacyImporter) match(ctx context.Context, old legacySkill, name, alia
 			}
 		}
 		if len(matches) != 1 {
-			return nil, nil, fmt.Errorf(i18n.Text("cannot identify a unique repository path for imported skill %q"), name)
+			return nil, nil, fmt.Errorf(i18n.Text("engine.legacy.no_unique_repository_path"), name)
 		}
 		subdir = matches[0].subdir
 	}
@@ -183,7 +183,7 @@ func (im *legacyImporter) match(ctx context.Context, old legacySkill, name, alia
 			return nil, nil, err
 		}
 		if treeHash != old.SkillFolderHash {
-			return nil, nil, fmt.Errorf(i18n.Text("recorded tree %s does not match repository tree at %s (%s)"), old.SkillFolderHash, old.Ref, treeHash)
+			return nil, nil, fmt.Errorf(i18n.Text("engine.legacy.recorded_tree_match_repository"), old.SkillFolderHash, old.Ref, treeHash)
 		}
 	}
 	mat, err := im.engine.materialize(ctx, repo, subdir, res, "", im.memo)
@@ -195,10 +195,10 @@ func (im *legacyImporter) match(ctx context.Context, old legacySkill, name, alia
 		return nil, nil, err
 	}
 	if remoteName != name {
-		return nil, nil, fmt.Errorf(i18n.Text("recorded source path contains skill %q, not installed skill %q"), remoteName, name)
+		return nil, nil, fmt.Errorf(i18n.Text("engine.legacy.recorded_source_path_contains"), remoteName, name)
 	}
 	if old.Ref == "" && mat.dirhash != installedHash {
-		return nil, nil, errors.New(i18n.Text("previous installer record has no immutable revision and the latest source does not match the installed contents"))
+		return nil, nil, errors.New(i18n.Text("engine.legacy.record_without_revision"))
 	}
 	// The old installer record is authoritative for provenance. The installed
 	// directory may have been edited after installation (or normalized by the

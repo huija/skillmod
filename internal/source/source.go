@@ -42,11 +42,11 @@ type RepoError struct {
 func (e *RepoError) Error() string {
 	switch e.Kind {
 	case RepoNotFound:
-		return i18n.Format("repository not found: %s (check the address)", e.Repo)
+		return i18n.Format("source.repository_not_found", e.Repo)
 	case RepoAuth:
-		return i18n.Format("repository authentication failed: %s (configure Git credentials with gh auth login or an SSH key)", e.Repo)
+		return i18n.Format("source.repository_authentication", e.Repo)
 	default:
-		return i18n.Format("failed to access repository: %s: %s", e.Repo, e.Stderr)
+		return i18n.Format("source.failed_access_repository", e.Repo, e.Stderr)
 	}
 }
 
@@ -105,7 +105,7 @@ func repoArg(args []string) string {
 func mapGitError(err error, stderr, repo string) error {
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 128 {
-		return fmt.Errorf(i18n.Text("git execution failed: %w"), err)
+		return fmt.Errorf(i18n.Text("source.git_execution_failed"), err)
 	}
 	kind := RepoOther
 	switch {

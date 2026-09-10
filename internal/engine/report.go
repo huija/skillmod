@@ -56,7 +56,7 @@ type Report struct {
 type PartialError struct{ Report *Report }
 
 func (e *PartialError) Error() string {
-	return i18n.Text("completed partially; one or more targets were preserved")
+	return i18n.Text("engine.report.completed_partially")
 }
 
 func setTargetResult(entry *EntryReport, path string, action Action) {

@@ -61,7 +61,7 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 			}
 		}
 		if !found {
-			return nil, fmt.Errorf(i18n.Text("entry %q is not in SKILL.mod"), n)
+			return nil, fmt.Errorf(i18n.Text("engine.remove.entry_skill_mod"), n)
 		}
 	}
 
@@ -81,12 +81,12 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 	}
 	if len(repositories) > 0 {
 		io.setProgress(
-			i18n.Format("checking %d source repositories concurrently", len(repositories)),
-			i18n.Text("contacting Git servers"),
-			i18n.Text("comparing available versions"),
+			i18n.Format("engine.update.checking_source_repositories", len(repositories)),
+			i18n.Text("engine.update.contacting_git_servers"),
+			i18n.Text("engine.update.comparing_available_versions"),
 		)
 		if err := e.loadRefsConcurrently(ctx, repositories, memo); err != nil {
-			return nil, fmt.Errorf(i18n.Text("update requires network access to resolve the latest version: %w"), err)
+			return nil, fmt.Errorf(i18n.Text("engine.update.update_requires_network_access"), err)
 		}
 	}
 
@@ -97,7 +97,7 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 		}
 		refs, err := e.refs(ctx, repo, memo)
 		if err != nil {
-			return nil, fmt.Errorf(i18n.Text("update requires network access to resolve the latest version: %w"), err)
+			return nil, fmt.Errorf(i18n.Text("engine.update.update_requires_network_access"), err)
 		}
 		lk := findLock(lock, sk)
 		cur := sk.Version
@@ -106,10 +106,10 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 		if resolve.IsPseudoVersion(cur) || resolve.IsSHA(cur) {
 			// Advance a commit-pinned entry to default-branch HEAD (PRD §3.6).
 			if refs.DefaultHead == "" {
-				return nil, fmt.Errorf(i18n.Text("entry %s: remote has no default branch"), sk.Name)
+				return nil, fmt.Errorf(i18n.Text("engine.update.entry_remote_has_default"), sk.Name)
 			}
 			if lk != nil && refs.DefaultHead == lk.Commit {
-				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "keep", Version: cur, Note: i18n.Text("already up to date")})
+				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "keep", Version: cur, Note: i18n.Text("engine.update.already_up_to_date")})
 				continue
 			}
 			fetchRef := "HEAD"
@@ -125,13 +125,13 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 			if r.Kind == resolve.KindTag && resolve.CompareVersions(r.Version, cur) < 0 && !io.AllowDowngrade {
 				rep.Entries = append(rep.Entries, EntryReport{
 					Name: sk.Name, Source: sk.Source, Action: ActionKeep, Version: cur,
-					Note: i18n.Format("remote latest is %s; refusing to downgrade from %s without --allow-downgrade", r.Version, cur),
+					Note: i18n.Format("engine.update.remote_latest_refusing", r.Version, cur),
 				})
 				continue
 			}
 			if r.Version == cur && lk != nil && lk.Commit != "" {
 				if r.Commit == lk.Commit {
-					rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "keep", Version: cur, Note: i18n.Text("already up to date")})
+					rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "keep", Version: cur, Note: i18n.Text("engine.update.already_up_to_date")})
 					continue
 				}
 				path, _ := e.Store.SnapshotPath(repo, cur)
@@ -216,7 +216,7 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 	}
 
 	if io.DryRun {
-		rep.Notes = append(rep.Notes, i18n.Text("dry-run: no files were written"))
+		rep.Notes = append(rep.Notes, i18n.Text("engine.get.dry_run_files_written"))
 		return rep, partialError(rep, conflicts, skip)
 	}
 
@@ -233,7 +233,7 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 	for _, en := range rep.Entries {
 		switch en.Action {
 		case "keep":
-			io.printf(i18n.Text("%s: %s (%s)"), en.Name, en.Version, en.Note)
+			io.printf(i18n.Text("engine.update.entry_label"), en.Name, en.Version, en.Note)
 		case "update":
 			io.printf("%s: %s", en.Name, en.Note)
 		}

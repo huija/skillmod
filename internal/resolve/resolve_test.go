@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/testutil"
 )
 
@@ -82,8 +81,9 @@ func TestResolve_BranchErrorMessage(t *testing.T) {
 	if !errors.As(err, &be) {
 		t.Fatalf("err = %v", err)
 	}
-	// Exact wording required by PRD §3.2.
-	want := i18n.Format("branches cannot be locked; use a tag or commit SHA (%q is a branch name)", "main")
+	// Exact wording required by PRD §3.2, pinned literally so a catalog edit
+	// cannot silently change the contract.
+	const want = `branches cannot be locked; use a tag or commit SHA ("main" is a branch name)`
 	if be.Error() != want {
 		t.Errorf("message = %q", be.Error())
 	}

@@ -66,11 +66,11 @@ func (s *Source) openRepo(ctx context.Context, repo string) (dir string, cleanup
 		haveInfo := strings.TrimSpace(string(info))
 		if !strings.HasPrefix(haveInfo, "git:") {
 			cleanup()
-			return "", nil, fmt.Errorf(i18n.Text("VCS cache metadata is invalid: %s"), dir+".info")
+			return "", nil, fmt.Errorf(i18n.Text("source.repo.vcs_cache_metadata_invalid"), dir+".info")
 		}
 		if haveInfo != wantInfo {
 			cleanup()
-			return "", nil, fmt.Errorf(i18n.Text("VCS cache identity conflict: %s"), dir)
+			return "", nil, fmt.Errorf(i18n.Text("source.repo.vcs_cache_identity_conflict"), dir)
 		}
 		if err := s.ensureOrigin(ctx, dir, repo); err != nil {
 			cleanup()
@@ -179,11 +179,11 @@ func (s *Source) fetchTarget(ctx context.Context, dir, commit, fetchRef string) 
 		plain := append([]string{"fetch", "-f", "--quiet", "origin"}, depth...)
 		plain = append(plain, "+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*")
 		if _, plainErr := s.run(ctx, dir, plain...); plainErr != nil {
-			return fmt.Errorf(i18n.Text("failed to fetch %s@%s: %w"), repoOrigin(dir), shortSHA(commit), plainErr)
+			return fmt.Errorf(i18n.Text("source.repo.failed_fetch"), repoOrigin(dir), shortSHA(commit), plainErr)
 		}
 	}
 	if !s.hasCommit(ctx, dir, commit) {
-		return fmt.Errorf(i18n.Text("commit %s is not in the history of the remote's public heads or tags"), commit)
+		return fmt.Errorf(i18n.Text("source.repo.commit_history_remote_public"), commit)
 	}
 	return nil
 }
@@ -191,7 +191,7 @@ func (s *Source) fetchTarget(ctx context.Context, dir, commit, fetchRef string) 
 // TreeHash returns the Git tree object ID for subdir at an immutable commit.
 func (s *Source) TreeHash(ctx context.Context, repo, commit, fetchRef, subdir string) (string, error) {
 	if !resolve.IsSHA(commit) {
-		return "", fmt.Errorf(i18n.Text("invalid Git commit hash: %q"), commit)
+		return "", fmt.Errorf(i18n.Text("source.repo.invalid_git_commit_hash"), commit)
 	}
 	if subdir != "" {
 		if err := fsutil.ValidPath(subdir); err != nil {
@@ -216,7 +216,7 @@ func (s *Source) TreeHash(ctx context.Context, repo, commit, fetchRef, subdir st
 	}
 	hash := strings.TrimSpace(out)
 	if !resolve.IsSHA(hash) {
-		return "", fmt.Errorf(i18n.Text("invalid Git tree hash: %q"), hash)
+		return "", fmt.Errorf(i18n.Text("source.repo.invalid_git_tree_hash"), hash)
 	}
 	if _, err := s.run(ctx, dir, "cat-file", "-e", hash+"^{tree}"); err != nil {
 		return "", err

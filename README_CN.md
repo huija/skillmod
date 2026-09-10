@@ -163,11 +163,15 @@ SKILLMOD_LANG=zh skillmod sync
 
 JSON 的字段名和供程序消费的 action 标识不会翻译。
 
-翻译统一维护在 [`locales/`](locales/) 下对等的 gettext/POSIX locale catalog：`en_US.po` 和 `zh_CN.po` 拥有完全相同的 msgid 集合。CLI 构建时会同时嵌入两份文件；`SKILLMOD_LANG=en` 与 `SKILLMOD_LANG=zh` 仍作为便捷别名。修改用户可见文案后运行：
+翻译统一维护在 [`locales/`](locales/) 下对等的 gettext/POSIX locale catalog：`en_US.po` 和 `zh_CN.po` 拥有完全相同的 message key 集合。CLI 构建时会同时嵌入两份文件；`SKILLMOD_LANG=en` 与 `SKILLMOD_LANG=zh` 仍作为便捷别名。
+
+源码中只传短 key（如 `i18n.Text("cli.get.long")`），文案存放在 catalog 里，英文原文以 `en_US.po` 为准。新增或修改用户可见文案后运行：
 
 ```bash
 go generate ./internal/i18n
 ```
+
+若某个 key 缺少英文或中文文案，生成会失败并列出该 key；在 `locales/` 中补全对应的 `msgstr` 后再次运行即可。key 的命名规则见 [`locales/README.md`](locales/README.md)。
 
 第一次获取某个 `repo@version` 时会物化完整仓库版本；之后添加该版本下的其他 skill，直接从本地子目录校验并安装，不调用 Git、不访问远端。显式 `@commit` 同样可通过已有 repo commit 快照复用。省略版本的 latest 与 `skillmod update` 保留联网刷新语义。
 

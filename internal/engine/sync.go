@@ -110,7 +110,7 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 				continue
 			}
 			rep.Entries = append(rep.Entries, EntryReport{
-				Name: sk.Name, Action: "local", Note: i18n.Text("no baseline in the lock; verification skipped (run init again to establish one)")})
+				Name: sk.Name, Action: "local", Note: i18n.Text("engine.sync.no_baseline")})
 			continue
 		}
 		for _, a := range adapters {
@@ -118,11 +118,11 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 			h, err := dirhash.HashDir(dst)
 			switch {
 			case err != nil:
-				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local", Note: i18n.Text("missing: ") + dst})
+				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local", Note: i18n.Text("engine.sync.missing") + dst})
 			case h != lk.Dirhash:
-				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local-drift", Note: i18n.Text("contents do not match the baseline (local changes)"), Targets: []string{dst}})
+				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local-drift", Note: i18n.Text("engine.sync.contents_match_baseline_local"), Targets: []string{dst}})
 			default:
-				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local", Note: i18n.Text("consistent")})
+				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local", Note: i18n.Text("engine.sync.consistent")})
 			}
 		}
 	}
@@ -131,7 +131,7 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 	for _, lk := range staleEntries(m, lock) {
 		rep.Entries = append(rep.Entries, EntryReport{
 			Name: lk.Name, Source: lk.Source, Version: lk.Version,
-			Action: "stale", Note: i18n.Text("removed from the mod; files were kept—run skillmod prune to clean them"),
+			Action: "stale", Note: i18n.Text("engine.sync.removed_mod_files_kept"),
 		})
 	}
 
@@ -167,7 +167,7 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 			rep.Entries[i].Action = ActionKeep
 		}
 		if skipped > 0 {
-			note := i18n.Format("%d conflicting targets were kept and skipped", skipped)
+			note := i18n.Format("engine.sync.conflicting_targets_kept", skipped)
 			rep.Entries[i].Note = appendNote(rep.Entries[i].Note, note)
 		}
 	}
@@ -183,13 +183,13 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 		}
 		skipped := skippedConflictCount(conflicts, skip)
 		if planned == 0 && skipped > 0 {
-			io.printf(i18n.Format("dry-run: no writes planned; %d conflicting targets would be kept", skipped))
+			io.printf(i18n.Format("engine.sync.dry_run_writes_planned", skipped))
 		} else if planned == 0 {
-			io.printf(i18n.Text("dry-run: everything is already consistent"))
+			io.printf(i18n.Text("engine.sync.dry_run_everything_already"))
 		} else {
-			io.printf(i18n.Format("dry-run: %d entries would be installed or updated", planned))
+			io.printf(i18n.Format("engine.sync.dry_run_entries_installed", planned))
 		}
-		rep.Notes = append(rep.Notes, i18n.Text("dry-run: no files were written"))
+		rep.Notes = append(rep.Notes, i18n.Text("engine.get.dry_run_files_written"))
 		return rep, partialError(rep, conflicts, skip)
 	}
 
@@ -212,12 +212,12 @@ func (e *Engine) Sync(ctx context.Context, checkOnly bool, io IO) (*Report, erro
 	}
 	if changed == 0 {
 		if skipped := skippedConflictCount(conflicts, skip); skipped > 0 {
-			io.printf(i18n.Format("no changes; %d conflicting targets were kept", skipped))
+			io.printf(i18n.Format("engine.sync.changes_conflicting_targets", skipped))
 		} else {
-			io.printf(i18n.Text("no changes")) // Idempotency required by AC-2.
+			io.printf(i18n.Text("engine.sync.changes")) // Idempotency required by AC-2.
 		}
 	} else {
-		io.printf(i18n.Text("synchronized %d entries; verification passed"), changed)
+		io.printf(i18n.Text("engine.sync.synchronized_entries"), changed)
 	}
 	return rep, partialError(rep, conflicts, skip)
 }
@@ -233,17 +233,17 @@ func (e *Engine) reestablishLocalBaseline(newLock *modfile.Lock, sk modfile.ModS
 		dst := adapterDir(a, e.Root, sk.DirName())
 		h, err := dirhash.HashDir(dst)
 		if err != nil {
-			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local", Note: i18n.Text("missing: ") + dst})
+			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local", Note: i18n.Text("engine.sync.missing") + dst})
 			continue
 		}
 		if baseline == "" {
 			baseline = h
 			upsertLock(newLock, modfile.LockSkill{Name: sk.Name, Dir: sk.Alias, Dirhash: h})
-			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local", Note: i18n.Text("baseline re-established from the installed files (the previous remote lock record was removed)")})
+			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local", Note: i18n.Text("engine.sync.baseline_re_established")})
 			continue
 		}
 		if h != baseline {
-			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local-drift", Note: i18n.Text("contents do not match the baseline (local changes)"), Targets: []string{dst}})
+			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "local-drift", Note: i18n.Text("engine.sync.contents_match_baseline_local"), Targets: []string{dst}})
 		}
 	}
 }

@@ -74,7 +74,7 @@ func (io IO) stopProgress() {
 // DriftError reports drift detected by verify and maps to CLI exit code 2 for AC-12.
 type DriftError struct{ Report *Report }
 
-func (e *DriftError) Error() string { return i18n.Text("drift detected") }
+func (e *DriftError) Error() string { return i18n.Text("engine.drift_detected") }
 
 // TamperError reports downloaded content whose dirhash differs from the lock (AC-3).
 type TamperError struct {
@@ -82,7 +82,7 @@ type TamperError struct {
 }
 
 func (e *TamperError) Error() string {
-	return i18n.Format("remote contents do not match the lock and may have been modified: %s\nlock:     %s\ncomputed: %s\nVerify that the source has not been tampered with; if it is valid, use skillmod get to lock it again", e.Name, e.Want, e.Got)
+	return i18n.Format("engine.remote_contents_mismatch", e.Name, e.Want, e.Got)
 }
 
 // NameConflictError reports the same name referring to different sources (AC-8).
@@ -99,10 +99,10 @@ type NameConflictError struct {
 
 func (e *NameConflictError) Error() string {
 	if e.OtherName != "" {
-		return i18n.Format("local name conflict: %q and %q differ only in letter case and map to the same installation directory (sources %s and %s)\nUse an alias to distinguish them: skillmod get --alias <new-name> %s",
+		return i18n.Format("engine.local_name_conflict_differ",
 			e.Name, e.OtherName, e.Existing, e.Incoming, e.Incoming)
 	}
-	return i18n.Format("local name conflict: %q already exists (source %s); the new source is %s\nUse an alias to distinguish them: skillmod get --alias <new-name> %s", e.Name, e.Existing, e.Incoming, e.Incoming)
+	return i18n.Format("engine.local_name_conflict_already", e.Name, e.Existing, e.Incoming, e.Incoming)
 }
 
 func (e *Engine) adapters() ([]install.Adapter, error) {
@@ -128,7 +128,7 @@ func (e *Engine) saveState(m *modfile.Mod, lock *modfile.Lock) error {
 func (e *Engine) loadMod() (*modfile.Mod, error) {
 	m, err := modfile.LoadMod(e.manifestRoot())
 	if os.IsNotExist(err) {
-		return nil, fmt.Errorf("%s", i18n.Text("SKILL.mod not found\nAdvice: run skillmod init or skillmod get first"))
+		return nil, fmt.Errorf("%s", i18n.Text("engine.skill_mod_found_advice"))
 	}
 	return m, err
 }
@@ -153,7 +153,7 @@ func (e *Engine) loadLock() (*modfile.Lock, error) {
 		return &modfile.Lock{}, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%w\nAdvice: %s", err, i18n.Text("SKILL.lock is tool-maintained; repair the listed entry by hand, or back up and delete the file, then re-run skillmod sync to regenerate it"))
+		return nil, fmt.Errorf("%w\nAdvice: %s", err, i18n.Text("engine.skill_lock_tool_maintained"))
 	}
 	return l, nil
 }
@@ -226,10 +226,10 @@ func upsertLock(l *modfile.Lock, e modfile.LockSkill) {
 func splitSource(src string) (repo, subdir string, err error) {
 	a, err := address.Parse(src)
 	if err != nil {
-		return "", "", fmt.Errorf(i18n.Text("invalid source in SKILL.mod: %w"), err)
+		return "", "", fmt.Errorf(i18n.Text("engine.invalid_source_skill_mod"), err)
 	}
 	if a.Ref != "" {
-		return "", "", fmt.Errorf(i18n.Text("the source field must not contain a version reference: %q"), src)
+		return "", "", fmt.Errorf(i18n.Text("engine.source_field_contain_version"), src)
 	}
 	return a.Repo, a.Subdir, nil
 }
@@ -245,7 +245,7 @@ func hashTree(t *source.Tree) (string, error) {
 	return dirhash.HashBlobs(paths, func(name string) (io.ReadCloser, error) {
 		b, ok := data[name]
 		if !ok {
-			return nil, fmt.Errorf(i18n.Text("internal error: missing blob %s"), name)
+			return nil, fmt.Errorf(i18n.Text("engine.internal_error_missing_blob"), name)
 		}
 		return io.NopCloser(bytes.NewReader(b)), nil
 	})
@@ -298,9 +298,9 @@ func (e *Engine) refs(ctx context.Context, repo string, memo *operationMemo) (*r
 		return result.refs, result.err
 	}
 	memo.setProgress(
-		i18n.Format("checking remote versions for %s", key),
-		i18n.Text("contacting the Git server"),
-		i18n.Text("waiting for remote references"),
+		i18n.Format("engine.checking_remote_versions", key),
+		i18n.Text("engine.contacting_git_server"),
+		i18n.Text("engine.waiting_remote_references"),
 	)
 	refs, err := e.Source.Refs(ctx, repo)
 	memo.refs[key] = refsResult{refs: refs, err: err}
@@ -313,7 +313,7 @@ type skillSubdirError struct {
 }
 
 func (e *skillSubdirError) Error() string {
-	return i18n.Format("skill subdirectory %q does not exist in local repository version %s", e.Subdir, e.Version)
+	return i18n.Format("engine.skill_subdirectory_exist_local", e.Subdir, e.Version)
 }
 
 func pathWithinSubdir(name, subdir string) bool {
@@ -354,7 +354,7 @@ func snapshotSkillDir(snap *store.Snapshot, subdir string) (string, error) {
 func validateSkillPaths(dir, subdir string) error {
 	display := subdir
 	if display == "" {
-		display = i18n.Text("snapshot root")
+		display = i18n.Text("engine.snapshot_root")
 	}
 	return filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -368,7 +368,7 @@ func validateSkillPaths(dir, subdir string) error {
 			return err
 		}
 		if err := fsutil.ValidPath(filepath.ToSlash(rel)); err != nil {
-			return fmt.Errorf("%s", i18n.Format("skill path %q in %s cannot be materialized on every platform: %s", filepath.ToSlash(rel), display, err))
+			return fmt.Errorf("%s", i18n.Format("engine.skill_path_not_materializable", filepath.ToSlash(rel), display, err))
 		}
 		return nil
 	})
@@ -380,9 +380,9 @@ func (e *Engine) snapshot(repo, version string, memo *operationMemo) (*store.Sna
 		return snap, nil
 	}
 	memo.setProgress(
-		i18n.Format("verifying cached snapshot for %s", key.repo),
-		i18n.Text("checking cached content integrity"),
-		i18n.Text("reading the local repository cache"),
+		i18n.Format("engine.verifying_cached_snapshot", key.repo),
+		i18n.Text("engine.checking_cached_content"),
+		i18n.Text("engine.reading_local_repository_cache"),
 	)
 	snap, err := e.Store.GetSnapshot(repo, version)
 	if err == nil {
@@ -410,9 +410,9 @@ func (e *Engine) snapshotMaterialized(repo, subdir, version, commit, wantHash st
 	h := snap.Info.Treehash
 	if subdir != "" {
 		memo.setProgress(
-			i18n.Format("verifying skill content in %s", source.RepoIdentity(repo)),
-			i18n.Text("hashing the selected skill"),
-			i18n.Text("checking cached content integrity"),
+			i18n.Format("engine.verifying_skill_content", source.RepoIdentity(repo)),
+			i18n.Text("engine.hashing_selected_skill"),
+			i18n.Text("engine.checking_cached_content"),
 		)
 		h, err = dirhash.HashDir(skillDir)
 		if err != nil {
@@ -454,9 +454,9 @@ func (e *Engine) materialize(ctx context.Context, repo, subdir string, res resol
 	}
 
 	memo.setProgress(
-		i18n.Format("downloading repository snapshot from %s", source.RepoIdentity(repo)),
-		i18n.Text("fetching Git objects"),
-		i18n.Text("reading repository contents"),
+		i18n.Format("engine.downloading_repository", source.RepoIdentity(repo)),
+		i18n.Text("engine.fetching_git_objects"),
+		i18n.Text("engine.reading_repository_contents"),
 	)
 	tree, err := e.Source.FetchRef(ctx, repo, res.Commit, res.FetchRef)
 	if err != nil {
@@ -513,7 +513,7 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 			if mat, found, snapErr := e.snapshotMaterialized(repo, subdir, ent.Version, ent.Commit, ent.Dirhash, memo); snapErr != nil {
 				return nil, snapErr
 			} else if found {
-				mat.note = i18n.Text("from a local version snapshot; not verified online")
+				mat.note = i18n.Text("engine.local_version_snapshot")
 				return mat, nil
 			}
 		}
@@ -531,7 +531,7 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 						return nil, snapErr
 					}
 				} else if found {
-					mat.note = i18n.Text("from a local repository commit snapshot; not verified online")
+					mat.note = i18n.Text("engine.local_repository_commit")
 					if indexErr := e.Store.PutResolved(repo, subdir, ref, store.ResolveEntry{Version: mat.version, Commit: mat.commit, Dirhash: mat.dirhash}); indexErr != nil {
 						return nil, indexErr
 					}
@@ -550,7 +550,7 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 					return nil, snapErr
 				}
 			} else if found {
-				mat.note = i18n.Text("from a local repository version snapshot; not verified online")
+				mat.note = i18n.Text("engine.local_repository_version")
 				if indexErr := e.Store.PutResolved(repo, subdir, ref, store.ResolveEntry{Version: mat.version, Commit: mat.commit, Dirhash: mat.dirhash}); indexErr != nil {
 					return nil, indexErr
 				}
@@ -575,7 +575,7 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 					if indexErr := e.Store.PutResolved(repo, subdir, ref, store.ResolveEntry{Version: mat.version, Commit: mat.commit, Dirhash: mat.dirhash}); indexErr != nil {
 						return nil, indexErr
 					}
-					mat.note = i18n.Text("resolved using the same-repository reference cache; remote was not refreshed")
+					mat.note = i18n.Text("engine.resolved_using_same_repository")
 					return mat, nil
 				}
 			}
@@ -591,11 +591,11 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 			if mat, found, snapErr := e.snapshotMaterialized(repo, subdir, ent.Version, ent.Commit, ent.Dirhash, memo); snapErr != nil {
 				return nil, snapErr
 			} else if found {
-				mat.note = i18n.Text("from a local version snapshot; not verified online")
+				mat.note = i18n.Text("engine.local_version_snapshot")
 				return mat, nil
 			}
 		}
-		return nil, fmt.Errorf(i18n.Text("network unavailable and no local version snapshot exists: %w"), err)
+		return nil, fmt.Errorf(i18n.Text("engine.network_unavailable_local"), err)
 	}
 	if err := e.Store.PutRepoRefs(repo, refs); err != nil {
 		return nil, err
@@ -611,7 +611,7 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 				return mat, nil
 			}
 		}
-		return nil, fmt.Errorf(i18n.Text("pseudo-version %s is not in the local resolution index (cross-machine synchronization of pseudo-version entries relies on the commit field in SKILL.lock)"), ref)
+		return nil, fmt.Errorf(i18n.Text("engine.pseudo_version_local"), ref)
 	}
 	res, err := resolve.Resolve(resolve.Request{Repo: repo, Subdir: subdir, Ref: ref}, refs)
 	if err != nil {
@@ -641,9 +641,9 @@ func (e *Engine) materializeLocked(ctx context.Context, repo, subdir string, lk 
 		fetchRef = "refs/tags/" + lk.Version
 	}
 	memo.setProgress(
-		i18n.Format("downloading repository snapshot from %s", source.RepoIdentity(repo)),
-		i18n.Text("fetching Git objects"),
-		i18n.Text("reading repository contents"),
+		i18n.Format("engine.downloading_repository", source.RepoIdentity(repo)),
+		i18n.Text("engine.fetching_git_objects"),
+		i18n.Text("engine.reading_repository_contents"),
 	)
 	tree, err := e.Source.FetchRef(ctx, repo, lk.Commit, fetchRef)
 	if err != nil {
@@ -707,7 +707,7 @@ func applyInstallsWithMode(plans []plannedInstall, mode install.Mode) (finalize 
 			}
 		}
 		if first != nil {
-			return fmt.Errorf(i18n.Text("rollback also failed: %w"), first)
+			return fmt.Errorf(i18n.Text("engine.rollback_also_failed"), first)
 		}
 		return nil
 	}
@@ -715,7 +715,7 @@ func applyInstallsWithMode(plans []plannedInstall, mode install.Mode) (finalize 
 		for _, tgt := range p.targets {
 			restore, commit, err := install.InstallWithMode(p.contentDir, tgt, mode)
 			if err != nil {
-				primary := fmt.Errorf(i18n.Text("install %s to %s (rolling back changes): %w"), p.name, tgt, err)
+				primary := fmt.Errorf(i18n.Text("engine.install_rolling_back_changes"), p.name, tgt, err)
 				return nil, errors.Join(primary, rollback())
 			}
 			dones = append(dones, applied{restore, commit})

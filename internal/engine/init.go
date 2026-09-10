@@ -36,7 +36,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 	defer unlock()
 	modPath := filepath.Join(e.manifestRoot(), modfile.ModFileName)
 	if _, err := os.Stat(modPath); err == nil && !force {
-		return nil, fmt.Errorf(i18n.Text("%s already exists\nAdvice: review it, then use --force to regenerate it (the original is backed up as SKILL.mod.bak)"), modPath)
+		return nil, fmt.Errorf(i18n.Text("engine.init.already_exists"), modPath)
 	}
 
 	legacy, legacyErr := e.legacySkills()
@@ -74,7 +74,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 			dir := filepath.Join(base, d.Name())
 			st, statErr := os.Stat(dir)
 			if statErr != nil {
-				skipped = append(skipped, i18n.Format("%s (unreadable or broken directory link: %v)", dir, statErr))
+				skipped = append(skipped, i18n.Format("engine.init.unreadable_broken_directory", dir, statErr))
 				continue
 			}
 			if !st.IsDir() {
@@ -89,32 +89,32 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 				// Use the directory name as specified by the PRD §3.1 error table,
 				// but only when it can actually serve as an installation directory.
 				if nameErr := fsutil.ValidName(d.Name()); nameErr != nil {
-					skipped = append(skipped, i18n.Format("%s (%v)", dir, nameErr))
+					skipped = append(skipped, i18n.Format("engine.init.init", dir, nameErr))
 					continue
 				}
 				s.name = d.Name()
-				s.note = i18n.Text("failed to parse the SKILL.md name; using the directory name as a placeholder—please correct it manually")
+				s.note = i18n.Text("engine.init.failed_parse_skill_md")
 			} else {
 				s.name = name
 				if s.dirName != s.name {
 					if aliasErr := fsutil.ValidAlias(s.dirName); aliasErr != nil {
-						skipped = append(skipped, i18n.Format("%s (%v)", dir, aliasErr))
+						skipped = append(skipped, i18n.Format("engine.init.init", dir, aliasErr))
 						continue
 					}
 				}
 			}
 			h, err := dirhash.HashDir(dir)
 			if err != nil {
-				skipped = append(skipped, i18n.Format("%s (%v)", dir, err))
+				skipped = append(skipped, i18n.Format("engine.init.init", dir, err))
 				continue
 			}
 			s.hash = h
 			if prev, ok := seen[s.dirName]; ok {
 				if prev.hash != h || prev.name != s.name {
-					return nil, fmt.Errorf(i18n.Text("cannot import different skills at %s and %s under the same directory name; reconcile them or rename one first"), prev.srcDirs[0], dir)
+					return nil, fmt.Errorf(i18n.Text("engine.init.cannot_import_different_skills"), prev.srcDirs[0], dir)
 				}
 				prev.srcDirs = append(prev.srcDirs, dir)
-				prev.note = appendNote(prev.note, i18n.Text("a skill with the same name appears in multiple platform directories; merged into one entry"))
+				prev.note = appendNote(prev.note, i18n.Text("engine.init.skill_same_name_appears"))
 				continue // Treat the same installation directory as one skill.
 			}
 			seen[s.dirName] = s
@@ -126,7 +126,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 	for _, s := range seen {
 		key := fsutil.FoldKey(s.dirName)
 		if prev, ok := folded[key]; ok {
-			return nil, fmt.Errorf(i18n.Text("init found skills %q (in %s) and %q (in %s) that differ only in letter case and would map to the same installation directory; rename one of them"), prev, seen[prev].srcDirs[0], s.dirName, s.srcDirs[0])
+			return nil, fmt.Errorf(i18n.Text("engine.init.init_found_skills_differ"), prev, seen[prev].srcDirs[0], s.dirName, s.srcDirs[0])
 		}
 		folded[key] = s.dirName
 	}
@@ -142,7 +142,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 	for _, repo := range e.Config.KnownSources {
 		refs, err := e.refs(ctx, repo, memo)
 		if err != nil {
-			io.printf(i18n.Text("notice: failed to match source %s (%v); related entries will be treated as local"), repo, err)
+			io.printf(i18n.Text("engine.init.notice_failed_match_source"), repo, err)
 			continue
 		}
 		sources = append(sources, srcRefs{repo, refs})
@@ -178,7 +178,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 		// not guess which source belongs to the installed files.
 		switch {
 		case hasDirRecord && hasNameRecord && dirName != name && dirRecord != nameRecord:
-			importer.ambiguous[dirName] = i18n.Format("ambiguous previous installer records for directory %q and skill name %q; retained as a local baseline", dirName, name)
+			importer.ambiguous[dirName] = i18n.Format("engine.init.ambiguous_previous_installer", dirName, name)
 		case hasDirRecord:
 			importer.records[dirName] = dirRecord
 		case hasNameRecord:
@@ -187,7 +187,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 	}
 	unresolved := 0
 	if len(skipped) > 0 {
-		rep.Notes = append(rep.Notes, i18n.Text("the following directories were skipped because they cannot be represented as valid SKILL.mod entries:"))
+		rep.Notes = append(rep.Notes, i18n.Text("engine.init.following_directories_skipped"))
 		for _, msg := range skipped {
 			rep.Notes = append(rep.Notes, "  "+msg)
 		}
@@ -202,7 +202,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 		entry := EntryReport{Name: name}
 		matched, matchedLock, identifyErr := e.identifyInstalled(s.srcDirs, name, alias, s.hash, lock, locator)
 		if identifyErr != nil {
-			entry.Note = i18n.Format("installed provenance could not be recovered: %v", identifyErr)
+			entry.Note = i18n.Format("engine.init.provenance_unrecoverable", identifyErr)
 		}
 		previous, recorded := importer.records[dirName]
 		// An ambiguous legacy slot never contributes provenance. Its diagnostic
@@ -213,7 +213,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 			recorded = true
 			ambiguity = message
 		} else if matched == nil && recorded && previous.SourceType != "local" {
-			io.setProgress(i18n.Format("recovering installed skill provenance: %s", name))
+			io.setProgress(i18n.Format("engine.init.recovering_installed_skill", name))
 			rctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 			matched, matchedLock, err = importer.match(rctx, previous, name, alias, s.hash)
 			cancel()
@@ -266,7 +266,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 			mat, matchErr := e.materialize(rctx, sr.repo, subdir, *candidate, "", memo)
 			cancel()
 			if matchErr != nil {
-				entry.Note = appendNote(entry.Note, i18n.Format("source could not be verified; kept as local: %v", matchErr))
+				entry.Note = appendNote(entry.Note, i18n.Format("engine.init.source_unverified_local", matchErr))
 				continue
 			}
 			if mat.dirhash != s.hash {
@@ -291,7 +291,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 				entry.Note = ""
 			}
 			if recorded && matchedLock.Dirhash != s.hash {
-				entry.Note = appendNote(entry.Note, i18n.Text("installed contents differ from the recorded source revision; the recorded source version was retained; run skillmod sync to align"))
+				entry.Note = appendNote(entry.Note, i18n.Text("engine.init.installed_contents_differ"))
 			}
 			m.Skills = append(m.Skills, *matched)
 		} else {
@@ -302,7 +302,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 			if ambiguity != "" {
 				entry.Note = appendNote(entry.Note, ambiguity)
 			} else if !recorded && entry.Note == "" {
-				entry.Note = i18n.Text("no verifiable source record found; retained as a local baseline")
+				entry.Note = i18n.Text("engine.init.no_source_record")
 			}
 		}
 		if s.note != "" {
@@ -312,10 +312,10 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 	}
 
 	if len(rep.Entries) == 0 {
-		rep.Notes = append(rep.Notes, i18n.Text("no skills found; generated an empty manifest—use skillmod get to add one"))
+		rep.Notes = append(rep.Notes, i18n.Text("engine.init.skills_found_generated_empty"))
 	}
 	if unresolved > 0 {
-		rep.Notes = append(rep.Notes, i18n.Format("%d skills had known but unresolved sources; those entries were retained as local baselines and can be retried later", unresolved))
+		rep.Notes = append(rep.Notes, i18n.Format("engine.init.unresolved_sources", unresolved))
 	}
 
 	io.stopProgress()
@@ -338,14 +338,14 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 
 	// Confirm each entry individually as required by the PRD interaction flow.
 	if !io.Yes && io.Confirm == nil {
-		rep.Notes = append(rep.Notes, i18n.Text("not confirmed in a non-interactive environment; rerun with --yes to accept all entries"))
-		return rep, fmt.Errorf("%s", i18n.Text("init requires confirmation: select each entry interactively or use --yes to accept all"))
+		rep.Notes = append(rep.Notes, i18n.Text("engine.init.confirmed_non_interactive"))
+		return rep, fmt.Errorf("%s", i18n.Text("engine.init.init_requires_confirmation"))
 	}
 	if io.Confirm != nil && !io.Yes {
 		var kept []modfile.ModSkill
 		var keptEntries []EntryReport
 		for i, sk := range m.Skills {
-			if io.Confirm.Confirm(i18n.Format("accept entry %s (%s)?", sk.Name, rep.Entries[i].Action)) {
+			if io.Confirm.Confirm(i18n.Format("engine.init.accept_entry", sk.Name, rep.Entries[i].Action)) {
 				kept = append(kept, sk)
 				keptEntries = append(keptEntries, rep.Entries[i])
 			}
@@ -367,20 +367,20 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 	}
 
 	if io.DryRun {
-		rep.Notes = append(rep.Notes, i18n.Text("dry-run: no files were written"))
+		rep.Notes = append(rep.Notes, i18n.Text("engine.get.dry_run_files_written"))
 		return rep, nil
 	}
 	// The backup happens at the write phase so --dry-run never overwrites it.
 	if _, err := os.Stat(modPath); err == nil {
 		if err := copyFile(modPath, modPath+".bak"); err != nil {
-			return nil, fmt.Errorf(i18n.Text("backup failed: %w"), err)
+			return nil, fmt.Errorf(i18n.Text("engine.init.backup_failed"), err)
 		}
 	}
 	if err := e.saveState(m, lock); err != nil {
 		return nil, err
 	}
-	io.printf(i18n.Text("generated %s (%d entries) without changing the original files"), modPath, len(m.Skills))
-	io.printf(i18n.Text("next: run skillmod sync to align the locked state, then commit SKILL.mod and SKILL.lock"))
+	io.printf(i18n.Text("engine.init.generated_entries"), modPath, len(m.Skills))
+	io.printf(i18n.Text("engine.init.next_run_skillmod_sync"))
 	return rep, nil
 }
 

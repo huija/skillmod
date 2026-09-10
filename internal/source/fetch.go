@@ -40,21 +40,21 @@ type Tree struct {
 type SymlinkError struct{ Path string }
 
 func (e *SymlinkError) Error() string {
-	return i18n.Format("skill contains a symlink (%s); skillmod does not support skills containing symlinks", e.Path)
+	return i18n.Format("source.fetch.skill_contains_symlink", e.Path)
 }
 
 // SubmoduleError reports a Git submodule that cannot be preserved byte for byte.
 type SubmoduleError struct{ Path string }
 
 func (e *SubmoduleError) Error() string {
-	return i18n.Format("skill contains a submodule (%s), which skillmod does not support", e.Path)
+	return i18n.Format("source.fetch.skill_contains_submodule", e.Path)
 }
 
 // NoSkillMDError reports a subtree with no SKILL.md or an unparseable frontmatter name.
 type NoSkillMDError struct{ Detail string }
 
 func (e *NoSkillMDError) Error() string {
-	return i18n.Text("skill package is missing SKILL.md or has an invalid frontmatter name (contact the author to fix it): ") + e.Detail
+	return i18n.Text("source.fetch.missing_skill_md") + e.Detail
 }
 
 // FetchRef uses one persistent bare repository per remote, fetches one complete
@@ -77,7 +77,7 @@ func (s *Source) FetchRef(ctx context.Context, repo, commit, fetchRef string) (*
 	}
 	ct, err := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
 	if err != nil {
-		return nil, fmt.Errorf(i18n.Text("failed to parse commit time: %q"), out)
+		return nil, fmt.Errorf(i18n.Text("source.fetch.failed_parse_commit_time"), out)
 	}
 
 	// List the complete repository; -z prevents core.quotePath from escaping non-ASCII paths.
@@ -110,7 +110,7 @@ func (s *Source) FetchRef(ctx context.Context, repo, commit, fetchRef string) (*
 	}
 	if err != nil {
 		if prefetchErr != nil {
-			return nil, fmt.Errorf(i18n.Text("batch repository blob fetch failed (lazy-fetch fallback also failed): %v: %w"), prefetchErr, err)
+			return nil, fmt.Errorf(i18n.Text("source.fetch.batch_repository_blob_fetch"), prefetchErr, err)
 		}
 		return nil, err
 	}
@@ -141,12 +141,12 @@ func parseLsTree(out string) ([]lsEntry, error) {
 		}
 		tab := strings.IndexByte(rec, '\t')
 		if tab < 0 {
-			return nil, fmt.Errorf(i18n.Text("malformed ls-tree output: %q"), rec)
+			return nil, fmt.Errorf(i18n.Text("source.fetch.malformed_ls_tree_output"), rec)
 		}
 		meta, path := rec[:tab], rec[tab+1:]
 		parts := strings.Fields(meta)
 		if len(parts) != 3 {
-			return nil, fmt.Errorf(i18n.Text("malformed ls-tree output: %q"), rec)
+			return nil, fmt.Errorf(i18n.Text("source.fetch.malformed_ls_tree_output"), rec)
 		}
 		mode, typ, sha := parts[0], parts[1], parts[2]
 		if typ != "blob" && typ != "commit" {
@@ -188,7 +188,7 @@ func (s *Source) prefetchMissingBlobs(ctx context.Context, dir string, entries [
 		return err
 	}
 	if len(remaining) != 0 {
-		return fmt.Errorf(i18n.Text("%d blobs are still missing after batch fetch (stdout=%q stderr=%q)"), len(remaining), strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()))
+		return fmt.Errorf(i18n.Text("source.fetch.blobs_still_missing"), len(remaining), strings.TrimSpace(stdout.String()), strings.TrimSpace(stderr.String()))
 	}
 	return nil
 }
@@ -221,7 +221,7 @@ func (s *Source) missingBlobs(ctx context.Context, dir string, entries []lsEntry
 	}
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
 	if len(lines) != len(ids) {
-		return nil, fmt.Errorf(i18n.Text("cat-file --batch-check returned %d lines; expected %d"), len(lines), len(ids))
+		return nil, fmt.Errorf(i18n.Text("source.fetch.cat_file_batch_check"), len(lines), len(ids))
 	}
 	var missing []string
 	for i, line := range lines {
@@ -231,7 +231,7 @@ func (s *Source) missingBlobs(ctx context.Context, dir string, entries []lsEntry
 			continue
 		}
 		if len(fields) < 3 || fields[0] != ids[i] || fields[1] != "blob" {
-			return nil, fmt.Errorf(i18n.Text("malformed cat-file --batch-check output: %q"), line)
+			return nil, fmt.Errorf(i18n.Text("source.fetch.malformed_cat_file_batch"), line)
 		}
 	}
 	return missing, nil
@@ -258,7 +258,7 @@ func (s *Source) catFileBatch(ctx context.Context, dir string, entries []lsEntry
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf(i18n.Text("start git cat-file: %w"), err)
+		return nil, fmt.Errorf(i18n.Text("source.fetch.start_git_cat_file"), err)
 	}
 	go func() {
 		for _, e := range entries {
@@ -273,12 +273,12 @@ func (s *Source) catFileBatch(ctx context.Context, dir string, entries []lsEntry
 		header, err := r.ReadString('\n')
 		if err != nil {
 			_ = cmd.Wait()
-			return nil, fmt.Errorf(i18n.Text("failed to read blob %s header: %w"), e.sha, err)
+			return nil, fmt.Errorf(i18n.Text("source.fetch.failed_read_blob_header"), e.sha, err)
 		}
 		parts := strings.Fields(strings.TrimRight(header, "\n"))
 		if len(parts) != 3 || parts[1] != "blob" {
 			_ = cmd.Wait()
-			return nil, fmt.Errorf(i18n.Text("blob %s is unreadable: %s"), e.sha, strings.TrimSpace(header))
+			return nil, fmt.Errorf(i18n.Text("source.fetch.blob_unreadable"), e.sha, strings.TrimSpace(header))
 		}
 		size, err := strconv.Atoi(parts[2])
 		if err != nil {
@@ -288,7 +288,7 @@ func (s *Source) catFileBatch(ctx context.Context, dir string, entries []lsEntry
 		data := make([]byte, size)
 		if _, err := io.ReadFull(r, data); err != nil {
 			_ = cmd.Wait()
-			return nil, fmt.Errorf(i18n.Text("failed to read blob %s contents: %w"), e.sha, err)
+			return nil, fmt.Errorf(i18n.Text("source.fetch.failed_read_blob_contents"), e.sha, err)
 		}
 		if _, err := r.ReadByte(); err != nil { // Separator newline after the blob.
 			_ = cmd.Wait()
@@ -312,7 +312,7 @@ type SkillMetadata struct {
 func SkillMetadataFromDir(dir string) (SkillMetadata, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
 	if err != nil {
-		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Text("SKILL.md is missing from the subtree root")}
+		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Text("source.fetch.skill_md_missing_subtree")}
 	}
 	return ParseSkillMetadata(string(data))
 }
@@ -332,12 +332,12 @@ func SkillNameFromDir(dir string) (string, error) {
 func ParseSkillMetadata(content string) (SkillMetadata, error) {
 	content = strings.ReplaceAll(content, "\r\n", "\n")
 	if !strings.HasPrefix(content, "---\n") {
-		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Text("missing opening --- frontmatter line")}
+		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Text("source.fetch.missing_opening_frontmatter")}
 	}
 	rest := content[len("---\n"):]
 	block, _, found := strings.Cut(rest, "\n---")
 	if !found {
-		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Text("missing closing --- frontmatter line")}
+		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Text("source.fetch.missing_closing_frontmatter")}
 	}
 	metadata := SkillMetadata{}
 	for line := range strings.SplitSeq(block, "\n") {
@@ -350,10 +350,10 @@ func ParseSkillMetadata(content string) (SkillMetadata, error) {
 		}
 	}
 	if metadata.Name == "" {
-		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Text("frontmatter has no name field")}
+		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Text("source.fetch.frontmatter_has_name_field")}
 	}
 	if err := fsutil.ValidName(metadata.Name); err != nil {
-		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Format("skill name %q is invalid: %s", metadata.Name, err)}
+		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Format("source.fetch.skill_name_invalid", metadata.Name, err)}
 	}
 	return metadata, nil
 }

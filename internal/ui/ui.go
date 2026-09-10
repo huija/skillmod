@@ -89,7 +89,7 @@ func (i *interactive) Choose(prompt string, options []string) int {
 				return len(options) - 1
 			}
 		}
-		if _, err := fmt.Fprintf(i.w, i18n.Text("choose [1-%d]: "), len(options)); err != nil {
+		if _, err := fmt.Fprintf(i.w, i18n.Text("ui.choose"), len(options)); err != nil {
 			return len(options) - 1
 		}
 		line, err := i.r.ReadString('\n')
@@ -106,7 +106,7 @@ func (i *interactive) Choose(prompt string, options []string) int {
 				return idx
 			}
 		}
-		if _, err := fmt.Fprintln(i.w, i18n.Text("invalid choice; try again")); err != nil {
+		if _, err := fmt.Fprintln(i.w, i18n.Text("ui.invalid_choice_try_again")); err != nil {
 			return len(options) - 1
 		}
 	}
@@ -164,7 +164,7 @@ func newCollapsibleMultiSelect(field *huh.MultiSelect[int], options []Option) *c
 		options:     options,
 		toggleDetails: key.NewBinding(
 			key.WithKeys("d", "D"),
-			key.WithHelp("d", i18n.Text("show details")),
+			key.WithHelp("d", i18n.Text("ui.show_details")),
 		),
 	}
 	m.refreshDetails()
@@ -195,10 +195,10 @@ func (m *collapsibleMultiSelect) KeyBinds() []key.Binding {
 func (m *collapsibleMultiSelect) refreshDetails() {
 	if !m.expanded {
 		m.Description("")
-		m.toggleDetails.SetHelp("d", i18n.Text("show details"))
+		m.toggleDetails.SetHelp("d", i18n.Text("ui.show_details"))
 		return
 	}
-	m.toggleDetails.SetHelp("d", i18n.Text("hide details"))
+	m.toggleDetails.SetHelp("d", i18n.Text("ui.hide_details"))
 	index, ok := m.Hovered()
 	if !ok || index < 0 || index >= len(m.options) {
 		m.Description("")
@@ -213,9 +213,9 @@ func (m *collapsibleMultiSelect) details() string {
 		return ""
 	}
 	option := m.options[index]
-	details := fmt.Sprintf("%s: %s", i18n.Text("Description"), description(option))
+	details := fmt.Sprintf("%s: %s", i18n.Text("ui.description"), description(option))
 	if command := cleanLine(option.Detail); command != "" {
-		details += fmt.Sprintf("\n%s: %s", i18n.Text("Install command"), command)
+		details += fmt.Sprintf("\n%s: %s", i18n.Text("ui.install_command"), command)
 	}
 	return details
 }
@@ -224,7 +224,7 @@ func description(option Option) string {
 	if value := cleanLine(option.Description); value != "" {
 		return value
 	}
-	return i18n.Text("no description")
+	return i18n.Text("engine.get.description")
 }
 
 func cleanLine(value string) string {

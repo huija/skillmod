@@ -165,11 +165,15 @@ SKILLMOD_LANG=zh skillmod sync
 
 Machine-readable JSON field names and action identifiers are not translated.
 
-Translations are maintained centrally as symmetric gettext/POSIX locale catalogs under [`locales/`](locales/): `en_US.po` and `zh_CN.po` contain the same msgid set. The CLI embeds both files. `SKILLMOD_LANG=en` and `SKILLMOD_LANG=zh` remain convenient aliases. After changing user-facing source messages, run:
+Translations are maintained centrally as symmetric gettext/POSIX locale catalogs under [`locales/`](locales/): `en_US.po` and `zh_CN.po` contain the same message-key set. The CLI embeds both files. `SKILLMOD_LANG=en` and `SKILLMOD_LANG=zh` remain convenient aliases.
+
+Source code passes a short message key — `i18n.Text("cli.get.long")` — and the wording lives in the catalog, with `en_US.po` holding the English text. After adding or rewording user-facing text, regenerate the catalogs:
 
 ```bash
 go generate ./internal/i18n
 ```
+
+Generation fails when a key has no English or Chinese text; fill the reported `msgstr` values in `locales/` and run it again. See [`locales/README.md`](locales/README.md) for the key naming rule.
 
 The first request for a given `repo@version` materializes a complete repository snapshot. Adding another skill from the same version later validates and installs it directly from the local subdirectory, without invoking Git or accessing the remote. An explicit `@commit` can likewise reuse an existing snapshot of that repository commit. Omitting the version to request latest, or running `skillmod update`, retains online refresh semantics.
 

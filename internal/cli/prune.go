@@ -14,7 +14,7 @@ import (
 func newPruneCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "prune",
-		Short: i18n.Text("remove installed files left by stale entries (list and confirm before deleting)"),
+		Short: i18n.Text("cli.prune.short"),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			eng, err := newEngine()

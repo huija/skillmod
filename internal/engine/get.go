@@ -39,34 +39,34 @@ func resolveConflicts(io IO, conflicts []conflict) (skip map[string]bool, err er
 	if io.Yes {
 		for _, c := range conflicts {
 			skip[c.dir] = true
-			io.printf(i18n.Text("conflict (--yes automatically kept and skipped): %s"), c.dir)
+			io.printf(i18n.Text("engine.get.conflict_yes_automatically"), c.dir)
 		}
 		return skip, nil
 	}
 	if io.Confirm != nil {
 		for _, c := range conflicts {
 			choice := io.Confirm.Choose(
-				i18n.Format("Conflict: %s exists and its contents do not match the lock (it may have local changes)", c.dir),
+				i18n.Format("engine.get.conflict_exists_mismatch", c.dir),
 				[]string{
-					i18n.Text("overwrite"),
-					i18n.Text("keep and skip"),
-					i18n.Text("abort"),
+					i18n.Text("engine.get.overwrite"),
+					i18n.Text("engine.get.keep_skip"),
+					i18n.Text("engine.get.abort"),
 				})
 			switch choice {
 			case 0: // Overwrite.
 			case 1:
 				skip[c.dir] = true
 			default:
-				return nil, fmt.Errorf("%s", i18n.Text("aborted by user"))
+				return nil, fmt.Errorf("%s", i18n.Text("engine.get.aborted_user"))
 			}
 		}
 		return skip, nil
 	}
-	msg := i18n.Text("Conflicts detected (targets exist and their contents do not match the lock):")
+	msg := i18n.Text("engine.get.conflicts_detected_targets")
 	for _, c := range conflicts {
 		msg += "\n  " + c.dir
 	}
-	return nil, fmt.Errorf("%s\n%s", msg, i18n.Text("Review the conflicts and retry interactively, or use --yes to keep and skip them automatically"))
+	return nil, fmt.Errorf("%s\n%s", msg, i18n.Text("engine.get.review_conflicts_retry"))
 }
 
 // Get implements skillmod get: resolve, download, validate, install, then write SKILL.mod and SKILL.lock.
@@ -101,7 +101,7 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 		}
 	}
 	if alias != "" && len(resolved) != 1 {
-		return nil, fmt.Errorf("%s", i18n.Text("--alias can only be used when exactly one skill is selected"))
+		return nil, fmt.Errorf("%s", i18n.Text("engine.get.alias_requires_one_skill"))
 	}
 
 	entries := make([]getEntry, 0, len(resolved))
@@ -215,7 +215,7 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 	}
 
 	if io.DryRun {
-		rep.Notes = append(rep.Notes, i18n.Text("dry-run: no files were written"))
+		rep.Notes = append(rep.Notes, i18n.Text("engine.get.dry_run_files_written"))
 		return rep, partialError(rep, conflicts, skip)
 	}
 
@@ -252,7 +252,7 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 	}
 	for _, entry := range entries {
 		if len(entry.targets) > 0 {
-			io.printf(i18n.Text("installed %s %s; SKILL.mod and SKILL.lock were updated"), entry.name, entry.mat.version)
+			io.printf(i18n.Text("engine.get.installed_skill_mod_skill"), entry.name, entry.mat.version)
 		}
 		if note := entry.directoryChangeNote(); note != "" {
 			io.printf("%s", note)
@@ -292,7 +292,7 @@ func (e getEntry) directoryChangeNote() string {
 	if e.previousDir == "" {
 		return ""
 	}
-	return i18n.Format("notice: changing installation directory from %q to %q keeps the old directory; run skillmod prune afterward to remove it", e.previousDir, e.dir)
+	return i18n.Format("engine.get.notice_changing_installation", e.previousDir, e.dir)
 }
 
 type resolvedGetSkill struct {
@@ -372,9 +372,9 @@ func (e *Engine) findSkillByName(ctx context.Context, repo, name, ref string, me
 		return skillCandidate{}, false, nil
 	}
 	memo.setProgress(
-		i18n.Text("discovering skills in the repository"),
-		i18n.Text("reading skill metadata"),
-		i18n.Text("matching the requested skill name"),
+		i18n.Text("engine.get.discovering_skills"),
+		i18n.Text("engine.get.reading_skill_metadata"),
+		i18n.Text("engine.get.matching_requested_skill_name"),
 	)
 	candidates, err := skillCandidates(root.contentDir)
 	if err != nil {
@@ -396,7 +396,7 @@ func (e *Engine) findSkillByName(ctx context.Context, repo, name, ref string, me
 		for i, match := range matches {
 			paths[i] = match.subdir
 		}
-		return skillCandidate{}, false, fmt.Errorf(i18n.Text("skill name %q matches multiple subdirectories: %s; use an exact subdirectory"), name, strings.Join(paths, ", "))
+		return skillCandidate{}, false, fmt.Errorf(i18n.Text("engine.get.skill_name_matches_multiple"), name, strings.Join(paths, ", "))
 	}
 }
 
@@ -416,7 +416,7 @@ func chooseSkillCandidates(root, repo string, io IO) ([]skillCandidate, error) {
 		return nil, err
 	}
 	if len(candidates) == 0 {
-		return nil, &source.NoSkillMDError{Detail: i18n.Text("SKILL.md is missing from the repository root and every descendant of skills/")}
+		return nil, &source.NoSkillMDError{Detail: i18n.Text("engine.get.skill_md_missing_repository")}
 	}
 	if len(candidates) == 1 || io.Yes {
 		return candidates, nil
@@ -430,7 +430,7 @@ func chooseSkillCandidates(root, repo string, io IO) ([]skillCandidate, error) {
 	if selector, ok := io.Confirm.(interface {
 		ChooseMany(prompt string, options []ui.Option) []int
 	}); ok {
-		return selectedCandidates(candidates, selector.ChooseMany(i18n.Format("multiple skills found in %s; select one or more", repo), options))
+		return selectedCandidates(candidates, selector.ChooseMany(i18n.Format("engine.get.multiple_skills_found_select", repo), options))
 	}
 	if io.Confirm == nil {
 		displayOptions := make([]string, len(candidates))
@@ -441,13 +441,13 @@ func chooseSkillCandidates(root, repo string, io IO) ([]skillCandidate, error) {
 	}
 	var selected []skillCandidate
 	for i, candidate := range candidates {
-		prompt := i18n.Format("install %s from %s?\n%s", candidate.name, candidateAddress(repo, displaySubdirs[i]), candidate.description)
+		prompt := i18n.Format("engine.get.confirm_install", candidate.name, candidateAddress(repo, displaySubdirs[i]), candidate.description)
 		if io.Confirm.Confirm(prompt) {
 			selected = append(selected, candidate)
 		}
 	}
 	if len(selected) == 0 {
-		return nil, fmt.Errorf("%s", i18n.Text("no skills selected"))
+		return nil, fmt.Errorf("%s", i18n.Text("engine.get.no_skills_selected"))
 	}
 	return selected, nil
 }
@@ -457,13 +457,13 @@ func selectedCandidates(candidates []skillCandidate, indices []int) ([]skillCand
 	selected := make([]skillCandidate, 0, len(indices))
 	for _, index := range indices {
 		if index < 0 || index >= len(candidates) || seen[index] {
-			return nil, fmt.Errorf("%s", i18n.Text("no skills selected"))
+			return nil, fmt.Errorf("%s", i18n.Text("engine.get.no_skills_selected"))
 		}
 		seen[index] = true
 		selected = append(selected, candidates[index])
 	}
 	if len(selected) == 0 {
-		return nil, fmt.Errorf("%s", i18n.Text("no skills selected"))
+		return nil, fmt.Errorf("%s", i18n.Text("engine.get.no_skills_selected"))
 	}
 	return selected, nil
 }
@@ -471,7 +471,7 @@ func selectedCandidates(candidates []skillCandidate, indices []int) ([]skillCand
 func (c skillCandidate) option(repo, displaySubdir string) ui.Option {
 	description := c.description
 	if description == "" {
-		description = i18n.Text("no description")
+		description = i18n.Text("engine.get.description")
 	}
 	return ui.Option{
 		Label:       c.name,
@@ -482,7 +482,7 @@ func (c skillCandidate) option(repo, displaySubdir string) ui.Option {
 
 func (c skillCandidate) displayOption(repo, displaySubdir string) string {
 	option := c.option(repo, displaySubdir)
-	return i18n.Format("%s — %s\n  %s", option.Label, option.Description, option.Detail)
+	return i18n.Format("engine.get.option_format", option.Label, option.Description, option.Detail)
 }
 
 func candidateDisplaySubdirs(root string, candidates []skillCandidate) []string {
@@ -515,7 +515,7 @@ func skillCandidates(root string) ([]skillCandidate, error) {
 			return nil
 		}
 		if strings.Contains(subdir, "@") {
-			return fmt.Errorf(i18n.Text("subdirectory must not contain @: %q"), subdir)
+			return fmt.Errorf(i18n.Text("address.subdirectory_at_sign"), subdir)
 		}
 		metadata, err := source.SkillMetadataFromDir(dir)
 		if err != nil {
@@ -572,7 +572,7 @@ type skillCandidatesError struct {
 }
 
 func (e *skillCandidatesError) Error() string {
-	return i18n.Format("multiple skills found in %s; rerun interactively to select one or more, use --yes to install all, or specify one of:\n  %s", e.Repo, strings.Join(e.Candidates, "\n  "))
+	return i18n.Format("engine.get.multiple_skills_found_rerun", e.Repo, strings.Join(e.Candidates, "\n  "))
 }
 
 func candidateAddress(repo, subdir string) string {

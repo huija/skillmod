@@ -56,7 +56,7 @@ func Load() (*Config, error) {
 	}
 	var cfg Config
 	if err := toml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf(i18n.Text("parse %s: %w"), p, err)
+		return nil, fmt.Errorf(i18n.Text("config.parse"), p, err)
 	}
 	if len(cfg.Agents) == 0 {
 		cfg.Agents = Default().Agents

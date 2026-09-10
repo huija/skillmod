@@ -40,7 +40,7 @@ var scpLike = regexp.MustCompile(`^[^/@\s:]+@[^/@\s:]+:`)
 // Branch names are rejected later by package resolve using ls-remote data rather than string heuristics.
 func Parse(raw string) (*Address, error) {
 	if raw == "" {
-		return nil, fmt.Errorf("%s", i18n.Text("address is empty; expected <repo>[//<subdir>][@<ref>]"))
+		return nil, fmt.Errorf("%s", i18n.Text("address.empty_repository"))
 	}
 
 	base, ref, err := splitRef(raw)
@@ -53,10 +53,10 @@ func Parse(raw string) (*Address, error) {
 		return nil, err
 	}
 	if repo == "" {
-		return nil, fmt.Errorf(i18n.Text("missing repository address: %q"), raw)
+		return nil, fmt.Errorf(i18n.Text("address.missing_repository_address"), raw)
 	}
 	if strings.ContainsAny(repo, " \t") {
-		return nil, fmt.Errorf(i18n.Text("repository address contains whitespace: %q"), repo)
+		return nil, fmt.Errorf(i18n.Text("address.repository_whitespace"), repo)
 	}
 	repo = normalizeRepo(repo)
 
@@ -78,17 +78,17 @@ func splitRef(s string) (base, ref string, err error) {
 	}
 	suffix := s[i+1:]
 	if suffix == "" {
-		return "", "", fmt.Errorf(i18n.Text("missing version reference after @: %q"), s)
+		return "", "", fmt.Errorf(i18n.Text("address.missing_version_reference"), s)
 	}
 	if strings.ContainsAny(suffix, ":/") {
 		return s, "", nil // scp-like form with no ref
 	}
 	if s[:i] == "" {
-		return "", "", fmt.Errorf(i18n.Text("missing repository address: %q"), s)
+		return "", "", fmt.Errorf(i18n.Text("address.missing_repository_address"), s)
 	}
 	ref = s[i+1:]
 	if strings.ContainsAny(ref, " \t") {
-		return "", "", fmt.Errorf(i18n.Text("version reference contains whitespace: %q"), ref)
+		return "", "", fmt.Errorf(i18n.Text("address.version_whitespace"), ref)
 	}
 	return s[:i], ref, nil
 }
@@ -105,7 +105,7 @@ func splitSubdir(s string) (repo, subdir string, err error) {
 	}
 	repo, subdir = s[:off+rel], s[off+rel+2:]
 	if subdir == "" {
-		return "", "", fmt.Errorf(i18n.Text("missing subdirectory after //: %q"), s)
+		return "", "", fmt.Errorf(i18n.Text("address.missing_subdirectory"), s)
 	}
 	return repo, subdir, nil
 }
@@ -121,14 +121,14 @@ func normalizeRepo(repo string) string {
 // cleanSubdir validates a canonical slash-separated Git path with no redundant or escaping segments.
 func cleanSubdir(s string) (string, error) {
 	if strings.Contains(s, "\\") {
-		return "", fmt.Errorf(i18n.Text("subdirectory must use / separators: %q"), s)
+		return "", fmt.Errorf(i18n.Text("address.subdirectory_separators"), s)
 	}
 	if strings.Contains(s, "@") {
-		return "", fmt.Errorf(i18n.Text("subdirectory must not contain @: %q"), s)
+		return "", fmt.Errorf(i18n.Text("address.subdirectory_at_sign"), s)
 	}
 	c := path.Clean(s)
 	if c != s || c == "." || c == ".." || strings.HasPrefix(c, "../") {
-		return "", fmt.Errorf(i18n.Text("non-canonical subdirectory path: %q (expected %q without '.', '..', or redundant slashes)"), s, strings.TrimPrefix(c, "./"))
+		return "", fmt.Errorf(i18n.Text("address.non_canonical_subdirectory"), s, strings.TrimPrefix(c, "./"))
 	}
 	return s, nil
 }

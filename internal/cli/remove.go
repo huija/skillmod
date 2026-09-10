@@ -13,9 +13,9 @@ import (
 
 func newRemoveCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   i18n.Text("remove <names…>"),
-		Short: i18n.Text("remove declarations and clean managed installations"),
-		Long:  i18n.Text("Select by published name or installation alias. Locally modified installations are kept and reported as partial completion."),
+		Use:   i18n.Text("cli.remove.use"),
+		Short: i18n.Text("cli.remove.short"),
+		Long:  i18n.Text("cli.remove.long"),
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			eng, err := newEngine()

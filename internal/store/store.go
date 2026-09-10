@@ -55,13 +55,13 @@ type Store struct {
 func Open(version string) (*Store, error) {
 	if root := os.Getenv(HomeEnv); root != "" {
 		if !filepath.IsAbs(root) {
-			return nil, fmt.Errorf(i18n.Text("%s must be an absolute path: %q"), HomeEnv, root)
+			return nil, fmt.Errorf(i18n.Text("engine.legacy.absolute_path"), HomeEnv, root)
 		}
 		return newStore(filepath.Clean(root), version, true), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, fmt.Errorf(i18n.Text("determine user home directory: %w"), err)
+		return nil, fmt.Errorf(i18n.Text("store.determine_user_home_directory"), err)
 	}
 	return newStore(filepath.Join(home, ".agents", "skillmod"), version, true), nil
 }
@@ -115,7 +115,7 @@ type SnapshotConflictError struct {
 }
 
 func (e *SnapshotConflictError) Error() string {
-	return i18n.Format("version snapshot conflict; refusing to overwrite %s\nexisting:  %s @ %s (%s)\nrequested: %s @ %s (%s)\nPossible cause: the remote tag moved or the contents of the same version were rewritten",
+	return i18n.Format("store.version_snapshot_conflict",
 		e.Path,
 		e.Have.Version, shortCommit(e.Have.Commit), displayHash(e.Have.Treehash),
 		e.Want.Version, shortCommit(e.Want.Commit), displayHash(e.Want.Treehash))
@@ -128,12 +128,12 @@ type CorruptError struct {
 }
 
 func (e *CorruptError) Error() string {
-	return i18n.Format("global version snapshot is corrupt or modified: %s (%s)", e.Path, e.Detail)
+	return i18n.Format("store.global_version_snapshot", e.Path, e.Detail)
 }
 
 func shortCommit(commit string) string {
 	if commit == "" {
-		return i18n.Text("commit pending resolution")
+		return i18n.Text("store.commit_pending_resolution")
 	}
 	if len(commit) > 12 {
 		return commit[:12]
@@ -143,7 +143,7 @@ func shortCommit(commit string) string {
 
 func displayHash(hash string) string {
 	if hash == "" {
-		return i18n.Text("hash pending verification")
+		return i18n.Text("store.hash_pending_verification")
 	}
 	return hash
 }
@@ -166,7 +166,7 @@ func versionKey(version string) (prefix, key string, err error) {
 		semverVersion = semverVersion[i+1:]
 	}
 	if !semver.IsValid(semverVersion) {
-		return "", "", fmt.Errorf(i18n.Text("version is not a canonical semver or pseudo-version: %q"), version)
+		return "", "", fmt.Errorf(i18n.Text("store.version_canonical_semver"), version)
 	}
 	key, err = module.EscapeVersion(semverVersion)
 	return prefix, key, err
@@ -226,7 +226,7 @@ func repoPath(repo string) (string, error) {
 	identity := source.RepoIdentity(repo)
 	u, err := url.Parse(identity)
 	if err != nil {
-		return "", fmt.Errorf(i18n.Text("parse repository identity %q: %w"), identity, err)
+		return "", fmt.Errorf(i18n.Text("store.parse_repository_identity"), identity, err)
 	}
 	var raw []string
 	if u.Scheme != "" {
@@ -251,12 +251,12 @@ func repoPath(repo string) (string, error) {
 		}
 	}
 	if len(raw) < 2 {
-		return "", fmt.Errorf(i18n.Text("repository identity has no project path: %q"), identity)
+		return "", fmt.Errorf(i18n.Text("store.identity_missing_project_path"), identity)
 	}
 	escaped := make([]string, 0, len(raw))
 	for _, segment := range raw {
 		if segment == "" || segment == "." || segment == ".." {
-			return "", fmt.Errorf(i18n.Text("repository identity contains an unsafe path segment: %q"), identity)
+			return "", fmt.Errorf(i18n.Text("store.repository_identity_contains"), identity)
 		}
 		escaped = append(escaped, escapePathSegment(segment))
 	}
@@ -325,14 +325,14 @@ func (s *Store) FindSnapshotVersionByCommit(repo, commit string) (string, bool, 
 		}
 		var info SnapshotInfo
 		if err := json.Unmarshal(data, &info); err != nil {
-			return "", false, fmt.Errorf(i18n.Text("cannot parse version metadata %s: %w"), filepath.Join(dir, entry.Name()), err)
+			return "", false, fmt.Errorf(i18n.Text("store.cannot_parse_version_metadata"), filepath.Join(dir, entry.Name()), err)
 		}
 		if source.RepoIdentity(info.Repo) != source.RepoIdentity(repo) {
-			return "", false, fmt.Errorf(i18n.Text("version metadata repository identity mismatch: %s"), filepath.Join(dir, entry.Name()))
+			return "", false, fmt.Errorf(i18n.Text("store.metadata_identity_mismatch"), filepath.Join(dir, entry.Name()))
 		}
 		expectedPath, err := s.snapshotInfoPath(repo, info.Version)
 		if err != nil || filepath.Clean(expectedPath) != filepath.Join(dir, entry.Name()) {
-			return "", false, fmt.Errorf(i18n.Text("version metadata version does not match its file name: %s"), filepath.Join(dir, entry.Name()))
+			return "", false, fmt.Errorf(i18n.Text("store.version_metadata_version_match"), filepath.Join(dir, entry.Name()))
 		}
 		if info.Commit == commit {
 			return info.Version, true, nil
@@ -358,17 +358,17 @@ func (s *Store) GetSnapshot(repo, version string) (*Snapshot, error) {
 		return nil, fs.ErrNotExist
 	}
 	if infoErr != nil {
-		return nil, &CorruptError{Path: dir, Detail: i18n.Text("version metadata is unreadable: ") + infoErr.Error()}
+		return nil, &CorruptError{Path: dir, Detail: i18n.Text("store.version_metadata_unreadable") + infoErr.Error()}
 	}
 	if dirErr != nil {
-		return nil, &CorruptError{Path: dir, Detail: i18n.Text("version directory is unreadable: ") + dirErr.Error()}
+		return nil, &CorruptError{Path: dir, Detail: i18n.Text("store.version_dir_unreadable") + dirErr.Error()}
 	}
 	var info SnapshotInfo
 	if err := json.Unmarshal(data, &info); err != nil {
-		return nil, &CorruptError{Path: dir, Detail: i18n.Text("cannot parse version metadata: ") + err.Error()}
+		return nil, &CorruptError{Path: dir, Detail: i18n.Text("store.version_metadata_prefix") + err.Error()}
 	}
 	if source.RepoIdentity(info.Repo) != source.RepoIdentity(repo) || info.Version != version {
-		return nil, &CorruptError{Path: dir, Detail: i18n.Text("repository/version in version metadata does not match the directory identity")}
+		return nil, &CorruptError{Path: dir, Detail: i18n.Text("store.metadata_version_mismatch")}
 	}
 	if info.Format != "" && s.version != "" {
 		recorded, current := releaseBase(info.Format), releaseBase(s.version)
@@ -378,16 +378,16 @@ func (s *Store) GetSnapshot(repo, version string) (*Snapshot, error) {
 			// content is re-hashed on every load and path rules are enforced when
 			// the snapshot is materialized, so there is no stale-cache hazard.
 			return nil, fmt.Errorf("%s", i18n.Format(
-				"snapshot %s was materialized by skillmod %s, which is newer than this build (%s); upgrade skillmod or remove that snapshot and re-run",
+				"store.snapshot_materialized_skillmod",
 				dir, info.Format, s.version))
 		}
 	}
 	h, err := dirhash.HashDir(dir)
 	if err != nil {
-		return nil, &CorruptError{Path: dir, Detail: i18n.Text("version directory cannot be verified: ") + err.Error()}
+		return nil, &CorruptError{Path: dir, Detail: i18n.Text("store.version_dir_unverifiable") + err.Error()}
 	}
 	if h != info.Treehash {
-		return nil, &CorruptError{Path: dir, Detail: i18n.Format("treehash mismatch: recorded %s, computed %s", info.Treehash, h)}
+		return nil, &CorruptError{Path: dir, Detail: i18n.Format("store.treehash_mismatch_recorded", info.Treehash, h)}
 	}
 	return &Snapshot{Info: info, ContentDir: dir}, nil
 }
@@ -426,7 +426,7 @@ func (s *Store) PutSnapshot(info SnapshotInfo, files []source.File) (*Snapshot, 
 	// collisions would otherwise fail much later, in the treehash check, with
 	// a confusing diagnosis.
 	if err := validateSnapshotFiles(files); err != nil {
-		return nil, fmt.Errorf(i18n.Text("version snapshot %s@%s: %w"), info.Repo, info.Version, err)
+		return nil, fmt.Errorf(i18n.Text("store.version_snapshot"), info.Repo, info.Version, err)
 	}
 	if info.Format == "" {
 		info.Format = s.version
@@ -450,7 +450,7 @@ func (s *Store) PutSnapshot(info SnapshotInfo, files []source.File) (*Snapshot, 
 		return nil, err
 	}
 	if gotHash != info.Treehash {
-		return nil, fmt.Errorf(i18n.Text("treehash verification failed before writing version snapshot: expected %s, computed %s"), info.Treehash, gotHash)
+		return nil, fmt.Errorf(i18n.Text("store.treehash_verification_failed"), info.Treehash, gotHash)
 	}
 	meta, err := json.MarshalIndent(info, "", "  ")
 	if err != nil {
@@ -478,20 +478,20 @@ func (s *Store) PutSnapshot(info SnapshotInfo, files []source.File) (*Snapshot, 
 		return nil, err
 	}
 	if err := os.Rename(tmp, dst); err != nil {
-		return nil, fmt.Errorf(i18n.Text("failed to commit version snapshot to disk: %w"), err)
+		return nil, fmt.Errorf(i18n.Text("store.failed_commit_version_snapshot"), err)
 	}
 	if err := fsutil.Replace(metaTmpName, infoPath); err != nil {
 		_ = os.RemoveAll(dst)
-		return nil, fmt.Errorf(i18n.Text("failed to commit version metadata to disk: %w"), err)
+		return nil, fmt.Errorf(i18n.Text("store.failed_commit_version_metadata"), err)
 	}
 	if s.readOnly {
 		if err := os.Chmod(infoPath, 0o444); err != nil {
-			return nil, fmt.Errorf(i18n.Text("failed to make version metadata read-only: %w"), err)
+			return nil, fmt.Errorf(i18n.Text("store.failed_make_version_metadata"), err)
 		}
 	}
 	if s.readOnly {
 		if err := makeReadOnly(dst); err != nil {
-			return nil, fmt.Errorf(i18n.Text("failed to make version snapshot read-only: %w"), err)
+			return nil, fmt.Errorf(i18n.Text("store.failed_make_version_snapshot"), err)
 		}
 	}
 	return &Snapshot{Info: info, ContentDir: dst}, nil
@@ -509,10 +509,10 @@ func validateSnapshotFiles(files []source.File) error {
 	seen := make(map[string]pathNode, len(files))
 	for _, f := range files {
 		if strings.Contains(f.Path, `\`) {
-			return fmt.Errorf(i18n.Text("repository file path %q contains a backslash and cannot be materialized on Windows"), f.Path)
+			return fmt.Errorf(i18n.Text("store.path_has_backslash"), f.Path)
 		}
 		if err := fsutil.ValidPath(f.Path); err != nil {
-			return fmt.Errorf(i18n.Text("repository file path %q cannot be materialized on this filesystem: %w"), f.Path, err)
+			return fmt.Errorf(i18n.Text("store.path_not_materializable"), f.Path, err)
 		}
 		var prefix string
 		components := strings.Split(f.Path, "/")
@@ -529,7 +529,7 @@ func validateSnapshotFiles(files []source.File) error {
 				// repeated node is either a case/normalization collision, a
 				// duplicate file, or a file-versus-directory conflict.
 				if prev.spelling != current.spelling || prev.dir != current.dir || !current.dir {
-					return fmt.Errorf(i18n.Text("repository file paths %q and %q collide on case-insensitive filesystems (macOS, Windows)"), prev.owner, f.Path)
+					return fmt.Errorf(i18n.Text("store.repository_file_paths_collide"), prev.owner, f.Path)
 				}
 				continue
 			}
@@ -543,7 +543,7 @@ func writeTree(dir string, files []source.File) error {
 	for _, f := range files {
 		rel := filepath.Clean(filepath.FromSlash(f.Path))
 		if rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return fmt.Errorf(i18n.Text("unsafe skill file path: %q"), f.Path)
+			return fmt.Errorf(i18n.Text("store.unsafe_skill_file_path"), f.Path)
 		}
 		p := filepath.Join(dir, rel)
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
@@ -606,10 +606,10 @@ func (s *Store) GetRepoRefs(repo string) (*resolve.Refs, bool, error) {
 	}
 	var rec repoRefsRecord
 	if err := json.Unmarshal(data, &rec); err != nil {
-		return nil, false, fmt.Errorf(i18n.Text("repository reference cache is corrupt %s: %w"), p, err)
+		return nil, false, fmt.Errorf(i18n.Text("store.cache_corrupt"), p, err)
 	}
 	if source.RepoIdentity(rec.Repo) != source.RepoIdentity(repo) {
-		return nil, false, fmt.Errorf(i18n.Text("repository reference cache identity mismatch: %s"), p)
+		return nil, false, fmt.Errorf(i18n.Text("store.cache_identity_mismatch"), p)
 	}
 	if rec.Refs.Tags == nil {
 		rec.Refs.Tags = map[string]string{}
@@ -624,7 +624,7 @@ func (s *Store) GetRepoRefs(repo string) (*resolve.Refs, bool, error) {
 // is left untouched so multiple skills from the same repo do not churn the file.
 func (s *Store) PutRepoRefs(repo string, refs *resolve.Refs) error {
 	if refs == nil {
-		return fmt.Errorf("%s", i18n.Text("repository reference cache cannot be nil"))
+		return fmt.Errorf("%s", i18n.Text("store.cache_nil"))
 	}
 	p := s.repoRefsPath(repo)
 	rec := repoRefsRecord{Repo: source.RepoIdentity(repo), Refs: *refs}
@@ -697,10 +697,10 @@ func (s *Store) GetResolved(repo, subdir, ref string) (ResolveEntry, bool, error
 	}
 	var rec resolveRecord
 	if err := json.Unmarshal(data, &rec); err != nil {
-		return ResolveEntry{}, false, fmt.Errorf(i18n.Text("resolution cache index is corrupt %s: %w"), p, err)
+		return ResolveEntry{}, false, fmt.Errorf(i18n.Text("store.index_corrupt"), p, err)
 	}
 	if source.RepoIdentity(rec.Repo) != source.RepoIdentity(repo) || rec.Subdir != subdir || rec.Ref != ref {
-		return ResolveEntry{}, false, fmt.Errorf(i18n.Text("resolution cache index identity mismatch: %s"), p)
+		return ResolveEntry{}, false, fmt.Errorf(i18n.Text("store.index_identity_mismatch"), p)
 	}
 	return rec.ResolveEntry, true, nil
 }
