@@ -170,9 +170,14 @@ func (s *Source) prefetchMissingBlobs(ctx context.Context, dir string, entries [
 	if err != nil {
 		return err
 	}
+	// `fetch-pack` addresses only local paths and scp-style ssh, so every https
+	// remote would fail here and leave each blob to its own lazy round trip.
+	// Mirror the promisor fetch Git itself uses, which works over every transport.
 	cmd := exec.CommandContext(ctx, git, platformGitArgs(
 		"-c", "protocol.version=2",
-		"fetch-pack", "--no-progress", "--refetch", "--thin", "--stdin", strings.TrimSpace(remote),
+		"-c", "fetch.negotiationAlgorithm=noop",
+		"fetch", strings.TrimSpace(remote), "--no-tags", "--no-write-fetch-head",
+		"--recurse-submodules=no", "--filter=blob:none", "--stdin",
 	)...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C", "GIT_NO_LAZY_FETCH=1")
@@ -181,7 +186,7 @@ func (s *Source) prefetchMissingBlobs(ctx context.Context, dir string, entries [
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git fetch-pack --stdin: %w: %s", err, strings.TrimSpace(stderr.String()))
+		return fmt.Errorf("git fetch --stdin: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	remaining, err := s.missingBlobs(ctx, dir, entries)
 	if err != nil {

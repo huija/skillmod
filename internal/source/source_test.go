@@ -7,6 +7,8 @@ package source
 import (
 	"context"
 	"errors"
+	"net/http/cgi"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -231,6 +233,14 @@ func TestOpenRepo_ReusesCanonicalIdentity(t *testing.T) {
 // subdirectory tag lark-doc/v0.8.1, and a dev branch.
 func newFixtureRepo(t *testing.T) (url string, headSHA string) {
 	t.Helper()
+	bare, headSHA := newFixtureBareRepo(t)
+	return "file://" + bare, headSHA
+}
+
+// newFixtureBareRepo builds the fixture on disk so a test can reach it over a
+// transport other than file://.
+func newFixtureBareRepo(t *testing.T) (bare string, headSHA string) {
+	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is unavailable")
 	}
@@ -260,13 +270,13 @@ func newFixtureRepo(t *testing.T) (url string, headSHA string) {
 	git(t, work, "commit", "-m", "dev commit")
 	git(t, work, "checkout", "main")
 
-	bare := filepath.Join(dir, "repo.git")
+	bare = filepath.Join(dir, "repo.git")
 	git(t, "", "clone", "--bare", work, bare)
 	git(t, bare, "config", "uploadpack.allowFilter", "true")
 	git(t, bare, "config", "uploadpack.allowAnySHA1InWant", "true")
 
 	headSHA = strings.TrimSpace(git(t, work, "rev-parse", "main"))
-	return "file://" + bare, headSHA
+	return bare, headSHA
 }
 
 func TestPrefetchMissingBlobs_Batched(t *testing.T) {
@@ -314,6 +324,94 @@ func TestPrefetchMissingBlobs_Batched(t *testing.T) {
 	}
 }
 
+// TestPrefetchMissingBlobs_OverSmartHTTP covers an http remote, one of the
+// addresses `git fetch-pack` cannot reach: with it the batch fetch always
+// failed and every blob cost its own lazy round trip.
+func TestPrefetchMissingBlobs_OverSmartHTTP(t *testing.T) {
+	bare, _ := newFixtureBareRepo(t)
+	url := newSmartHTTPServer(t, bare)
+	s := &Source{VCSRoot: t.TempDir()}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	refs, err := s.Refs(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit := refs.Tags["v1.0.0"]
+	repoDir, cleanup, err := s.openRepo(ctx, url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanup()
+	if err := s.fetchTarget(ctx, repoDir, commit, "refs/tags/v1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.run(ctx, repoDir, "ls-tree", "-r", "-z", commit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := parseLsTree(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing, err := s.missingBlobs(ctx, repoDir, entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(missing) < 3 {
+		t.Fatalf("missing objects after blob:none fetch = %d; the partial clone did not stay blobless", len(missing))
+	}
+	if err := s.prefetchMissingBlobs(ctx, repoDir, entries); err != nil {
+		t.Fatalf("batch fetch from an http remote: %v", err)
+	}
+	remaining, err := s.missingBlobs(ctx, repoDir, entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("%d blobs remain missing after batch fetch", len(remaining))
+	}
+}
+
+// newSmartHTTPServer serves bare over Git's smart HTTP protocol on loopback, so
+// tests reach an address that `fetch-pack` cannot address without leaving the machine.
+func newSmartHTTPServer(t *testing.T, bare string) string {
+	t.Helper()
+	backend, err := gitHTTPBackend()
+	if err != nil {
+		t.Skipf("git-http-backend is unavailable: %v", err)
+	}
+	handler := &cgi.Handler{
+		Path: backend,
+		Env: []string{
+			"GIT_PROJECT_ROOT=" + filepath.Dir(bare),
+			"GIT_HTTP_EXPORT_ALL=1",
+		},
+	}
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	return srv.URL + "/" + filepath.Base(bare)
+}
+
+func gitHTTPBackend() (string, error) {
+	if path, err := exec.LookPath("git-http-backend"); err == nil {
+		return path, nil
+	}
+	out, err := exec.Command("git", "--exec-path").Output()
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(strings.TrimSpace(string(out)), "git-http-backend")
+	if runtime.GOOS == "windows" {
+		path += ".exe"
+	}
+	if _, err := os.Stat(path); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
 func TestFetchRef_BatchUnsupportedFallsBackToLazyFetch(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test uses a POSIX shell wrapper")
@@ -325,7 +423,9 @@ func TestFetchRef_BatchUnsupportedFallsBackToLazyFetch(t *testing.T) {
 	}
 	marker := filepath.Join(t.TempDir(), "batch-attempted")
 	wrapper := filepath.Join(t.TempDir(), "git")
-	body := "#!/bin/sh\nif [ \"$3\" = fetch-pack ]; then : > \"$SKILLMOD_BATCH_MARKER\"; exit 2; fi\nexec \"$SKILLMOD_REAL_GIT\" \"$@\"\n"
+	// The wrapper fails the batch fetch by flag rather than by argv position so
+	// the test survives changes to the command's flag order.
+	body := "#!/bin/sh\nfor arg in \"$@\"; do\n  if [ \"$arg\" = --no-write-fetch-head ]; then : > \"$SKILLMOD_BATCH_MARKER\"; exit 2; fi\ndone\nexec \"$SKILLMOD_REAL_GIT\" \"$@\"\n"
 	if err := os.WriteFile(wrapper, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
