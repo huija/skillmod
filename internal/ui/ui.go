@@ -23,9 +23,9 @@ import (
 // Confirmer abstracts user confirmation.
 type Confirmer interface {
 	// Confirm asks a yes-or-no question and defaults to no.
-	Confirm(prompt string) bool
+	Confirm(prompt string) (bool, error)
 	// Choose returns an option index; for example, options may be ["overwrite", "keep and skip", "abort"].
-	Choose(prompt string, options []string) int
+	Choose(prompt string, options []string) (int, error)
 }
 
 // Option is one structured multi-select choice.
@@ -38,7 +38,7 @@ type Option struct {
 // MultiSelector can select zero or more options by index.
 type MultiSelector interface {
 	Confirmer
-	ChooseMany(prompt string, options []Option) []int
+	ChooseMany(prompt string, options []Option) ([]int, error)
 }
 
 // Interactive returns a multi-selector backed by terminal input. The caller
@@ -67,56 +67,52 @@ type collapsibleMultiSelect struct {
 
 var _ huh.Field = (*collapsibleMultiSelect)(nil)
 
-func (i *interactive) Confirm(prompt string) bool {
+func (i *interactive) Confirm(prompt string) (bool, error) {
 	if _, err := fmt.Fprintf(i.w, "%s [y/N] ", prompt); err != nil {
-		return false
+		return false, err
 	}
 	line, err := i.r.ReadString('\n')
 	if err != nil {
-		return false // EOF or a read failure means no; do not spin.
+		return false, err
 	}
 	s := strings.ToLower(strings.TrimSpace(line))
-	return s == "y" || s == "yes"
+	return s == "y" || s == "yes", nil
 }
 
-func (i *interactive) Choose(prompt string, options []string) int {
+func (i *interactive) Choose(prompt string, options []string) (int, error) {
 	for {
 		if _, err := fmt.Fprintf(i.w, "%s\n", prompt); err != nil {
-			return len(options) - 1
+			return 0, err
 		}
 		for idx, option := range options {
 			if _, err := fmt.Fprintf(i.w, "  %d) %s\n", idx+1, option); err != nil {
-				return len(options) - 1
+				return 0, err
 			}
 		}
 		if _, err := fmt.Fprintf(i.w, i18n.Text("ui.choose"), len(options)); err != nil {
-			return len(options) - 1
+			return 0, err
 		}
 		line, err := i.r.ReadString('\n')
 		if err != nil {
-			// On EOF or a read failure, choose the final option, which callers reserve as the safest; do not spin.
-			if _, writeErr := fmt.Fprintln(i.w); writeErr != nil {
-				return len(options) - 1
-			}
-			return len(options) - 1
+			return 0, err
 		}
 		s := strings.TrimSpace(line)
 		for idx := range options {
 			if s == fmt.Sprint(idx+1) {
-				return idx
+				return idx, nil
 			}
 		}
 		if _, err := fmt.Fprintln(i.w, i18n.Text("ui.invalid_choice_try_again")); err != nil {
-			return len(options) - 1
+			return 0, err
 		}
 	}
 }
 
 // ChooseMany returns the selected zero-based indices using huh's Bubble Tea
 // multi-select over the terminal input the selector was constructed with.
-func (i *interactive) ChooseMany(prompt string, options []Option) []int {
+func (i *interactive) ChooseMany(prompt string, options []Option) ([]int, error) {
 	if len(options) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	huhOptions := make([]huh.Option[int], len(options))
@@ -144,18 +140,20 @@ func (i *interactive) ChooseMany(prompt string, options []Option) []int {
 		WithTheme(huh.ThemeCharm()).
 		Run()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	// Huh clears the form when it quits. Preserve explicitly expanded details
 	// as ordinary terminal output so confirming the selection does not make the
 	// second line disappear before the user can read it.
 	if collapsibleField.expanded {
 		if details := collapsibleField.details(); details != "" {
-			_, _ = fmt.Fprintln(i.w, details)
+			if _, err := fmt.Fprintln(i.w, details); err != nil {
+				return nil, err
+			}
 		}
 	}
 	slices.Sort(selected)
-	return selected
+	return selected, nil
 }
 
 func newCollapsibleMultiSelect(field *huh.MultiSelect[int], options []Option) *collapsibleMultiSelect {

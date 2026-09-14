@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"go.yaml.in/yaml/v3"
+
 	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
 )
@@ -248,7 +250,9 @@ func (s *Source) catFileBatch(ctx context.Context, dir string, entries []lsEntry
 	if git == "" {
 		git = "git"
 	}
-	cmd := exec.CommandContext(ctx, git, platformGitArgs("cat-file", "--batch")...)
+	childCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(childCtx, git, platformGitArgs("cat-file", "--batch")...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
 	if noLazyFetch {
@@ -260,9 +264,11 @@ func (s *Source) catFileBatch(ctx context.Context, dir string, entries []lsEntry
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		_ = stdin.Close()
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
 		return nil, fmt.Errorf(i18n.Text("source.fetch.start_git_cat_file"), err)
 	}
 	go func() {
@@ -271,32 +277,37 @@ func (s *Source) catFileBatch(ctx context.Context, dir string, entries []lsEntry
 		}
 		_ = stdin.Close()
 	}()
+	abort := func() {
+		cancel()
+		_ = stdin.Close()
+		_ = cmd.Wait()
+	}
 
 	out := make(map[string][]byte, len(entries))
 	r := bufio.NewReader(stdout)
 	for _, e := range entries {
 		header, err := r.ReadString('\n')
 		if err != nil {
-			_ = cmd.Wait()
+			abort()
 			return nil, fmt.Errorf(i18n.Text("source.fetch.failed_read_blob_header"), e.sha, err)
 		}
 		parts := strings.Fields(strings.TrimRight(header, "\n"))
 		if len(parts) != 3 || parts[1] != "blob" {
-			_ = cmd.Wait()
+			abort()
 			return nil, fmt.Errorf(i18n.Text("source.fetch.blob_unreadable"), e.sha, strings.TrimSpace(header))
 		}
 		size, err := strconv.Atoi(parts[2])
 		if err != nil {
-			_ = cmd.Wait()
+			abort()
 			return nil, err
 		}
 		data := make([]byte, size)
 		if _, err := io.ReadFull(r, data); err != nil {
-			_ = cmd.Wait()
+			abort()
 			return nil, fmt.Errorf(i18n.Text("source.fetch.failed_read_blob_contents"), e.sha, err)
 		}
 		if _, err := r.ReadByte(); err != nil { // Separator newline after the blob.
-			_ = cmd.Wait()
+			abort()
 			return nil, err
 		}
 		out[e.sha] = data
@@ -331,27 +342,53 @@ func SkillNameFromDir(dir string) (string, error) {
 	return metadata.Name, nil
 }
 
-// ParseSkillMetadata parses the scalar name and description fields from SKILL.md frontmatter.
-// Parsing is line-ending agnostic: CRLF frontmatter is accepted by normalizing the copy used
-// for parsing only, never the original content or its dirhash.
+// ParseSkillMetadata parses the scalar name and description fields from YAML
+// frontmatter. Unknown metadata fields remain available to other skill tools;
+// only fields used by skillmod are decoded here.
 func ParseSkillMetadata(content string) (SkillMetadata, error) {
 	content = strings.ReplaceAll(content, "\r\n", "\n")
-	if !strings.HasPrefix(content, "---\n") {
+	lines := strings.Split(content, "\n")
+	if len(lines) == 0 || lines[0] != "---" {
 		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Text("source.fetch.missing_opening_frontmatter")}
 	}
-	rest := content[len("---\n"):]
-	block, _, found := strings.Cut(rest, "\n---")
-	if !found {
+	closing := -1
+	for i := 1; i < len(lines); i++ {
+		if lines[i] == "---" {
+			closing = i
+			break
+		}
+	}
+	if closing < 0 {
 		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Text("source.fetch.missing_closing_frontmatter")}
 	}
+	block := strings.Join(lines[1:closing], "\n")
+	var document yaml.Node
+	if err := yaml.Unmarshal([]byte(block), &document); err != nil {
+		return SkillMetadata{}, invalidFrontmatter(err)
+	}
+	if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
+		return SkillMetadata{}, invalidFrontmatter(nil)
+	}
+	root := document.Content[0]
 	metadata := SkillMetadata{}
-	for line := range strings.SplitSeq(block, "\n") {
-		if v, ok := strings.CutPrefix(line, "name:"); ok {
-			metadata.Name = strings.Trim(strings.TrimSpace(v), `"'`)
+	seen := map[string]bool{}
+	for i := 0; i < len(root.Content); i += 2 {
+		key, value := root.Content[i], root.Content[i+1]
+		if key.Kind != yaml.ScalarNode {
+			return SkillMetadata{}, invalidFrontmatter(nil)
+		}
+		if key.Value != "name" && key.Value != "description" {
 			continue
 		}
-		if v, ok := strings.CutPrefix(line, "description:"); ok {
-			metadata.Description = strings.Trim(strings.TrimSpace(v), `"'`)
+		if seen[key.Value] || value.Kind != yaml.ScalarNode || value.Tag != "!!str" {
+			return SkillMetadata{}, invalidFrontmatter(nil)
+		}
+		seen[key.Value] = true
+		switch key.Value {
+		case "name":
+			metadata.Name = value.Value
+		case "description":
+			metadata.Description = value.Value
 		}
 	}
 	if metadata.Name == "" {
@@ -361,4 +398,12 @@ func ParseSkillMetadata(content string) (SkillMetadata, error) {
 		return SkillMetadata{}, &NoSkillMDError{Detail: i18n.Format("source.fetch.skill_name_invalid", metadata.Name, err)}
 	}
 	return metadata, nil
+}
+
+func invalidFrontmatter(err error) error {
+	detail := i18n.Text("source.fetch.invalid_frontmatter")
+	if err != nil {
+		detail += err.Error()
+	}
+	return &NoSkillMDError{Detail: detail}
 }

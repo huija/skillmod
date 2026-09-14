@@ -84,6 +84,39 @@ func TestParseLsTree(t *testing.T) {
 	}
 }
 
+func TestCatFileBatchCancelsProcessAfterMalformedHeader(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses a POSIX shell wrapper")
+	}
+	wrapper := filepath.Join(t.TempDir(), "git")
+	body := `#!/bin/sh
+read first
+printf '%s missing\n' "$first"
+while read object; do
+  printf '%s blob 65536\n' "$object"
+  dd if=/dev/zero bs=65536 count=1 2>/dev/null
+  printf '\n'
+done
+`
+	if err := os.WriteFile(wrapper, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	entries := make([]lsEntry, 200)
+	for i := range entries {
+		entries[i] = lsEntry{sha: strings.Repeat(string(rune('a'+i%6)), 40)}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	started := time.Now()
+	_, err := (&Source{Git: wrapper}).catFileBatch(ctx, t.TempDir(), entries, true)
+	if err == nil || !strings.Contains(err.Error(), "unreadable") {
+		t.Fatalf("catFileBatch(malformed header) error = %v, want unreadable error", err)
+	}
+	if elapsed := time.Since(started); elapsed >= time.Second {
+		t.Errorf("catFileBatch(malformed header) took %s, want prompt cancellation", elapsed)
+	}
+}
+
 func TestSkillNameParsing(t *testing.T) {
 	for name, tc := range map[string]struct {
 		content string
@@ -118,6 +151,36 @@ func TestSkillMetadataParsing(t *testing.T) {
 	}
 }
 
+func TestSkillMetadataParsingUsesYAMLSemantics(t *testing.T) {
+	content := `---
+name: demo # an inline comment
+description: >-
+  First line
+  second line
+license: Apache-2.0
+metadata:
+  owner: platform
+---
+# Demo
+`
+	metadata, err := ParseSkillMetadata(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := SkillMetadata{Name: "demo", Description: "First line second line"}
+	if metadata != want {
+		t.Errorf("ParseSkillMetadata(YAML) = %+v, want %+v", metadata, want)
+	}
+
+	escaped, err := ParseSkillMetadata("---\nname: demo\ndescription: \"line\\nbreak\"\n---\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if escaped.Description != "line\nbreak" {
+		t.Errorf("ParseSkillMetadata(escaped description) = %q, want decoded newline", escaped.Description)
+	}
+}
+
 func TestSkillNameParsingErrors(t *testing.T) {
 	for name, content := range map[string]string{
 		"opening delimiter":  "name: demo\n---\n",
@@ -136,6 +199,9 @@ func TestSkillNameParsingErrors(t *testing.T) {
 		"asterisk":           "---\nname: a*b\n---\n",
 		"pipe":               "---\nname: a|b\n---\n",
 		"control char":       "---\nname: a\x01b\n---\n",
+		"non-scalar name":    "---\nname: [demo]\n---\n",
+		"duplicate name":     "---\nname: demo\nname: other\n---\n",
+		"trailing delimiter": "---\nname: demo\n---junk\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := ParseSkillMetadata(content)
@@ -179,23 +245,8 @@ func TestSourceErrors(t *testing.T) {
 	}
 }
 
-func TestRepoIdentity_NormalizesTransportAndGitSuffix(t *testing.T) {
-	want := "https://github.com/acme/skills"
-	for _, repo := range []string{
-		"https://github.com/acme/skills",
-		"https://user:secret@GITHUB.com:443/acme/skills.git/?token=secret",
-		"git@github.com:acme/skills.git",
-		"ssh://git@github.com:22/acme/skills.git",
-		"github.com/acme/skills.git",
-	} {
-		if got := RepoIdentity(repo); got != want {
-			t.Errorf("RepoIdentity(%q) = %q, want %q", repo, got, want)
-		}
-	}
-	if RepoIdentity("ssh://git@github.com:2222/acme/skills.git") == want {
-		t.Error("a non-default SSH port must not share the standard HTTPS identity")
-	}
-	if vcsKey("git@github.com:acme/skills.git") != vcsKey(want) {
+func TestVCSKeyUsesCanonicalRepositoryIdentity(t *testing.T) {
+	if vcsKey("git@github.com:acme/skills.git") != vcsKey("https://github.com/acme/skills") {
 		t.Error("the same logical repository did not reuse its VCS key")
 	}
 }

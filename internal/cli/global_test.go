@@ -14,7 +14,6 @@ import (
 )
 
 func TestGlobalScopeIsIndependentOfProject(t *testing.T) {
-	preserveFlags(t)
 	project, storeRoot := isolateCLI(t)
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -72,10 +71,8 @@ func TestGlobalScopeIsIndependentOfProject(t *testing.T) {
 }
 
 func TestInstallModeOverrideAndRelinkFlags(t *testing.T) {
-	preserveFlags(t)
 	isolateCLI(t)
-	flagInstallMode = "copy"
-	eng, err := newEngine()
+	eng, err := (&rootOptions{installMode: "copy"}).newEngine()
 	if err != nil {
 		t.Fatal(err)
 	}

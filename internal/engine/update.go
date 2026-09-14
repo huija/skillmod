@@ -14,19 +14,25 @@ import (
 	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/modfile"
+	repoaddr "github.com/huija/skillmod/internal/repo"
 	"github.com/huija/skillmod/internal/resolve"
-	"github.com/huija/skillmod/internal/source"
 	"github.com/huija/skillmod/internal/store"
 )
 
 const maxConcurrentRefQueries = 4
 
+// UpdateOptions controls version selection behavior.
+type UpdateOptions struct {
+	AllowDowngrade bool
+	DryRun         bool
+}
+
 // Update implements skillmod update [names...]: resolve the latest versions, update the lock, and install.
 // A selector may be either the published skill name or its installation alias;
 // a published name selects every declaration with that name. With no selectors
 // it updates all remote entries. Commit-pinned entries, including pseudo-versions,
-// advance to a new pseudo-version at default-branch HEAD (PRD §3.6).
-func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, error) {
+// advance to a new pseudo-version at default-branch HEAD.
+func (e *Engine) Update(ctx context.Context, names []string, options UpdateOptions, io IO) (*Report, error) {
 	defer io.stopProgress()
 	unlock, err := e.lockState()
 	if err != nil {
@@ -47,8 +53,16 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 		want[n] = true
 	}
 	var targets []modfile.ModSkill
+	var localSelections []modfile.ModSkill
 	for _, sk := range m.Skills {
-		if sk.Local || (len(want) > 0 && !want[sk.Name] && !want[sk.DirName()]) {
+		selected := len(want) == 0 || want[sk.Name] || want[sk.DirName()]
+		if !selected {
+			continue
+		}
+		if sk.Local {
+			if len(want) > 0 {
+				localSelections = append(localSelections, sk)
+			}
 			continue
 		}
 		targets = append(targets, sk)
@@ -65,7 +79,19 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 		}
 	}
 
-	rep := &Report{Action: "update"}
+	rep := &Report{Action: CommandUpdate}
+	for _, sk := range localSelections {
+		rep.Entries = append(rep.Entries, EntryReport{
+			Name: sk.Name, Local: true, Action: ActionSkip,
+			Note: i18n.Text("engine.update.local_entry_skipped"),
+		})
+	}
+	if len(targets) == 0 {
+		if len(want) == 0 {
+			rep.Notes = append(rep.Notes, i18n.Text("engine.update.no_remote_entries"))
+		}
+		return rep, printUpdateReport(rep, io)
+	}
 	var plans []plannedInstall
 	var conflicts []conflict
 	contentByDir := map[string]string{}
@@ -101,15 +127,19 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 		}
 		lk := findLock(lock, sk)
 		cur := sk.Version
+		installedVersion := cur
+		if installedVersion == "" && lk != nil {
+			installedVersion = lk.Version
+		}
 
 		var res resolve.Resolution
 		if resolve.IsPseudoVersion(cur) || resolve.IsSHA(cur) {
-			// Advance a commit-pinned entry to default-branch HEAD (PRD §3.6).
+			// Advance a commit-pinned entry to default-branch HEAD.
 			if refs.DefaultHead == "" {
 				return nil, fmt.Errorf(i18n.Text("engine.update.entry_remote_has_default"), sk.Name)
 			}
 			if lk != nil && refs.DefaultHead == lk.Commit {
-				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "keep", Version: cur, Note: i18n.Text("engine.update.already_up_to_date")})
+				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: ActionKeep, Version: cur, Note: i18n.Text("engine.update.already_up_to_date")})
 				continue
 			}
 			fetchRef := "HEAD"
@@ -122,22 +152,22 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 			if err != nil {
 				return nil, err
 			}
-			if r.Kind == resolve.KindTag && resolve.CompareVersions(r.Version, cur) < 0 && !io.AllowDowngrade {
+			if r.Kind == resolve.KindTag && resolve.CompareVersions(r.Version, installedVersion) < 0 && !options.AllowDowngrade {
 				rep.Entries = append(rep.Entries, EntryReport{
-					Name: sk.Name, Source: sk.Source, Action: ActionKeep, Version: cur,
-					Note: i18n.Format("engine.update.remote_latest_refusing", r.Version, cur),
+					Name: sk.Name, Source: sk.Source, Action: ActionKeep, Version: installedVersion,
+					Note: i18n.Format("engine.update.remote_latest_refusing", r.Version, installedVersion),
 				})
 				continue
 			}
-			if r.Version == cur && lk != nil && lk.Commit != "" {
+			if r.Version == installedVersion && lk != nil && lk.Commit != "" {
 				if r.Commit == lk.Commit {
-					rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: "keep", Version: cur, Note: i18n.Text("engine.update.already_up_to_date")})
+					rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: ActionKeep, Version: installedVersion, Note: i18n.Text("engine.update.already_up_to_date")})
 					continue
 				}
-				path, _ := e.Store.SnapshotPath(repo, cur)
+				path, _ := e.Store.SnapshotPath(repo, installedVersion)
 				return nil, &store.SnapshotConflictError{
 					Path: path,
-					Have: store.SnapshotInfo{Repo: repo, Version: cur, Commit: lk.Commit},
+					Have: store.SnapshotInfo{Repo: repo, Version: installedVersion, Commit: lk.Commit},
 					Want: store.SnapshotInfo{Repo: repo, Version: r.Version, Commit: r.Commit},
 				}
 			}
@@ -171,13 +201,13 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 			plans = append(plans, plannedInstall{name: sk.DirName(), contentDir: mat.contentDir, targets: tgts})
 		}
 		rep.Entries = append(rep.Entries, EntryReport{
-			Name: sk.Name, Source: sk.Source, Action: "update",
-			Version: mat.version, Note: fmt.Sprintf("%s → %s", cur, mat.version), Targets: append([]string(nil), tgts...), TargetResults: targetResults,
+			Name: sk.Name, Source: sk.Source, Action: ActionUpdate,
+			Version: mat.version, Note: fmt.Sprintf("%s → %s", installedVersion, mat.version), TargetResults: targetResults,
 		})
 		reportByDir[fsutil.FoldKey(sk.DirName())] = len(rep.Entries) - 1
 		// Update the in-memory mod and lock; write them only after success.
 		for i := range m.Skills {
-			if sameDir(m.Skills[i].DirName(), sk.DirName()) {
+			if sk.Version != "" && sameDir(m.Skills[i].DirName(), sk.DirName()) {
 				m.Skills[i].Version = mat.version
 				break
 			}
@@ -203,7 +233,6 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 			continue
 		}
 		setTargetResult(&rep.Entries[reportIndex], c.dir, ActionInstall)
-		rep.Entries[reportIndex].Targets = append(rep.Entries[reportIndex].Targets, c.dir)
 		// For an overwrite, locate the corresponding entry's contentDir.
 		for _, sk := range targets {
 			if sk.DirName() != c.name {
@@ -215,9 +244,9 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 		}
 	}
 
-	if io.DryRun {
-		rep.Notes = append(rep.Notes, i18n.Text("engine.get.dry_run_files_written"))
-		return rep, partialError(rep, conflicts, skip)
+	if options.DryRun {
+		rep.Notes = append(rep.Notes, i18n.Text("engine.dry_run_files_written"))
+		return rep, errors.Join(printUpdateReport(rep, io), partialError(rep, conflicts, skip))
 	}
 
 	finalize, err := applyInstallsWithMode(plans, e.Config.InstallMode)
@@ -230,15 +259,23 @@ func (e *Engine) Update(ctx context.Context, names []string, io IO) (*Report, er
 	if err := finalize(true); err != nil {
 		return nil, err
 	}
-	for _, en := range rep.Entries {
-		switch en.Action {
-		case "keep":
-			io.printf(i18n.Text("engine.update.entry_label"), en.Name, en.Version, en.Note)
-		case "update":
-			io.printf("%s: %s", en.Name, en.Note)
+	return rep, errors.Join(printUpdateReport(rep, io), partialError(rep, conflicts, skip))
+}
+
+func printUpdateReport(rep *Report, io IO) error {
+	for _, entry := range rep.Entries {
+		switch entry.Action {
+		case ActionKeep:
+			if err := io.printf(i18n.Text("engine.update.entry_label"), entry.Name, entry.Version, entry.Note); err != nil {
+				return err
+			}
+		case ActionUpdate, ActionSkip:
+			if err := io.printf("%s: %s", entry.Name, entry.Note); err != nil {
+				return err
+			}
 		}
 	}
-	return rep, partialError(rep, conflicts, skip)
+	return printReportNotes(rep, io)
 }
 
 func updateRepositories(targets []modfile.ModSkill) ([]string, error) {
@@ -293,7 +330,7 @@ func (e *Engine) loadRefsConcurrently(ctx context.Context, repositories []string
 		return firstErr
 	}
 	for i, repo := range repositories {
-		memo.refs[source.RepoIdentity(repo)] = results[i]
+		memo.refs[repoaddr.Identity(repo)] = results[i]
 	}
 	return nil
 }
@@ -326,7 +363,7 @@ func (e *Engine) loadRefsBestEffort(ctx context.Context, repositories []string, 
 	}
 	wait.Wait()
 	for i, repo := range repositories {
-		memo.refs[source.RepoIdentity(repo)] = results[i]
+		memo.refs[repoaddr.Identity(repo)] = results[i]
 	}
 }
 
@@ -334,7 +371,7 @@ func uniqueRepositories(repositories []string) []string {
 	seen := make(map[string]bool, len(repositories))
 	unique := make([]string, 0, len(repositories))
 	for _, repo := range repositories {
-		identity := source.RepoIdentity(repo)
+		identity := repoaddr.Identity(repo)
 		if seen[identity] {
 			continue
 		}

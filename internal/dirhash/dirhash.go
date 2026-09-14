@@ -4,16 +4,17 @@
 
 // Package dirhash wraps the official x/mod dirhash.Hash1 implementation without rewriting it.
 // Fetching hashes Git blob bytes while verification hashes installed files through the same implementation,
-// ensuring that downloaded and recomputed installation hashes match for AC-1.
+// ensuring that downloaded and recomputed installation hashes match.
 package dirhash
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/huija/skillmod/internal/i18n"
 	"golang.org/x/mod/sumdb/dirhash"
@@ -73,10 +74,15 @@ func HashDir(dir string) (string, error) {
 	})
 }
 
-// Validate checks the h1: prefix format at lock-file boundaries.
+// Validate checks that h is an h1 digest containing one SHA-256 value.
 func Validate(h string) error {
-	if !strings.HasPrefix(h, "h1:") {
+	const prefix = "h1:"
+	if len(h) < len(prefix) || h[:len(prefix)] != prefix {
 		return fmt.Errorf(i18n.Text("dirhash.missing_h1_prefix"), h)
+	}
+	digest, err := base64.StdEncoding.DecodeString(h[len(prefix):])
+	if err != nil || len(digest) != sha256.Size {
+		return fmt.Errorf(i18n.Text("dirhash.invalid_h1_digest"), h)
 	}
 	return nil
 }

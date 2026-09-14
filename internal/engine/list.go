@@ -8,7 +8,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/resolve"
 )
@@ -50,38 +49,10 @@ func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 	}
 	e.loadRefsBestEffort(ctx, repositories, memo, 10*time.Second)
 
-	rep := &Report{Action: "list"}
+	rep := &Report{Action: CommandList}
 	for _, sk := range m.Skills {
-		entry := EntryReport{Name: sk.Name, Source: sk.Source, Version: sk.Version}
-		if sk.Local {
-			entry.Action = "local"
-			rep.Entries = append(rep.Entries, entry)
-			continue
-		}
-		// Installation status.
-		status := Action("installed")
 		lk := findLock(lock, sk)
-		if lk == nil {
-			status = ActionUnlocked
-		} else {
-			for _, a := range adapters {
-				dst := adapterDir(a, e.Root, sk.DirName())
-				entry.Targets = append(entry.Targets, dst)
-				h, err := dirhash.HashDir(dst)
-				if err != nil {
-					setTargetResult(&entry, dst, ActionMissing)
-					status = mergeInspectionStatus(status, ActionMissing)
-					continue
-				}
-				if h != lk.Dirhash {
-					setTargetResult(&entry, dst, ActionDrift)
-					status = mergeInspectionStatus(status, ActionDrift)
-					continue
-				}
-				setTargetResult(&entry, dst, ActionInstalled)
-			}
-		}
-		entry.Action = status
+		entry := e.inspectSkill(sk, lk, adapters)
 
 		// Upgrade detection; defer pseudo-version comparisons to update.
 		repo, subdir, err := splitSource(sk.Source)
@@ -97,8 +68,8 @@ func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 				}
 				latestCache[key] = latest
 			}
-			if latest != "" && resolve.CompareVersions(latest, sk.Version) > 0 {
-				entry.Note = i18n.Text("engine.list.upgrade_available") + latest
+			if latest != "" && resolve.CompareVersions(latest, lk.Version) > 0 {
+				entry.Note = appendNote(entry.Note, i18n.Text("engine.list.upgrade_available")+latest)
 			}
 		}
 		rep.Entries = append(rep.Entries, entry)
@@ -109,12 +80,18 @@ func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 		if en.Note != "" {
 			note = i18n.Format("engine.list.list", en.Note)
 		}
-		io.printf("%-24s %-28s %s%s", en.Name, en.Version, displayListAction(en.Action), note)
+		action := displayListAction(en.Action)
+		if en.Local && en.Action == ActionInstalled {
+			action = string(ActionLocal)
+		}
+		if err := io.printf("%-24s %-28s %s%s", en.Name, en.Version, action, note); err != nil {
+			return rep, err
+		}
 	}
 	return rep, nil
 }
 
-func displayListAction(action Action) string {
+func displayListAction(action EntryStatus) string {
 	switch action {
 	case ActionInstalled:
 		return i18n.Text("engine.list.installed")

@@ -18,19 +18,20 @@ import (
 	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/modfile"
+	repoaddr "github.com/huija/skillmod/internal/repo"
 	"github.com/huija/skillmod/internal/resolve"
 	"github.com/huija/skillmod/internal/source"
 	"github.com/huija/skillmod/internal/ui"
 )
 
-// conflict represents an existing installation target whose content does not match (PRD §3.3 rule 5).
+// conflict represents an existing installation target whose content does not match.
 type conflict struct {
 	name string
 	dir  string
 }
 
 // resolveConflicts applies interactive or non-interactive conflict rules and returns directories to keep and skip.
-// The PRD defines overwrite, keep and skip, or abort; non-interactive operation without --yes aborts.
+// Supported choices are overwrite, keep and skip, or abort; non-interactive operation without --yes aborts.
 func resolveConflicts(io IO, conflicts []conflict) (skip map[string]bool, err error) {
 	skip = map[string]bool{}
 	if len(conflicts) == 0 {
@@ -39,19 +40,24 @@ func resolveConflicts(io IO, conflicts []conflict) (skip map[string]bool, err er
 	if io.Yes {
 		for _, c := range conflicts {
 			skip[c.dir] = true
-			io.printf(i18n.Text("engine.get.conflict_yes_automatically"), c.dir)
+			if err := io.printf(i18n.Text("engine.get.conflict_yes_automatically"), c.dir); err != nil {
+				return nil, err
+			}
 		}
 		return skip, nil
 	}
 	if io.Confirm != nil {
 		for _, c := range conflicts {
-			choice := io.Confirm.Choose(
+			choice, err := io.Confirm.Choose(
 				i18n.Format("engine.get.conflict_exists_mismatch", c.dir),
 				[]string{
 					i18n.Text("engine.get.overwrite"),
 					i18n.Text("engine.get.keep_skip"),
 					i18n.Text("engine.get.abort"),
 				})
+			if err != nil {
+				return nil, err
+			}
 			switch choice {
 			case 0: // Overwrite.
 			case 1:
@@ -70,8 +76,9 @@ func resolveConflicts(io IO, conflicts []conflict) (skip map[string]bool, err er
 }
 
 // Get implements skillmod get: resolve, download, validate, install, then write SKILL.mod and SKILL.lock.
-// A failure at any step leaves no partially updated state (PRD §3.2 rule 6).
-func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report, error) {
+// A failure at any step leaves no partially updated state.
+func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO, options ...MutationOptions) (*Report, error) {
+	run := mutationOptions(options)
 	defer io.stopProgress()
 	addr, err := address.Parse(rawAddr)
 	if err != nil {
@@ -194,9 +201,9 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 		}
 	}
 
-	rep := &Report{Action: "get"}
+	rep := &Report{Action: CommandGet}
 	for _, entry := range entries {
-		action := ActionInstall
+		action := EntryStatus(ActionInstall)
 		switch {
 		case len(entry.targets) > 0 && len(entry.skippedTargets) > 0:
 			action = ActionPartial
@@ -207,16 +214,16 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 		}
 		rep.Entries = append(rep.Entries, EntryReport{
 			Name: entry.name, Source: entry.source, Version: entry.mat.version,
-			Action: action, Note: entry.mat.note, Targets: entry.targets, TargetResults: entry.targetResults,
+			Action: action, Note: entry.mat.note, TargetResults: entry.targetResults,
 		})
 		if note := entry.directoryChangeNote(); note != "" {
 			rep.Notes = append(rep.Notes, note)
 		}
 	}
 
-	if io.DryRun {
-		rep.Notes = append(rep.Notes, i18n.Text("engine.get.dry_run_files_written"))
-		return rep, partialError(rep, conflicts, skip)
+	if run.DryRun {
+		rep.Notes = append(rep.Notes, i18n.Text("engine.dry_run_files_written"))
+		return rep, errors.Join(printGetDryRunReport(rep, io), partialError(rep, conflicts, skip))
 	}
 
 	for _, entry := range entries {
@@ -252,13 +259,26 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO) (*Report
 	}
 	for _, entry := range entries {
 		if len(entry.targets) > 0 {
-			io.printf(i18n.Text("engine.get.installed_skill_mod_skill"), entry.name, entry.mat.version)
+			if err := io.printf(i18n.Text("engine.get.installed_skill_mod_skill"), entry.name, entry.mat.version); err != nil {
+				return rep, errors.Join(err, partialError(rep, conflicts, skip))
+			}
 		}
 		if note := entry.directoryChangeNote(); note != "" {
-			io.printf("%s", note)
+			if err := io.printf("%s", note); err != nil {
+				return rep, errors.Join(err, partialError(rep, conflicts, skip))
+			}
 		}
 	}
 	return rep, partialError(rep, conflicts, skip)
+}
+
+func printGetDryRunReport(rep *Report, io IO) error {
+	for _, entry := range rep.Entries {
+		if err := io.printf(i18n.Text("engine.get.dry_run_entry"), entry.Name, entry.Version, entry.Action); err != nil {
+			return err
+		}
+	}
+	return printReportNotes(rep, io)
 }
 
 type getEntry struct {
@@ -275,7 +295,7 @@ type getEntry struct {
 	targetResults  []TargetReport
 }
 
-func setGetTargetResult(entry *getEntry, path string, action Action) {
+func setGetTargetResult(entry *getEntry, path string, action TargetStatus) {
 	for i := range entry.targetResults {
 		if entry.targetResults[i].Path == path {
 			entry.targetResults[i].Action = action
@@ -427,10 +447,12 @@ func chooseSkillCandidates(root, repo string, io IO) ([]skillCandidate, error) {
 	for i, candidate := range candidates {
 		options[i] = candidate.option(repo, displaySubdirs[i])
 	}
-	if selector, ok := io.Confirm.(interface {
-		ChooseMany(prompt string, options []ui.Option) []int
-	}); ok {
-		return selectedCandidates(candidates, selector.ChooseMany(i18n.Format("engine.get.multiple_skills_found_select", repo), options))
+	if selector, ok := io.Confirm.(ui.MultiSelector); ok {
+		selected, err := selector.ChooseMany(i18n.Format("engine.get.multiple_skills_found_select", repo), options)
+		if err != nil {
+			return nil, err
+		}
+		return selectedCandidates(candidates, selected)
 	}
 	if io.Confirm == nil {
 		displayOptions := make([]string, len(candidates))
@@ -442,7 +464,11 @@ func chooseSkillCandidates(root, repo string, io IO) ([]skillCandidate, error) {
 	var selected []skillCandidate
 	for i, candidate := range candidates {
 		prompt := i18n.Format("engine.get.confirm_install", candidate.name, candidateAddress(repo, displaySubdirs[i]), candidate.description)
-		if io.Confirm.Confirm(prompt) {
+		confirmed, err := io.Confirm.Confirm(prompt)
+		if err != nil {
+			return nil, err
+		}
+		if confirmed {
 			selected = append(selected, candidate)
 		}
 	}
@@ -598,7 +624,7 @@ func sameRemoteSource(a, b string) bool {
 	if err != nil {
 		return false
 	}
-	return aSubdir == bSubdir && source.RepoIdentity(aRepo) == source.RepoIdentity(bRepo)
+	return aSubdir == bSubdir && repoaddr.Identity(aRepo) == repoaddr.Identity(bRepo)
 }
 
 func upsertMod(m *modfile.Mod, e modfile.ModSkill) {
@@ -656,7 +682,7 @@ func validDirName(s string) bool {
 
 // classifyTarget selects install for absent or clean old content, keep for matching content, or conflict for local modifications.
 // prevHash is the previous lock hash; matching content is a clean old installation that can be overwritten without losing user data.
-func classifyTarget(dst, wantHash, prevHash string) Action {
+func classifyTarget(dst, wantHash, prevHash string) TargetStatus {
 	h, err := dirhash.HashDir(dst)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

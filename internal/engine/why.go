@@ -6,11 +6,8 @@ package engine
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io/fs"
 
-	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/i18n"
 )
 
@@ -35,48 +32,13 @@ func (e *Engine) Why(_ context.Context, name string, io IO) (*Report, error) {
 		return nil, err
 	}
 
-	rep := &Report{Action: "why"}
+	rep := &Report{Action: CommandWhy}
 	for _, skill := range m.Skills {
 		if skill.Name != name && skill.DirName() != name {
 			continue
 		}
-		entry := EntryReport{
-			Name: skill.Name, Source: skill.Source, Version: skill.Version,
-			Directory: skill.DirName(), Action: ActionUnlocked,
-		}
 		locked := findLock(lock, skill)
-		if locked != nil {
-			entry.Commit = locked.Commit
-			entry.Dirhash = locked.Dirhash
-		}
-		if skill.Local {
-			entry.Action = ActionLocal
-		} else if locked != nil {
-			entry.Action = ActionInstalled
-		}
-		for _, adapter := range adapters {
-			dst := adapterDir(adapter, e.Root, skill.DirName())
-			entry.Targets = append(entry.Targets, dst)
-			hash, hashErr := dirhash.HashDir(dst)
-			switch {
-			case errors.Is(hashErr, fs.ErrNotExist):
-				setTargetResult(&entry, dst, ActionMissing)
-				entry.Action = mergeInspectionStatus(entry.Action, ActionMissing)
-			case hashErr != nil:
-				setTargetResult(&entry, dst, ActionUnverifiable)
-				entry.Action = mergeInspectionStatus(entry.Action, ActionDrift)
-			case locked == nil:
-				setTargetResult(&entry, dst, ActionUnlocked)
-				if !skill.Local {
-					entry.Action = mergeInspectionStatus(entry.Action, ActionUnlocked)
-				}
-			case hash != locked.Dirhash:
-				setTargetResult(&entry, dst, ActionDrift)
-				entry.Action = mergeInspectionStatus(entry.Action, ActionDrift)
-			default:
-				setTargetResult(&entry, dst, ActionInstalled)
-			}
-		}
+		entry := e.inspectSkill(skill, locked, adapters)
 		rep.Entries = append(rep.Entries, entry)
 	}
 	if len(rep.Entries) == 0 {
@@ -87,15 +49,23 @@ func (e *Engine) Why(_ context.Context, name string, io IO) (*Report, error) {
 		if source == "" {
 			source = i18n.Text("engine.why.local")
 		}
-		io.printf(i18n.Text("engine.why.directory"), entry.Name, entry.Directory, source, entry.Version)
+		if err := io.printf(i18n.Text("engine.why.directory"), entry.Name, entry.Directory, source, entry.Version); err != nil {
+			return rep, err
+		}
 		if entry.Commit != "" {
-			io.printf(i18n.Text("engine.why.commit"), entry.Commit)
+			if err := io.printf(i18n.Text("engine.why.commit"), entry.Commit); err != nil {
+				return rep, err
+			}
 		}
 		if entry.Dirhash != "" {
-			io.printf(i18n.Text("engine.why.dirhash"), entry.Dirhash)
+			if err := io.printf(i18n.Text("engine.why.dirhash"), entry.Dirhash); err != nil {
+				return rep, err
+			}
 		}
 		for _, target := range entry.TargetResults {
-			io.printf(i18n.Text("engine.why.why"), target.Path, target.Action)
+			if err := io.printf(i18n.Text("engine.why.why"), target.Path, target.Action); err != nil {
+				return rep, err
+			}
 		}
 	}
 	return rep, nil

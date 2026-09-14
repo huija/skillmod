@@ -39,7 +39,7 @@ func (e *Engine) identifyInstalled(dirs []string, name, alias, hash string, lock
 			lookupErrs = append(lookupErrs, err)
 			continue
 		}
-		sk.Source, sk.Version = snap.Info.Repo, snap.Info.Version
+		sk.Source, sk.Version = snap.Info.Repository(), snap.Info.Version
 		if subdir != "" {
 			sk.Source += subdirSuffix(subdir)
 		}

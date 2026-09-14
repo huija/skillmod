@@ -29,6 +29,7 @@ import (
 	"github.com/huija/skillmod/internal/filelock"
 	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
+	repoaddr "github.com/huija/skillmod/internal/repo"
 	"github.com/huija/skillmod/internal/resolve"
 	"github.com/huija/skillmod/internal/source"
 	"golang.org/x/mod/module"
@@ -88,7 +89,8 @@ func (s *Store) VCSRoot() string { return filepath.Join(s.CacheRoot(), "vcs") }
 
 // SnapshotInfo records the immutable identity and integrity of one materialized repo.
 type SnapshotInfo struct {
-	Repo       string   `json:"repo"`
+	Repo       string   `json:"repo"`                // canonical cache identity
+	Transport  string   `json:"transport,omitempty"` // credential-free Git transport used to create the snapshot
 	Version    string   `json:"version"`
 	Commit     string   `json:"commit"`
 	Treehash   string   `json:"treehash"`
@@ -99,6 +101,15 @@ type SnapshotInfo struct {
 	// like "v0.0.1-1-g21882fe". Reads reject only snapshots written by a
 	// strictly newer skillmod; everything else is re-verified on every load.
 	Format string `json:"format,omitempty"`
+}
+
+// Repository returns the credential-free transport used to create the
+// snapshot, falling back to the canonical identity for legacy metadata.
+func (i SnapshotInfo) Repository() string {
+	if i.Transport != "" {
+		return i.Transport
+	}
+	return i.Repo
 }
 
 // Snapshot is a verified full-repository snapshot in pkg/mod.
@@ -223,7 +234,7 @@ func escapePathSegment(segment string) string {
 // github.com/anthropics/skills. Non-web and local repositories live below a
 // scheme-prefixed namespace but remain reversible and inspectable.
 func repoPath(repo string) (string, error) {
-	identity := source.RepoIdentity(repo)
+	identity := repoaddr.Identity(repo)
 	u, err := url.Parse(identity)
 	if err != nil {
 		return "", fmt.Errorf(i18n.Text("store.parse_repository_identity"), identity, err)
@@ -327,7 +338,7 @@ func (s *Store) FindSnapshotVersionByCommit(repo, commit string) (string, bool, 
 		if err := json.Unmarshal(data, &info); err != nil {
 			return "", false, fmt.Errorf(i18n.Text("store.cannot_parse_version_metadata"), filepath.Join(dir, entry.Name()), err)
 		}
-		if source.RepoIdentity(info.Repo) != source.RepoIdentity(repo) {
+		if repoaddr.Identity(info.Repo) != repoaddr.Identity(repo) {
 			return "", false, fmt.Errorf(i18n.Text("store.metadata_identity_mismatch"), filepath.Join(dir, entry.Name()))
 		}
 		expectedPath, err := s.snapshotInfoPath(repo, info.Version)
@@ -367,9 +378,17 @@ func (s *Store) GetSnapshot(repo, version string) (*Snapshot, error) {
 	if err := json.Unmarshal(data, &info); err != nil {
 		return nil, &CorruptError{Path: dir, Detail: i18n.Text("store.version_metadata_prefix") + err.Error()}
 	}
-	if source.RepoIdentity(info.Repo) != source.RepoIdentity(repo) || info.Version != version {
+	if repoaddr.Identity(info.Repo) != repoaddr.Identity(repo) || info.Version != version {
 		return nil, &CorruptError{Path: dir, Detail: i18n.Text("store.metadata_version_mismatch")}
 	}
+	if info.Transport == "" {
+		info.Transport = info.Repo
+	}
+	transport, err := repoaddr.PersistedTransport(info.Transport)
+	if err != nil || repoaddr.Identity(transport) != repoaddr.Identity(info.Repo) {
+		return nil, &CorruptError{Path: dir, Detail: i18n.Text("store.metadata_transport_mismatch")}
+	}
+	info.Transport = transport
 	if info.Format != "" && s.version != "" {
 		recorded, current := releaseBase(info.Format), releaseBase(s.version)
 		if semver.IsValid(recorded) && semver.IsValid(current) && semver.Compare(recorded, current) > 0 {
@@ -394,7 +413,12 @@ func (s *Store) GetSnapshot(repo, version string) (*Snapshot, error) {
 
 // PutSnapshot atomically creates an immutable version-addressed full repo snapshot.
 func (s *Store) PutSnapshot(info SnapshotInfo, files []source.File) (*Snapshot, error) {
-	info.Repo = source.RepoIdentity(info.Repo)
+	transport, err := repoaddr.PersistedTransport(info.Repo)
+	if err != nil {
+		return nil, err
+	}
+	info.Repo = repoaddr.Identity(transport)
+	info.Transport = transport
 	dst, err := s.SnapshotPath(info.Repo, info.Version)
 	if err != nil {
 		return nil, err
@@ -588,7 +612,7 @@ type repoRefsRecord struct {
 func (s *Store) repoRefsPath(repo string) string {
 	rel, err := repoPath(repo)
 	if err != nil {
-		return filepath.Join(s.CacheRoot(), "refs", hashKey("refs", source.RepoIdentity(repo))+".json")
+		return filepath.Join(s.CacheRoot(), "refs", hashKey("refs", repoaddr.Identity(repo))+".json")
 	}
 	return filepath.Join(s.CacheRoot(), "download", rel, "@v", "refs.json")
 }
@@ -608,7 +632,7 @@ func (s *Store) GetRepoRefs(repo string) (*resolve.Refs, bool, error) {
 	if err := json.Unmarshal(data, &rec); err != nil {
 		return nil, false, fmt.Errorf(i18n.Text("store.cache_corrupt"), p, err)
 	}
-	if source.RepoIdentity(rec.Repo) != source.RepoIdentity(repo) {
+	if repoaddr.Identity(rec.Repo) != repoaddr.Identity(repo) {
 		return nil, false, fmt.Errorf(i18n.Text("store.cache_identity_mismatch"), p)
 	}
 	if rec.Refs.Tags == nil {
@@ -627,7 +651,7 @@ func (s *Store) PutRepoRefs(repo string, refs *resolve.Refs) error {
 		return fmt.Errorf("%s", i18n.Text("store.cache_nil"))
 	}
 	p := s.repoRefsPath(repo)
-	rec := repoRefsRecord{Repo: source.RepoIdentity(repo), Refs: *refs}
+	rec := repoRefsRecord{Repo: repoaddr.Identity(repo), Refs: *refs}
 	data, err := json.Marshal(rec)
 	if err != nil {
 		return err
@@ -680,7 +704,7 @@ type resolveRecord struct {
 func (s *Store) resolvePath(repo, subdir, ref string) string {
 	rel, err := repoPath(repo)
 	if err != nil {
-		return filepath.Join(s.CacheRoot(), "resolve", hashKey("resolve", source.RepoIdentity(repo), subdir, ref)+".json")
+		return filepath.Join(s.CacheRoot(), "resolve", hashKey("resolve", repoaddr.Identity(repo), subdir, ref)+".json")
 	}
 	return filepath.Join(s.CacheRoot(), "download", rel, "@v", "resolve", hashKey("resolve", subdir, ref)+".json")
 }
@@ -699,7 +723,7 @@ func (s *Store) GetResolved(repo, subdir, ref string) (ResolveEntry, bool, error
 	if err := json.Unmarshal(data, &rec); err != nil {
 		return ResolveEntry{}, false, fmt.Errorf(i18n.Text("store.index_corrupt"), p, err)
 	}
-	if source.RepoIdentity(rec.Repo) != source.RepoIdentity(repo) || rec.Subdir != subdir || rec.Ref != ref {
+	if repoaddr.Identity(rec.Repo) != repoaddr.Identity(repo) || rec.Subdir != subdir || rec.Ref != ref {
 		return ResolveEntry{}, false, fmt.Errorf(i18n.Text("store.index_identity_mismatch"), p)
 	}
 	return rec.ResolveEntry, true, nil
@@ -716,7 +740,7 @@ func (s *Store) PutResolved(repo, subdir, ref string, entry ResolveEntry) error 
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
-	rec := resolveRecord{Repo: source.RepoIdentity(repo), Subdir: subdir, Ref: ref, ResolveEntry: entry}
+	rec := resolveRecord{Repo: repoaddr.Identity(repo), Subdir: subdir, Ref: ref, ResolveEntry: entry}
 	data, err := json.Marshal(rec)
 	if err != nil {
 		return err

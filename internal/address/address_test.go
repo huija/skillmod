@@ -33,8 +33,8 @@ func TestParse(t *testing.T) {
 		{"scp-like without ref", "git@github.com:a/b", &Address{Repo: "git@github.com:a/b"}, ""},
 		{"scp-like with ref", "git@github.com:a/b@v1.0.0", &Address{Repo: "git@github.com:a/b", Ref: "v1.0.0"}, ""},
 		{"scp-like with subdirectory and ref", "git@github.com:a/b//x@v1.0.0", &Address{Repo: "git@github.com:a/b", Subdir: "x", Ref: "v1.0.0"}, ""},
-		// User information in a URL is not a version separator.
-		{"url with user info", "https://user@host/path", &Address{Repo: "https://user@host/path"}, ""},
+		// SSH usernames are transport details rather than embedded credentials.
+		{"ssh URL with username", "ssh://git@host/path", &Address{Repo: "ssh://git@host/path"}, ""},
 		// Commit SHA reference.
 		{"40-character SHA", "github.com/a/b@0123456789abcdef0123456789abcdef01234567", &Address{Repo: "https://github.com/a/b", Ref: "0123456789abcdef0123456789abcdef01234567"}, ""},
 		// Invalid addresses.
@@ -43,6 +43,14 @@ func TestParse(t *testing.T) {
 		{"missing repository", "@v1.0.0", nil, "missing repository address"},
 		{"empty subdirectory after separator", "github.com/a/b//", nil, "missing subdirectory"},
 		{"repository contains whitespace", "git hub.com/a/b", nil, "whitespace"},
+		{"https user info", "https://user@host/path", nil, "must not contain embedded credentials"},
+		{"https password", "https://user:secret@host/path", nil, "must not contain embedded credentials"},
+		{"ssh password", "ssh://git:secret@host/path", nil, "must not contain embedded credentials"},
+		{"query parameters", "https://host/path?access_token=secret", nil, "must not contain embedded credentials"},
+		{"query parameters after subdirectory", "https://host/path//skill?access_token=secret", nil, "must not contain embedded credentials"},
+		{"fragment", "https://host/path#secret", nil, "must not contain embedded credentials"},
+		{"fragment after subdirectory", "https://host/path//skill#secret", nil, "must not contain embedded credentials"},
+		{"unsupported transport", "custom://host/path", nil, "must not contain embedded credentials"},
 		{"ref contains whitespace", "github.com/a/b@v1 .0", nil, "whitespace"},
 		{"subdirectory escapes root", "github.com/a/b//../x", nil, "non-canonical"},
 		{"subdirectory dot segment", "github.com/a/b//./x", nil, "non-canonical"},
@@ -71,6 +79,25 @@ func TestParse(t *testing.T) {
 				t.Errorf("Parse(%q) = %+v, want %+v", tt.raw, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseErrorsDoNotEchoCredentials(t *testing.T) {
+	for _, raw := range []string{
+		"https://user:secret@",
+		"https://user:secret@example.com/repo path",
+		"https://user:secret@example.com/repo//",
+		"https://example.com/repo//skill?access_token=secret",
+	} {
+		_, err := Parse(raw)
+		if err == nil {
+			t.Fatalf("Parse(%q) succeeded, want error", raw)
+		}
+		for _, secret := range []string{"user", "secret", "access_token"} {
+			if strings.Contains(err.Error(), secret) {
+				t.Errorf("Parse(%q) error = %q, leaked %q", raw, err, secret)
+			}
+		}
 	}
 }
 

@@ -1,3 +1,5 @@
+schemaversion = 1
+
 [[skill]]
 name = 'gh-fix-ci'
 source = 'https://github.com/openai/skills//skills/.curated/gh-fix-ci'

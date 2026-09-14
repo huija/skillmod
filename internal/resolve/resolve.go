@@ -53,7 +53,7 @@ type Request struct {
 	Ref    string // explicit reference; empty resolves the latest version
 }
 
-// BranchError reports a ref that names a mutable remote branch and therefore cannot be locked (PRD §3.2).
+// BranchError reports a ref that names a mutable remote branch and therefore cannot be locked.
 type BranchError struct{ Ref string }
 
 func (e *BranchError) Error() string {
@@ -92,7 +92,7 @@ func Resolve(req Request, refs *Refs) (*Resolution, error) {
 }
 
 func resolveExplicit(req Request, refs *Refs) (*Resolution, error) {
-	// 1. Monorepo convention: automatically prefix an explicit bare version with <subdir>/ (AC-6).
+	// 1. Monorepo convention: automatically prefix an explicit bare version with <subdir>/.
 	if req.Subdir != "" {
 		if r := tryTag(req.Subdir+"/"+req.Ref, refs); r != nil {
 			return r, nil

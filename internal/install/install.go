@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-// Package install provides platform adapters and byte-preserving installation (PRD §3.5).
+// Package install provides platform adapters and byte-preserving installation.
 // Adapters may only choose installation directories; they must not change file names or content.
 // This guarantees identical dirhash values across platform-specific copies.
 package install
@@ -41,7 +41,7 @@ var registry = map[string]Adapter{
 	"agents":      agentSkills{},
 }
 
-// ByName returns a named adapter or an error listing supported names (PRD §3.5 error table).
+// ByName returns a named adapter or an error listing supported names.
 func ByName(name string) (Adapter, error) {
 	a, ok := registry[name]
 	if !ok {

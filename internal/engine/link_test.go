@@ -42,9 +42,7 @@ func TestProjectAndGlobalShareSnapshotAcrossInstallModes(t *testing.T) {
 	beforeMod := readFileString(t, filepath.Join(global.ManifestRoot, modfile.ModFileName))
 	beforeLock := readFileString(t, filepath.Join(global.ManifestRoot, modfile.LockFileName))
 	global.Config.InstallMode = install.Auto
-	relink := testIO()
-	relink.Relink = true
-	if _, err := global.Sync(ctx, false, relink); err != nil {
+	if _, err := global.Sync(ctx, engine.SyncOptions{Relink: true}, testIO()); err != nil {
 		t.Fatal(err)
 	}
 	if got := readFileString(t, filepath.Join(global.ManifestRoot, modfile.ModFileName)); got != beforeMod {
@@ -85,21 +83,19 @@ func TestRelinkDryRunAndCopyDetachment(t *testing.T) {
 	dst := installedDir(eng.Root, "hello")
 	eng.Config.InstallMode = install.Auto
 	relink := testIO()
-	relink.Relink, relink.DryRun = true, true
 	var out bytes.Buffer
 	relink.Out = &out
-	if _, err := eng.Sync(ctx, false, relink); err != nil {
+	if _, err := eng.Sync(ctx, engine.SyncOptions{Relink: true, DryRun: true}, relink); err != nil {
 		t.Fatal(err)
 	}
 	if st, err := os.Lstat(dst); err != nil || !st.IsDir() {
 		t.Fatalf("relink dry-run changed copy: %v, %v", st, err)
 	}
-	relink.DryRun = false
-	if _, err := eng.Sync(ctx, false, relink); err != nil {
+	if _, err := eng.Sync(ctx, engine.SyncOptions{Relink: true}, relink); err != nil {
 		t.Fatal(err)
 	}
 	eng.Config.InstallMode = install.Copy
-	if _, err := eng.Sync(ctx, false, relink); err != nil {
+	if _, err := eng.Sync(ctx, engine.SyncOptions{Relink: true}, relink); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dst, "SKILL.md"), []byte("local edit"), 0o644); err != nil {
@@ -109,7 +105,7 @@ func TestRelinkDryRunAndCopyDetachment(t *testing.T) {
 		t.Errorf("detached edit damaged snapshot: %v", err)
 	}
 	// Relink must obey conflict handling and keep local modifications.
-	if _, err := eng.Sync(ctx, false, relink); err == nil {
+	if _, err := eng.Sync(ctx, engine.SyncOptions{Relink: true}, relink); err == nil {
 		t.Fatal("relink conflict did not report partial completion")
 	}
 	if got := readFileString(t, filepath.Join(dst, "SKILL.md")); got != "local edit" {
@@ -130,7 +126,7 @@ func TestLinkedUpdateKeepsOtherProjectPinned(t *testing.T) {
 	r.Write("next.txt", "next version\n")
 	r.CommitAll("v1.1")
 	r.Evolve("v1.1.0", false)
-	if _, err := first.Update(ctx, nil, testIO()); err != nil {
+	if _, err := first.Update(ctx, nil, engine.UpdateOptions{}, testIO()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(installedDir(first.Root, "hello"), "next.txt")); err != nil {
@@ -167,7 +163,7 @@ func TestSyncRepairsAndPruneRemovesDanglingInstallationLink(t *testing.T) {
 	if _, err := eng.Verify(ctx, testIO()); err == nil {
 		t.Error("Verify accepted dangling installation link")
 	}
-	if _, err := eng.Sync(ctx, false, testIO()); err != nil {
+	if _, err := eng.Sync(ctx, engine.SyncOptions{}, testIO()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := eng.Verify(ctx, testIO()); err != nil {

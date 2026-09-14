@@ -11,18 +11,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newWhyCmd() *cobra.Command {
+func newWhyCmd(options *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   i18n.Text("cli.why.use"),
 		Short: i18n.Text("cli.why.short"),
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			eng, err := newEngine()
+			eng, err := options.newEngine()
 			if err != nil {
 				return err
 			}
-			rep, err := eng.Why(cmd.Context(), args[0], newIO(cmd))
-			return errors.Join(err, output(cmd, rep))
+			rep, err := eng.Why(cmd.Context(), args[0], options.newIO(cmd))
+			return errors.Join(err, options.output(cmd, rep))
 		},
 	}
 }

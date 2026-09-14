@@ -18,16 +18,21 @@ import (
 	"github.com/huija/skillmod/internal/filelock"
 	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
+	repoaddr "github.com/huija/skillmod/internal/repo"
 	"github.com/huija/skillmod/internal/resolve"
 )
 
 func vcsKey(repo string) string {
-	return fmt.Sprintf("%x", sha256.Sum256([]byte("git:"+RepoIdentity(repo))))
+	return fmt.Sprintf("%x", sha256.Sum256([]byte("git:"+repoaddr.Identity(repo))))
 }
 
 // openRepo opens one persistent bare repository and holds its cross-process lock.
 // cleanup releases the lock and also removes the root when an ephemeral root was used.
 func (s *Source) openRepo(ctx context.Context, repo string) (dir string, cleanup func(), err error) {
+	repo, err = repoaddr.PersistedTransport(repo)
+	if err != nil {
+		return "", nil, err
+	}
 	root := s.VCSRoot
 	ephemeral := false
 	if root == "" {
@@ -59,7 +64,7 @@ func (s *Source) openRepo(ctx context.Context, repo string) (dir string, cleanup
 		}
 	}
 
-	wantInfo := "git:" + RepoIdentity(repo)
+	wantInfo := "git:" + repoaddr.Identity(repo)
 	info, infoErr := os.ReadFile(dir + ".info")
 	st, dirErr := os.Stat(dir)
 	if infoErr == nil && dirErr == nil && st.IsDir() {
@@ -237,7 +242,7 @@ func repoOrigin(dir string) string {
 	if err != nil {
 		return dir
 	}
-	return strings.TrimPrefix(strings.TrimSpace(string(data)), "git:")
+	return repoaddr.Redact(strings.TrimPrefix(strings.TrimSpace(string(data)), "git:"))
 }
 
 func shortSHA(sha string) string {

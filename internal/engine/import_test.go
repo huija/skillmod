@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/huija/skillmod/internal/engine"
 	"github.com/huija/skillmod/internal/install"
 	"github.com/huija/skillmod/internal/modfile"
 	"github.com/huija/skillmod/internal/testutil"
@@ -620,7 +621,7 @@ func TestInitRecoversMonorepoSnapshotLink(t *testing.T) {
 	if lk.Source != r.URL+"//skills/demo" || lk.Version != "skills/demo/v1.2.0" {
 		t.Errorf("recovered lock = %+v, want exact monorepo path and tag", lk)
 	}
-	if _, err := eng.Sync(ctx, false, testIO()); err != nil {
+	if _, err := eng.Sync(ctx, engine.SyncOptions{}, testIO()); err != nil {
 		t.Errorf("offline Sync after import: %v", err)
 	}
 }

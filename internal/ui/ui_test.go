@@ -6,6 +6,8 @@ package ui
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -18,23 +20,33 @@ import (
 func TestMain(m *testing.M) { testutil.RunMain(m) }
 
 func TestChoose_EOF(t *testing.T) {
-	// EOF must return the final, safest option without spinning; this guards a bug found in smoke testing.
 	c := Interactive(strings.NewReader(""), &bytes.Buffer{})
-	if got := c.Choose("pick", []string{"a", "b", "c"}); got != 2 {
-		t.Errorf("Choose on EOF = %d, want 2", got)
+	if got, err := c.Choose("pick", []string{"a", "b", "c"}); !errors.Is(err, io.EOF) {
+		t.Errorf("Choose on EOF = %d, %v, want io.EOF", got, err)
 	}
 }
 
 func TestConfirm_EOF(t *testing.T) {
 	c := Interactive(strings.NewReader(""), &bytes.Buffer{})
-	if c.Confirm("ok?") {
-		t.Error("Confirm on EOF = true, want false")
+	if got, err := c.Confirm("ok?"); got || !errors.Is(err, io.EOF) {
+		t.Errorf("Confirm on EOF = %t, %v, want false, io.EOF", got, err)
+	}
+}
+
+func TestInteractivePropagatesWriteErrors(t *testing.T) {
+	want := errors.New("writer failed")
+	c := Interactive(strings.NewReader("y\n"), failingWriter{err: want})
+	if _, err := c.Confirm("ok?"); !errors.Is(err, want) {
+		t.Errorf("Confirm write error = %v, want %v", err, want)
+	}
+	if _, err := c.Choose("pick", []string{"a"}); !errors.Is(err, want) {
+		t.Errorf("Choose write error = %v, want %v", err, want)
 	}
 }
 
 func TestChoose_ValidAndRetry(t *testing.T) {
 	c := Interactive(strings.NewReader("x\n2\n"), &bytes.Buffer{})
-	if got := c.Choose("pick", []string{"a", "b"}); got != 1 {
+	if got, err := c.Choose("pick", []string{"a", "b"}); err != nil || got != 1 {
 		t.Errorf("Choose = %d, want 1 after an invalid input followed by a valid one", got)
 	}
 }
@@ -42,8 +54,8 @@ func TestChoose_ValidAndRetry(t *testing.T) {
 func TestConfirm_Yes(t *testing.T) {
 	for _, in := range []string{"y\n", "Y\n", "yes\n", " YES \n"} {
 		c := Interactive(strings.NewReader(in), &bytes.Buffer{})
-		if !c.Confirm("ok?") {
-			t.Errorf("Confirm(%q) = false, want true", in)
+		if got, err := c.Confirm("ok?"); err != nil || !got {
+			t.Errorf("Confirm(%q) = %t, %v, want true, nil", in, got, err)
 		}
 	}
 }
@@ -51,7 +63,7 @@ func TestConfirm_Yes(t *testing.T) {
 func TestChoose_EnglishPrompt(t *testing.T) {
 	var out bytes.Buffer
 	c := Interactive(strings.NewReader("x\n2\n"), &out)
-	if got := c.Choose("pick", []string{"first", "second"}); got != 1 {
+	if got, err := c.Choose("pick", []string{"first", "second"}); err != nil || got != 1 {
 		t.Fatalf("Choose = %d, want 1", got)
 	}
 	if text := out.String(); !strings.Contains(text, "choose [1-2]") || !strings.Contains(text, "invalid choice; try again") {
@@ -85,7 +97,10 @@ func TestChooseMany_HuhTogglesWithSpaceAndConfirmsWithEnter(t *testing.T) {
 		{Label: "third", Description: "third description", Detail: "install third"},
 	}
 
-	got := selector.ChooseMany("pick", options)
+	got, err := selector.ChooseMany("pick", options)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if want := []int{1, 2}; !slices.Equal(got, want) {
 		t.Errorf("ChooseMany(down, space, down, space, enter) = %v, want %v; output = %q", got, want, out.String())
 	}
@@ -106,7 +121,10 @@ func TestChooseMany_HuhKeepsEveryOptionOnOneLine(t *testing.T) {
 	}
 	options := []Option{{Label: "first\nforged line", Description: "hidden"}, {Label: "second"}}
 
-	got := selector.ChooseMany("pick", options)
+	got, err := selector.ChooseMany("pick", options)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if want := []int{0}; !slices.Equal(got, want) {
 		t.Errorf("ChooseMany(space, enter) = %v, want %v; output = %q", got, want, out.String())
 	}
@@ -126,7 +144,10 @@ func TestChooseMany_HuhKeepsExpandedDetailsAfterSubmit(t *testing.T) {
 		Detail:      "skillmod get github.com/acme/first",
 	}}
 
-	got := selector.ChooseMany("pick", options)
+	got, err := selector.ChooseMany("pick", options)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if want := []int{0}; !slices.Equal(got, want) {
 		t.Fatalf("ChooseMany(d, space, enter) = %v, want %v; output = %q", got, want, out.String())
 	}
@@ -148,7 +169,10 @@ func TestChooseMany_HuhUsesArrowKeysWhenTERMIsDumb(t *testing.T) {
 	}
 	options := []Option{{Label: "first"}, {Label: "second"}, {Label: "third"}}
 
-	got := selector.ChooseMany("pick", options)
+	got, err := selector.ChooseMany("pick", options)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if want := []int{0, 1}; !slices.Equal(got, want) {
 		t.Errorf("ChooseMany(right, space, left, space, enter; TERM=dumb) = %v, want %v; output = %q", got, want, out.String())
 	}
@@ -188,3 +212,7 @@ func TestCollapsibleMultiSelectTogglesDetailsAndFollowsCursor(t *testing.T) {
 		t.Errorf("collapsibleMultiSelect.Update(d, down, d) view = %q, want details collapsed", view)
 	}
 }
+
+type failingWriter struct{ err error }
+
+func (w failingWriter) Write([]byte) (int, error) { return 0, w.err }

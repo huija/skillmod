@@ -89,12 +89,14 @@ local = true
 
 ```toml
 # SKILL.lock（工具维护，禁止手改；纯函数，无时间戳）
+schemaversion = 1
+
 [[skill]]
 name = "code-review"
 source = "github.com/acme/agent-skills//code-review"
 version = "code-review/v1.2.0"
 commit = "7f3a9c1e00000000000000000000000000000000"
-dirhash = "h1:4wYq0b..."
+dirhash = "h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 ```
 
 ```bash
@@ -145,7 +147,7 @@ skillmod sync --relink --install-mode=copy  # 转成独立、可编辑的目录
 
 普通 `sync` 保留内容已一致的安装，维持幂等；`--relink` 显式按所选安装方式重装远程条目。两者都遵守本地修改的冲突处理规则，`--yes` 不会强制覆盖冲突；本地条目只登记和校验，不会自动迁移。
 
-`get`、`sync`、`update`、`remove` 在独立操作已完成、但有目标被安全保留时返回退出码 3。JSON 报告提供 `targetResults`，自动化可以区分 `install`、`installed`、`keep`、`skip`、`missing`、`drift` 等动作。远端较新 tag 消失时，`update` 默认拒绝静默降级；明确需要降级时使用 `--allow-downgrade`。
+`get`、`sync`、`update`、`remove` 在独立操作已完成、但有目标被安全保留时返回退出码 3。JSON 顶层 `action` 标识命令（`get`、`init`、`list`、`prune`、`remove`、`sync`、`update`、`verify`、`why`）；每个条目的 `action` 是聚合结果（`conflict`、`drift`、`install`、`installed`、`keep`、`local`、`local-drift`、`matched`、`missing`、`partial`、`prune`、`remove`、`skip`、`stale`、`unlocked`、`unresolved`、`unverifiable`、`update`）。逐目录事实只存在 `targetResults` 中，其 action 为 `drift`、`install`、`installed`、`keep`、`missing`、`remove`、`skip`、`unlocked`、`unverifiable`。远端较新 tag 消失时，`update` 默认拒绝静默降级；明确需要降级时使用 `--allow-downgrade`。
 
 `skillmod remove <名称或别名>` 会在一个可回滚事务中删除匹配的声明和内容未改动的受管安装；本地修改过或无法验证的目录会保留，并报告为部分完成。`skillmod why <名称或别名>` 展示来源、解析版本、commit、dirhash、alias 目录和每个安装目标的状态。
 

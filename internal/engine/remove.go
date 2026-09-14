@@ -8,9 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 
-	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/modfile"
@@ -19,7 +17,8 @@ import (
 // Remove deletes declarations and clean managed installations selected by
 // published name or installation alias. Locally modified installations are
 // kept and reported as partial completion.
-func (e *Engine) Remove(_ context.Context, names []string, io IO) (*Report, error) {
+func (e *Engine) Remove(_ context.Context, names []string, io IO, options ...MutationOptions) (*Report, error) {
+	run := mutationOptions(options)
 	unlock, err := e.lockState()
 	if err != nil {
 		return nil, err
@@ -68,14 +67,14 @@ func (e *Engine) Remove(_ context.Context, names []string, io IO) (*Report, erro
 			newMod.Skills = append(newMod.Skills, skill)
 		}
 	}
-	newLock := &modfile.Lock{}
+	newLock := &modfile.Lock{SchemaVersion: modfile.SchemaVersion}
 	for _, locked := range lock.Skills {
 		if !selected[fsutil.FoldKey(locked.InstallDir())] {
 			newLock.Skills = append(newLock.Skills, locked)
 		}
 	}
 
-	rep := &Report{Action: ActionRemove}
+	rep := &Report{Action: CommandRemove}
 	var deletable []string
 	partial := false
 	for _, skill := range m.Skills {
@@ -87,25 +86,24 @@ func (e *Engine) Remove(_ context.Context, names []string, io IO) (*Report, erro
 		entryPartial := false
 		for _, adapter := range adapters {
 			dst := adapterDir(adapter, e.Root, skill.DirName())
-			hash, hashErr := dirhash.HashDir(dst)
-			switch {
-			case errors.Is(hashErr, fs.ErrNotExist):
-				setTargetResult(&entry, dst, ActionMissing)
-			case hashErr != nil:
+			target := inspectTarget(dst, locked)
+			switch target.Action {
+			case ActionMissing:
+			case ActionUnverifiable:
 				partial = true
 				entryPartial = true
-				setTargetResult(&entry, dst, ActionKeep)
-				entry.Note = appendNote(entry.Note, i18n.Format("engine.remove.could_verify_kept_installed", dst, hashErr))
-			case locked == nil || hash != locked.Dirhash:
+				target.Action = ActionKeep
+				entry.Note = appendNote(entry.Note, i18n.Format("engine.remove.could_verify_kept_installed", dst, target.Note))
+			case ActionUnlocked, ActionDrift:
 				partial = true
 				entryPartial = true
-				setTargetResult(&entry, dst, ActionKeep)
+				target.Action = ActionKeep
 				entry.Note = appendNote(entry.Note, i18n.Text("engine.remove.locally_modified_kept")+dst)
-			default:
+			case ActionInstalled:
 				deletable = append(deletable, dst)
-				entry.Targets = append(entry.Targets, dst)
-				setTargetResult(&entry, dst, ActionRemove)
+				target.Action = ActionRemove
 			}
+			entry.TargetResults = append(entry.TargetResults, target)
 		}
 		if entryPartial {
 			entry.Action = ActionPartial
@@ -114,19 +112,23 @@ func (e *Engine) Remove(_ context.Context, names []string, io IO) (*Report, erro
 	}
 
 	if len(deletable) > 0 {
-		io.printf(i18n.Text("engine.prune.following_directories_deleted"))
+		if err := io.printf(i18n.Text("engine.prune.following_directories_deleted")); err != nil {
+			return rep, err
+		}
 		for _, dir := range deletable {
-			io.printf("  %s", dir)
+			if err := io.printf("  %s", dir); err != nil {
+				return rep, err
+			}
 		}
 	}
-	if io.DryRun {
+	if run.DryRun {
 		rep.Notes = append(rep.Notes, i18n.Text("engine.prune.dry_run_files_deleted"))
 		if partial {
 			return rep, &PartialError{Report: rep}
 		}
 		return rep, nil
 	}
-	if err := confirmRemovals(io, deletable); err != nil {
+	if err := confirmRemovals(io, deletable, run.DryRun); err != nil {
 		return nil, err
 	}
 	finalize, err := applyRemovals(deletable)
@@ -139,9 +141,9 @@ func (e *Engine) Remove(_ context.Context, names []string, io IO) (*Report, erro
 	if err := finalize(true); err != nil {
 		return nil, err
 	}
-	io.printf(i18n.Format("engine.remove.removed_declarations_clean", len(rep.Entries), len(deletable)))
+	writeErr := io.printf(i18n.Format("engine.remove.removed_declarations_clean", len(rep.Entries), len(deletable)))
 	if partial {
-		return rep, &PartialError{Report: rep}
+		return rep, errors.Join(writeErr, &PartialError{Report: rep})
 	}
-	return rep, nil
+	return rep, writeErr
 }

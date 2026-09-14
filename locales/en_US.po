@@ -186,6 +186,10 @@ msgstr "installation directory contains a symlink and cannot be verified: %"
 "s"
 
 #, go-format
+msgid "dirhash.invalid_h1_digest"
+msgstr "dirhash is not a base64-encoded SHA-256 h1 digest: %q"
+
+#, go-format
 msgid "dirhash.missing_h1_prefix"
 msgstr "dirhash is missing the h1: prefix: %q"
 
@@ -213,6 +217,9 @@ msgstr "downloading repository snapshot from %s"
 
 msgid "engine.drift_detected"
 msgstr "drift detected"
+
+msgid "engine.dry_run_files_written"
+msgstr "dry-run: no files were written"
 
 msgid "engine.fetching_git_objects"
 msgstr "fetching Git objects"
@@ -249,8 +256,9 @@ msgstr "no description"
 msgid "engine.get.discovering_skills"
 msgstr "discovering skills in the repository"
 
-msgid "engine.get.dry_run_files_written"
-msgstr "dry-run: no files were written"
+#, go-format
+msgid "engine.get.dry_run_entry"
+msgstr "dry-run: %s %s (%s)"
 
 #, go-format
 msgid "engine.get.installed_skill_mod_skill"
@@ -402,6 +410,14 @@ msgstr "%s (unreadable or broken directory link: %v)"
 msgid "engine.init.unresolved_sources"
 msgstr "%d skills had known but unresolved sources; those entries were reta"
 "ined as local baselines and can be retried later"
+
+#, go-format
+msgid "engine.inspect.latest_lock"
+msgstr "manifest tracks latest; lock currently resolves to %s"
+
+#, go-format
+msgid "engine.inspect.version_mismatch"
+msgstr "manifest requests %s; lock contains %s—run skillmod sync"
 
 #, go-format
 msgid "engine.install_rolling_back_changes"
@@ -684,6 +700,12 @@ msgstr "%s: %s (%s)"
 msgid "engine.update.entry_remote_has_default"
 msgstr "entry %s: remote has no default branch"
 
+msgid "engine.update.local_entry_skipped"
+msgstr "local entries have no remote version to update"
+
+msgid "engine.update.no_remote_entries"
+msgstr "nothing to update: SKILL.mod has no remote entries"
+
 #, go-format
 msgid "engine.update.remote_latest_refusing"
 msgstr "remote latest is %s; refusing to downgrade from %s without --allow-"
@@ -744,6 +766,9 @@ msgstr "local"
 #, go-format
 msgid "engine.why.why"
 msgstr "  %s: %s"
+
+msgid "engine.write_output"
+msgstr "write command output"
 
 #, go-format
 msgid "fsutil.commit_disk"
@@ -842,8 +867,16 @@ msgstr "SKILL.lock declares skill %q with an invalid installation directory"
 ": %w"
 
 #, go-format
+msgid "modfile.lock_invalid_dirhash"
+msgstr "SKILL.lock declares skill %q with an invalid dirhash: %w"
+
+#, go-format
 msgid "modfile.lock_invalid_name"
 msgstr "SKILL.lock declares skill %q with an invalid name: %w"
+
+#, go-format
+msgid "modfile.lock_invalid_source"
+msgstr "SKILL.lock declares skill %q with an invalid source: %w"
 
 #, go-format
 msgid "modfile.lock_local_with_remote_version"
@@ -851,12 +884,12 @@ msgstr "SKILL.lock declares local skill %q with remote-only version or comm"
 "it fields"
 
 #, go-format
-msgid "modfile.lock_missing_dirhash"
-msgstr "SKILL.lock declares skill %q without a dirhash"
-
-#, go-format
 msgid "modfile.lock_missing_version"
 msgstr "SKILL.lock declares remote skill %q without a version"
+
+#, go-format
+msgid "modfile.lock_unsupported_schemaversion"
+msgstr "SKILL.lock schemaversion=%d is unsupported; expected %d"
 
 #, go-format
 msgid "modfile.mod_case_conflict"
@@ -876,6 +909,19 @@ msgid "modfile.mod_invalid_name"
 msgstr "SKILL.mod declares skill %q with an invalid name: %w"
 
 #, go-format
+msgid "modfile.mod_invalid_source"
+msgstr "SKILL.mod declares skill %q with an invalid source: %w"
+
+#, go-format
+msgid "modfile.mod_local_with_remote_fields"
+msgstr "SKILL.mod declares local skill %q with remote-only source or versio"
+"n fields"
+
+#, go-format
+msgid "modfile.mod_remote_missing_source"
+msgstr "SKILL.mod declares non-local skill %q without a source"
+
+#, go-format
 msgid "modfile.mod_unsupported_schemaversion"
 msgstr "SKILL.mod schemaversion=%d is unsupported; expected %d"
 
@@ -890,6 +936,13 @@ msgstr "parse SKILL.mod: %w"
 #, go-format
 msgid "modfile.restore_manifest_state"
 msgstr "restore manifest state: %w"
+
+msgid "modfile.source_contains_version"
+msgstr "source must not contain an @version suffix; use the version field"
+
+msgid "repo.repository_address_unsafe"
+msgstr "repository address must not contain embedded credentials, query par"
+"ameters, fragments, control characters, or an unsupported transport"
 
 #, go-format
 msgid "resolve.branch_not_lockable"
@@ -946,6 +999,9 @@ msgstr "failed to read blob %s header: %w"
 
 msgid "source.fetch.frontmatter_has_name_field"
 msgstr "frontmatter has no name field"
+
+msgid "source.fetch.invalid_frontmatter"
+msgstr "invalid YAML frontmatter: "
 
 #, go-format
 msgid "source.fetch.malformed_cat_file_batch"
@@ -1083,6 +1139,9 @@ msgstr "resolution cache index identity mismatch: %s"
 #, go-format
 msgid "store.metadata_identity_mismatch"
 msgstr "version metadata repository identity mismatch: %s"
+
+msgid "store.metadata_transport_mismatch"
+msgstr "repository metadata contains an unsafe or mismatched transport"
 
 msgid "store.metadata_version_mismatch"
 msgstr "repository/version in version metadata does not match the directory"

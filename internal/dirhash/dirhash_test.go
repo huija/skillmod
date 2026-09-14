@@ -114,10 +114,12 @@ func TestHashDirRejectsEmptyMissingAndSymlink(t *testing.T) {
 }
 
 func TestValidate(t *testing.T) {
-	if err := Validate("h1:anything"); err != nil {
+	if err := Validate(testutil.DirHash("anything")); err != nil {
 		t.Fatalf("valid hash rejected: %v", err)
 	}
-	if err := Validate("sha256:anything"); err == nil || !strings.Contains(err.Error(), "h1:") {
-		t.Fatalf("invalid hash error = %v", err)
+	for _, hash := range []string{"sha256:anything", "h1:", "h1:not-base64", "h1:YQ=="} {
+		if err := Validate(hash); err == nil {
+			t.Errorf("Validate(%q) = nil, want error", hash)
+		}
 	}
 }

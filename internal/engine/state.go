@@ -93,13 +93,17 @@ func applyRemovals(paths []string) (finalize func(bool) error, err error) {
 	}, nil
 }
 
-func confirmRemovals(io IO, paths []string) error {
-	if len(paths) == 0 || io.DryRun {
+func confirmRemovals(io IO, paths []string, dryRun bool) error {
+	if len(paths) == 0 || dryRun {
 		return nil
 	}
 	ok := io.Yes
 	if !ok && io.Confirm != nil {
-		ok = io.Confirm.Confirm(i18n.Format("engine.state.delete_directories_listed", len(paths)))
+		var err error
+		ok, err = io.Confirm.Confirm(i18n.Format("engine.state.delete_directories_listed", len(paths)))
+		if err != nil {
+			return err
+		}
 	}
 	if !ok && io.Confirm == nil {
 		return fmt.Errorf("%s", i18n.Text("engine.state.deletion_list_requires"))

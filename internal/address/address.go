@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/huija/skillmod/internal/i18n"
+	repoaddr "github.com/huija/skillmod/internal/repo"
 )
 
 // Address is a parsed skill address.
@@ -42,6 +43,12 @@ func Parse(raw string) (*Address, error) {
 	if raw == "" {
 		return nil, fmt.Errorf("%s", i18n.Text("address.empty_repository"))
 	}
+	// Query parameters and fragments are never part of the skill address
+	// grammar. Reject them before splitting //subdir so they cannot be
+	// misclassified as a path and persisted with credentials.
+	if strings.ContainsAny(raw, "\r\n\x00?#") {
+		return nil, fmt.Errorf("%s", i18n.Text("repo.repository_address_unsafe"))
+	}
 
 	base, ref, err := splitRef(raw)
 	if err != nil {
@@ -53,12 +60,16 @@ func Parse(raw string) (*Address, error) {
 		return nil, err
 	}
 	if repo == "" {
-		return nil, fmt.Errorf(i18n.Text("address.missing_repository_address"), raw)
+		return nil, fmt.Errorf(i18n.Text("address.missing_repository_address"), repoaddr.Redact(raw))
 	}
 	if strings.ContainsAny(repo, " \t") {
-		return nil, fmt.Errorf(i18n.Text("address.repository_whitespace"), repo)
+		return nil, fmt.Errorf(i18n.Text("address.repository_whitespace"), repoaddr.Redact(repo))
 	}
 	repo = normalizeRepo(repo)
+	repo, err = repoaddr.PersistedTransport(repo)
+	if err != nil {
+		return nil, err
+	}
 
 	if subdir != "" {
 		if subdir, err = cleanSubdir(subdir); err != nil {
@@ -78,7 +89,7 @@ func splitRef(s string) (base, ref string, err error) {
 	}
 	suffix := s[i+1:]
 	if suffix == "" {
-		return "", "", fmt.Errorf(i18n.Text("address.missing_version_reference"), s)
+		return "", "", fmt.Errorf(i18n.Text("address.missing_version_reference"), repoaddr.Redact(s))
 	}
 	if strings.ContainsAny(suffix, ":/") {
 		return s, "", nil // scp-like form with no ref
@@ -105,7 +116,7 @@ func splitSubdir(s string) (repo, subdir string, err error) {
 	}
 	repo, subdir = s[:off+rel], s[off+rel+2:]
 	if subdir == "" {
-		return "", "", fmt.Errorf(i18n.Text("address.missing_subdirectory"), s)
+		return "", "", fmt.Errorf(i18n.Text("address.missing_subdirectory"), repoaddr.Redact(s))
 	}
 	return repo, subdir, nil
 }

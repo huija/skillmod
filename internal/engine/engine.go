@@ -26,6 +26,7 @@ import (
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/install"
 	"github.com/huija/skillmod/internal/modfile"
+	repoaddr "github.com/huija/skillmod/internal/repo"
 	"github.com/huija/skillmod/internal/resolve"
 	"github.com/huija/skillmod/internal/source"
 	"github.com/huija/skillmod/internal/store"
@@ -44,19 +45,33 @@ type Engine struct {
 
 // IO contains the input, output, and confirmation channels for one command run.
 type IO struct {
-	Out            io.Writer
-	Confirm        ui.Confirmer // nil means non-interactive and applies safe conflict defaults
-	Progress       ui.Progress  // nil disables interactive activity updates
-	Yes            bool         // skip confirmation in CI
-	Relink         bool         // explicitly convert matching remote installations using the configured mode
-	AllowDowngrade bool         // permit update to select a lower remaining semantic version
-	DryRun         bool         // report the plan without writing files
+	Out      io.Writer
+	Confirm  ui.Confirmer // nil means non-interactive and applies safe conflict defaults
+	Progress ui.Progress  // nil disables interactive activity updates
+	Yes      bool         // skip confirmation in CI
 }
 
-func (io IO) printf(format string, args ...any) {
-	if io.Out != nil {
-		_, _ = fmt.Fprintf(io.Out, format+"\n", args...)
+// MutationOptions controls behavior shared by commands that can write state.
+// It is separate from IO so execution policy is not coupled to transport.
+type MutationOptions struct {
+	DryRun bool
+}
+
+func mutationOptions(options []MutationOptions) MutationOptions {
+	if len(options) == 0 {
+		return MutationOptions{}
 	}
+	return options[0]
+}
+
+func (io IO) printf(format string, args ...any) error {
+	if io.Out == nil {
+		return nil
+	}
+	if _, err := fmt.Fprintf(io.Out, format+"\n", args...); err != nil {
+		return fmt.Errorf("%s: %w", i18n.Text("engine.write_output"), err)
+	}
+	return nil
 }
 
 func (io IO) setProgress(messages ...string) {
@@ -71,12 +86,12 @@ func (io IO) stopProgress() {
 	}
 }
 
-// DriftError reports drift detected by verify and maps to CLI exit code 2 for AC-12.
+// DriftError reports drift detected by verify and maps to CLI exit code 2.
 type DriftError struct{ Report *Report }
 
 func (e *DriftError) Error() string { return i18n.Text("engine.drift_detected") }
 
-// TamperError reports downloaded content whose dirhash differs from the lock (AC-3).
+// TamperError reports downloaded content whose dirhash differs from the lock.
 type TamperError struct {
 	Name, Want, Got string
 }
@@ -85,7 +100,7 @@ func (e *TamperError) Error() string {
 	return i18n.Format("engine.remote_contents_mismatch", e.Name, e.Want, e.Got)
 }
 
-// NameConflictError reports the same name referring to different sources (AC-8).
+// NameConflictError reports the same name referring to different sources.
 type NameConflictError struct {
 	Name, Existing, Incoming string
 	// OtherName is set when the collision is between two spellings that differ
@@ -150,7 +165,7 @@ func (e *Engine) loadModOrEmpty() (*modfile.Mod, error) {
 func (e *Engine) loadLock() (*modfile.Lock, error) {
 	l, err := modfile.LoadLock(e.manifestRoot())
 	if os.IsNotExist(err) {
-		return &modfile.Lock{}, nil
+		return &modfile.Lock{SchemaVersion: modfile.SchemaVersion}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%w\nAdvice: %s", err, i18n.Text("engine.skill_lock_tool_maintained"))
@@ -196,7 +211,7 @@ func sameSource(a, b string) bool {
 	return sameRemoteSource(a, b)
 }
 
-// saveLockIfChanged writes SKILL.lock only when content changes, avoiding writes when already converged (AC-2).
+// saveLockIfChanged writes SKILL.lock only when content changes, avoiding writes when already converged.
 func (e *Engine) saveLockIfChanged(lock *modfile.Lock) error {
 	newBytes, err := modfile.MarshalLock(lock)
 	if err != nil {
@@ -293,7 +308,7 @@ func (m *operationMemo) setProgress(messages ...string) {
 }
 
 func (e *Engine) refs(ctx context.Context, repo string, memo *operationMemo) (*resolve.Refs, error) {
-	key := source.RepoIdentity(repo)
+	key := repoaddr.Identity(repo)
 	if result, ok := memo.refs[key]; ok {
 		return result.refs, result.err
 	}
@@ -375,7 +390,7 @@ func validateSkillPaths(dir, subdir string) error {
 }
 
 func (e *Engine) snapshot(repo, version string, memo *operationMemo) (*store.Snapshot, error) {
-	key := snapshotKey{repo: source.RepoIdentity(repo), version: version}
+	key := snapshotKey{repo: repoaddr.Identity(repo), version: version}
 	if snap, ok := memo.snapshots[key]; ok {
 		return snap, nil
 	}
@@ -410,7 +425,7 @@ func (e *Engine) snapshotMaterialized(repo, subdir, version, commit, wantHash st
 	h := snap.Info.Treehash
 	if subdir != "" {
 		memo.setProgress(
-			i18n.Format("engine.verifying_skill_content", source.RepoIdentity(repo)),
+			i18n.Format("engine.verifying_skill_content", repoaddr.Identity(repo)),
 			i18n.Text("engine.hashing_selected_skill"),
 			i18n.Text("engine.checking_cached_content"),
 		)
@@ -429,7 +444,7 @@ func (e *Engine) snapshotMaterialized(repo, subdir, version, commit, wantHash st
 }
 
 // materialize ensures resolved content is stored in a persistent version snapshot and returns its location.
-// A non-empty wantHash requires an exact match and reports tampering on mismatch (AC-3).
+// A non-empty wantHash requires an exact match and reports tampering on mismatch.
 func (e *Engine) materialize(ctx context.Context, repo, subdir string, res resolve.Resolution, wantHash string, memo *operationMemo) (*materialized, error) {
 	// A resolved tag can directly address an immutable snapshot by source and version.
 	if res.Version != "" {
@@ -454,7 +469,7 @@ func (e *Engine) materialize(ctx context.Context, repo, subdir string, res resol
 	}
 
 	memo.setProgress(
-		i18n.Format("engine.downloading_repository", source.RepoIdentity(repo)),
+		i18n.Format("engine.downloading_repository", repoaddr.Identity(repo)),
 		i18n.Text("engine.fetching_git_objects"),
 		i18n.Text("engine.reading_repository_contents"),
 	)
@@ -477,7 +492,7 @@ func (e *Engine) materialize(ctx context.Context, repo, subdir string, res resol
 	if err != nil {
 		return nil, err
 	}
-	memo.snapshots[snapshotKey{repo: source.RepoIdentity(repo), version: version}] = snap
+	memo.snapshots[snapshotKey{repo: repoaddr.Identity(repo), version: version}] = snap
 	skillDir, err := snapshotSkillDir(snap, subdir)
 	if err != nil {
 		return nil, err
@@ -502,7 +517,7 @@ func (e *Engine) materialize(ctx context.Context, repo, subdir string, res resol
 	return &materialized{version, res.Commit, h, skillDir, ""}, nil
 }
 
-// resolveAndFetch resolves a ref and materializes its content, falling back to the resolution index on network failure (PRD offline hit).
+// resolveAndFetch resolves a ref and materializes its content, falling back to the resolution index on network failure.
 func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, memo *operationMemo) (*materialized, error) {
 	// Prefer persistent resolution records and immutable snapshots for exact versions and commits.
 	// update owns remote refreshes, so repeated get operations avoid the network like the Go module cache.
@@ -621,15 +636,15 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 	if err != nil {
 		return nil, err
 	}
-	// Index the original ref so an offline get of the same ref hits directly (PRD §3.2 error table).
+	// Index the original ref so an offline get of the same ref hits directly.
 	if err := e.Store.PutResolved(repo, subdir, ref, store.ResolveEntry{Version: mat.version, Commit: mat.commit, Dirhash: mat.dirhash}); err != nil {
 		return nil, err
 	}
 	return mat, nil
 }
 
-// materializeLocked materializes content from an existing authoritative lock entry (AC-10):
-// it skips ls-remote and uses the lock's commit and dirhash, requiring the computed hash to match (AC-3).
+// materializeLocked materializes content from an existing authoritative lock entry:
+// it skips ls-remote and uses the lock's commit and dirhash, requiring the computed hash to match.
 func (e *Engine) materializeLocked(ctx context.Context, repo, subdir string, lk modfile.LockSkill, memo *operationMemo) (string, error) {
 	if mat, ok, err := e.snapshotMaterialized(repo, subdir, lk.Version, lk.Commit, lk.Dirhash, memo); err != nil {
 		return "", err
@@ -641,7 +656,7 @@ func (e *Engine) materializeLocked(ctx context.Context, repo, subdir string, lk 
 		fetchRef = "refs/tags/" + lk.Version
 	}
 	memo.setProgress(
-		i18n.Format("engine.downloading_repository", source.RepoIdentity(repo)),
+		i18n.Format("engine.downloading_repository", repoaddr.Identity(repo)),
 		i18n.Text("engine.fetching_git_objects"),
 		i18n.Text("engine.reading_repository_contents"),
 	)
@@ -660,7 +675,7 @@ func (e *Engine) materializeLocked(ctx context.Context, repo, subdir string, lk 
 	if err != nil {
 		return "", err
 	}
-	memo.snapshots[snapshotKey{repo: source.RepoIdentity(repo), version: lk.Version}] = snap
+	memo.snapshots[snapshotKey{repo: repoaddr.Identity(repo), version: lk.Version}] = snap
 	skillDir, err := snapshotSkillDir(snap, subdir)
 	if err != nil {
 		return "", err

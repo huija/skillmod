@@ -21,14 +21,16 @@ import (
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/install"
 	"github.com/huija/skillmod/internal/modfile"
+	repoaddr "github.com/huija/skillmod/internal/repo"
 	"github.com/huija/skillmod/internal/resolve"
 	"github.com/huija/skillmod/internal/source"
 	"github.com/huija/skillmod/internal/store"
 )
 
-// Init implements skillmod init by scanning existing skills and drafting SKILL.mod (PRD §3.1).
+// Init implements skillmod init by scanning existing skills and drafting SKILL.mod.
 // It only reads existing skill files, refuses to run when SKILL.mod exists, and backs up and rebuilds with --force.
-func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
+func (e *Engine) Init(ctx context.Context, force bool, io IO, options ...MutationOptions) (*Report, error) {
+	run := mutationOptions(options)
 	unlock, err := e.lockState()
 	if err != nil {
 		return nil, err
@@ -86,7 +88,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 			s := &scanned{dirName: d.Name(), srcDirs: []string{dir}}
 			name, err := source.SkillNameFromDir(dir)
 			if err != nil {
-				// Use the directory name as specified by the PRD §3.1 error table,
+				// Use the directory name so an invalid SKILL.md can still be identified,
 				// but only when it can actually serve as an installation directory.
 				if nameErr := fsutil.ValidName(d.Name()); nameErr != nil {
 					skipped = append(skipped, i18n.Format("engine.init.init", dir, nameErr))
@@ -142,7 +144,9 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 	for _, repo := range e.Config.KnownSources {
 		refs, err := e.refs(ctx, repo, memo)
 		if err != nil {
-			io.printf(i18n.Text("engine.init.notice_failed_match_source"), repo, err)
+			if writeErr := io.printf(i18n.Text("engine.init.notice_failed_match_source"), repoaddr.Redact(repo), err); writeErr != nil {
+				return nil, writeErr
+			}
 			continue
 		}
 		sources = append(sources, srcRefs{repo, refs})
@@ -159,7 +163,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 	if err != nil {
 		return nil, err
 	}
-	rep := &Report{Action: "init"}
+	rep := &Report{Action: CommandInit}
 	if legacyErr != nil {
 		rep.Notes = append(rep.Notes, legacyErr.Error())
 	}
@@ -218,16 +222,22 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 			matched, matchedLock, err = importer.match(rctx, previous, name, alias, s.hash)
 			cancel()
 			if err != nil {
-				entry.Action = "unresolved"
-				entry.Source = previous.Source
+				entry.Action = ActionUnresolved
+				// A malformed legacy record can contain credentials. Keep the
+				// diagnostic useful without echoing its raw source into reports.
+				entry.Source = repoaddr.Redact(previous.Source)
 				if repo, subdir, locationErr := previous.location(); locationErr == nil {
-					entry.Source = source.RepoIdentity(repo)
+					entry.Source = repo
 					if subdir != "" {
 						entry.Source += subdirSuffix(subdir)
 					}
 				}
 				entry.Note = appendNote(entry.Note, err.Error())
-				entry.Targets = append([]string(nil), s.srcDirs...)
+				for _, dir := range s.srcDirs {
+					entry.TargetResults = append(entry.TargetResults, TargetReport{
+						Path: dir, Action: ActionUnverifiable, Note: err.Error(),
+					})
+				}
 				// Preserve a usable declaration and baseline even when the old
 				// installer record cannot be verified today. The source is kept in
 				// the report so the user can retry or repair it later; treating this
@@ -283,7 +293,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 			upsertLock(lock, *matchedLock)
 			entry.Source = matched.Source
 			entry.Version = matched.Version
-			entry.Action = "matched"
+			entry.Action = ActionMatched
 			if identifyErr != nil {
 				// A legacy record or known-source match supersedes a corrupt
 				// snapshot provenance lookup; do not report the intermediate
@@ -295,10 +305,10 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 			}
 			m.Skills = append(m.Skills, *matched)
 		} else {
-			// For a local entry, record its name and baseline content dirhash (PRD §3.1 rule 2).
+			// For a local entry, record its name and baseline content dirhash.
 			m.Skills = append(m.Skills, modfile.ModSkill{Name: name, Alias: alias, Local: true})
 			upsertLock(lock, modfile.LockSkill{Name: name, Dirhash: s.hash, Dir: alias})
-			entry.Action = "local"
+			entry.Action = ActionLocal
 			if ambiguity != "" {
 				entry.Note = appendNote(entry.Note, ambiguity)
 			} else if !recorded && entry.Note == "" {
@@ -327,16 +337,22 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 		if entry.Version != "" {
 			summary += " " + entry.Version
 		}
-		io.printf("  %s", summary)
+		if err := io.printf("  %s", summary); err != nil {
+			return rep, err
+		}
 		if entry.Note != "" {
-			io.printf("    %s", entry.Note)
+			if err := io.printf("    %s", entry.Note); err != nil {
+				return rep, err
+			}
 		}
 	}
 	for _, note := range rep.Notes {
-		io.printf("%s", note)
+		if err := io.printf("%s", note); err != nil {
+			return rep, err
+		}
 	}
 
-	// Confirm each entry individually as required by the PRD interaction flow.
+	// Confirm each entry individually so users can reject uncertain provenance.
 	if !io.Yes && io.Confirm == nil {
 		rep.Notes = append(rep.Notes, i18n.Text("engine.init.confirmed_non_interactive"))
 		return rep, fmt.Errorf("%s", i18n.Text("engine.init.init_requires_confirmation"))
@@ -345,7 +361,11 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 		var kept []modfile.ModSkill
 		var keptEntries []EntryReport
 		for i, sk := range m.Skills {
-			if io.Confirm.Confirm(i18n.Format("engine.init.accept_entry", sk.Name, rep.Entries[i].Action)) {
+			confirmed, err := io.Confirm.Confirm(i18n.Format("engine.init.accept_entry", sk.Name, rep.Entries[i].Action))
+			if err != nil {
+				return nil, err
+			}
+			if confirmed {
 				kept = append(kept, sk)
 				keptEntries = append(keptEntries, rep.Entries[i])
 			}
@@ -366,8 +386,8 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 		lock.Skills = keptLock
 	}
 
-	if io.DryRun {
-		rep.Notes = append(rep.Notes, i18n.Text("engine.get.dry_run_files_written"))
+	if run.DryRun {
+		rep.Notes = append(rep.Notes, i18n.Text("engine.dry_run_files_written"))
 		return rep, nil
 	}
 	// The backup happens at the write phase so --dry-run never overwrites it.
@@ -379,9 +399,10 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO) (*Report, error) {
 	if err := e.saveState(m, lock); err != nil {
 		return nil, err
 	}
-	io.printf(i18n.Text("engine.init.generated_entries"), modPath, len(m.Skills))
-	io.printf(i18n.Text("engine.init.next_run_skillmod_sync"))
-	return rep, nil
+	if err := io.printf(i18n.Text("engine.init.generated_entries"), modPath, len(m.Skills)); err != nil {
+		return rep, err
+	}
+	return rep, io.printf(i18n.Text("engine.init.next_run_skillmod_sync"))
 }
 
 func hasPrefixTag(refs *resolve.Refs, prefix string) bool {

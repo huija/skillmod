@@ -6,47 +6,73 @@ package engine
 
 import "github.com/huija/skillmod/internal/i18n"
 
-// Action is a stable, machine-readable command or entry outcome.
-type Action string
+// Command is the stable machine-readable command that produced a report.
+type Command string
+
+// EntryStatus is the stable machine-readable outcome for one declaration.
+type EntryStatus string
+
+// TargetStatus is the stable machine-readable outcome for one installation directory.
+type TargetStatus string
 
 const (
-	ActionConflict     Action = "conflict"
-	ActionDrift        Action = "drift"
-	ActionInstall      Action = "install"
-	ActionInstalled    Action = "installed"
-	ActionKeep         Action = "keep"
-	ActionLocal        Action = "local"
-	ActionMissing      Action = "missing"
-	ActionPartial      Action = "partial"
-	ActionRemove       Action = "remove"
-	ActionSkip         Action = "skip"
-	ActionUnlocked     Action = "unlocked"
-	ActionUnverifiable Action = "unverifiable"
+	CommandGet    Command = "get"
+	CommandInit   Command = "init"
+	CommandList   Command = "list"
+	CommandPrune  Command = "prune"
+	CommandRemove Command = "remove"
+	CommandSync   Command = "sync"
+	CommandUpdate Command = "update"
+	CommandVerify Command = "verify"
+	CommandWhy    Command = "why"
+
+	ActionConflict     = "conflict"
+	ActionDrift        = "drift"
+	ActionInstall      = "install"
+	ActionInstalled    = "installed"
+	ActionKeep         = "keep"
+	ActionLocal        = "local"
+	ActionLocalDrift   = "local-drift"
+	ActionMatched      = "matched"
+	ActionMissing      = "missing"
+	ActionPartial      = "partial"
+	ActionPrune        = "prune"
+	ActionRemove       = "remove"
+	ActionSkip         = "skip"
+	ActionStale        = "stale"
+	ActionUnlocked     = "unlocked"
+	ActionUnresolved   = "unresolved"
+	ActionUnverifiable = "unverifiable"
+	ActionUpdate       = "update"
 )
 
 // TargetReport records one installation directory's outcome.
 type TargetReport struct {
-	Path   string `json:"path"`
-	Action Action `json:"action"`
+	Path   string       `json:"path"`
+	Action TargetStatus `json:"action"`
+	Note   string       `json:"note,omitempty"`
 }
 
 // EntryReport is one entry's result and the structured unit emitted by --json.
 type EntryReport struct {
-	Name          string         `json:"name"`
-	Source        string         `json:"source,omitempty"`
-	Action        Action         `json:"action"`
-	Version       string         `json:"version,omitempty"`
-	Commit        string         `json:"commit,omitempty"`
-	Dirhash       string         `json:"dirhash,omitempty"`
-	Directory     string         `json:"directory,omitempty"`
-	Note          string         `json:"note,omitempty"`
-	Targets       []string       `json:"targets,omitempty"`
-	TargetResults []TargetReport `json:"targetResults,omitempty"`
+	Name    string      `json:"name"`
+	Source  string      `json:"source,omitempty"`
+	Local   bool        `json:"local,omitempty"`
+	Action  EntryStatus `json:"action"`
+	Version string      `json:"version,omitempty"`
+	// RequestedVersion is present for remote inspection entries and contains
+	// the exact SKILL.mod value. An empty value means the entry tracks latest.
+	RequestedVersion *string        `json:"requestedVersion,omitempty"`
+	Commit           string         `json:"commit,omitempty"`
+	Dirhash          string         `json:"dirhash,omitempty"`
+	Directory        string         `json:"directory,omitempty"`
+	Note             string         `json:"note,omitempty"`
+	TargetResults    []TargetReport `json:"targetResults,omitempty"`
 }
 
 // Report is the structured result of a command.
 type Report struct {
-	Action  Action        `json:"action"`
+	Action  Command       `json:"action"`
 	Entries []EntryReport `json:"entries"`
 	Notes   []string      `json:"notes,omitempty"`
 }
@@ -59,7 +85,7 @@ func (e *PartialError) Error() string {
 	return i18n.Text("engine.report.completed_partially")
 }
 
-func setTargetResult(entry *EntryReport, path string, action Action) {
+func setTargetResult(entry *EntryReport, path string, action TargetStatus) {
 	for i := range entry.TargetResults {
 		if entry.TargetResults[i].Path == path {
 			entry.TargetResults[i].Action = action
@@ -79,19 +105,31 @@ func appendNote(existing, note string) string {
 	return existing + "; " + note
 }
 
+func printReportNotes(rep *Report, io IO) error {
+	for _, note := range rep.Notes {
+		if err := io.printf("%s", note); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // mergeInspectionStatus retains the most actionable aggregate status when a
 // skill is installed into more than one adapter directory. It keeps results
 // independent of adapter order while targetResults preserves every detail.
-func mergeInspectionStatus(current, next Action) Action {
-	if inspectionSeverity(next) > inspectionSeverity(current) {
-		return next
+func mergeInspectionStatus(current EntryStatus, next TargetStatus) EntryStatus {
+	candidate := EntryStatus(next)
+	if inspectionSeverity(candidate) > inspectionSeverity(current) {
+		return candidate
 	}
 	return current
 }
 
-func inspectionSeverity(action Action) int {
+func inspectionSeverity(action EntryStatus) int {
 	switch action {
-	case ActionDrift, ActionUnverifiable:
+	case ActionUnverifiable:
+		return 4
+	case ActionDrift, ActionLocalDrift:
 		return 3
 	case ActionMissing:
 		return 2

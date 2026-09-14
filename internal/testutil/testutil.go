@@ -6,6 +6,8 @@
 package testutil
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"net/url"
 	"os"
 	"os/exec"
@@ -16,6 +18,13 @@ import (
 
 	"github.com/huija/skillmod/internal/i18n"
 )
+
+// DirHash returns a structurally valid h1 digest for fixtures that do not need
+// to hash an actual directory.
+func DirHash(seed string) string {
+	sum := sha256.Sum256([]byte(seed))
+	return "h1:" + base64.StdEncoding.EncodeToString(sum[:])
+}
 
 // RunMain runs a package's tests with a deterministic English locale.
 // Packages that explicitly test locale selection should not use this helper.

@@ -6,6 +6,7 @@ package engine
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -19,6 +20,18 @@ import (
 	"github.com/huija/skillmod/internal/source"
 	"github.com/huija/skillmod/internal/store"
 )
+
+func TestIOPrintfPropagatesWriteError(t *testing.T) {
+	want := errors.New("writer failed")
+	err := (IO{Out: failingWriter{err: want}}).printf("result: %s", "done")
+	if !errors.Is(err, want) {
+		t.Fatalf("printf error = %v, want wrapped %v", err, want)
+	}
+}
+
+type failingWriter struct{ err error }
+
+func (w failingWriter) Write([]byte) (int, error) { return 0, w.err }
 
 func TestLockStateSerializesManifestScope(t *testing.T) {
 	root := t.TempDir()
@@ -63,13 +76,16 @@ func TestLockStateSerializesManifestScope(t *testing.T) {
 
 func TestMergeInspectionStatusIsOrderIndependent(t *testing.T) {
 	for _, tc := range []struct {
-		left, right Action
-		want        Action
+		left  EntryStatus
+		right TargetStatus
+		want  EntryStatus
 	}{
 		{ActionInstalled, ActionMissing, ActionMissing},
 		{ActionMissing, ActionInstalled, ActionMissing},
 		{ActionMissing, ActionDrift, ActionDrift},
 		{ActionDrift, ActionMissing, ActionDrift},
+		{ActionDrift, ActionUnverifiable, ActionUnverifiable},
+		{ActionUnverifiable, ActionDrift, ActionUnverifiable},
 		{ActionLocal, ActionUnlocked, ActionUnlocked},
 	} {
 		if got := mergeInspectionStatus(tc.left, tc.right); got != tc.want {
@@ -88,7 +104,7 @@ func TestLoadLock_PropagatesValidationErrors(t *testing.T) {
 		t.Fatalf("missing lock = %+v, %v; want empty lock, nil error", l, err)
 	}
 	lockPath := filepath.Join(e.Root, modfile.LockFileName)
-	if err := os.WriteFile(lockPath, []byte("[[skill]]\nname = \"con\"\ndirhash = \"h1:x\"\n"), 0o644); err != nil {
+	if err := os.WriteFile(lockPath, []byte("schemaversion = 1\n\n[[skill]]\nname = \"con\"\ndirhash = \"h1:x\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, err = e.loadLock()
@@ -432,7 +448,7 @@ func TestDisplayListAction(t *testing.T) {
 		"drift":     "drift",
 		"local":     "local",
 	} {
-		if got := displayListAction(Action(action)); got != want {
+		if got := displayListAction(EntryStatus(action)); got != want {
 			t.Errorf("displayListAction(%q) = %q, want %q", action, got, want)
 		}
 	}
@@ -564,12 +580,12 @@ type choiceConfirmer struct {
 	calls   int
 }
 
-func (*choiceConfirmer) Confirm(string) bool { return false }
+func (*choiceConfirmer) Confirm(string) (bool, error) { return false, nil }
 
-func (c *choiceConfirmer) Choose(string, []string) int {
+func (c *choiceConfirmer) Choose(string, []string) (int, error) {
 	choice := c.choices[c.calls]
 	c.calls++
-	return choice
+	return choice, nil
 }
 
 func newInstallationTarget(t *testing.T, content string) string {

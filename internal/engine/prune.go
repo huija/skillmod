@@ -10,15 +10,15 @@ import (
 	"io/fs"
 	"os"
 
-	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/modfile"
 )
 
 // Prune implements skillmod prune by cleaning installed files for stale entries present in the lock but absent from the mod.
-// It lists and confirms changes first; locally modified files are kept while only their lock records are removed (PRD §3.6).
-func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
+// It lists and confirms changes first; locally modified files are kept while only their lock records are removed.
+func (e *Engine) Prune(ctx context.Context, io IO, options ...MutationOptions) (*Report, error) {
+	run := mutationOptions(options)
 	unlock, err := e.lockState()
 	if err != nil {
 		return nil, err
@@ -33,11 +33,10 @@ func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
 		return nil, err
 	}
 	stale := staleEntries(m, lock)
-	rep := &Report{Action: "prune"}
+	rep := &Report{Action: CommandPrune}
 	if len(stale) == 0 {
 		rep.Notes = append(rep.Notes, i18n.Text("engine.prune.stale_entries"))
-		io.printf(i18n.Text("engine.prune.stale_entries"))
-		return rep, nil
+		return rep, io.printf(i18n.Text("engine.prune.stale_entries"))
 	}
 
 	adapters, err := e.adapters()
@@ -45,7 +44,7 @@ func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
 		return nil, err
 	}
 	var deletable []string
-	newLock := &modfile.Lock{}
+	newLock := &modfile.Lock{SchemaVersion: modfile.SchemaVersion}
 	staleDirs := map[string]bool{}
 	for _, lk := range stale {
 		staleDirs[fsutil.FoldKey(lk.InstallDir())] = true
@@ -57,48 +56,62 @@ func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
 	}
 	for _, lk := range stale {
 		entry := EntryReport{Name: lk.Name, Source: lk.Source, Version: lk.Version}
+		entryPartial := false
 		// The recorded installation directory survives alias removal from the
 		// mod file; without it, an aliased install could never be located
 		// again and would leak as an orphan directory.
 		dirName := lk.InstallDir()
 		for _, a := range adapters {
 			dst := adapterDir(a, e.Root, dirName)
-			h, err := dirhash.HashDir(dst)
-			if err != nil {
+			target := inspectTarget(dst, &lk)
+			switch target.Action {
+			case ActionMissing:
 				// A dangling installation link has no target contents to preserve.
 				// Remove only that entry, never its missing destination.
-				if st, statErr := os.Lstat(dst); errors.Is(err, fs.ErrNotExist) && statErr == nil && st.Mode()&fs.ModeSymlink != 0 {
+				if st, statErr := os.Lstat(dst); statErr == nil && st.Mode()&fs.ModeSymlink != 0 {
 					if _, targetErr := os.Stat(dst); errors.Is(targetErr, fs.ErrNotExist) {
 						deletable = append(deletable, dst)
-						entry.Targets = append(entry.Targets, dst)
+						target.Action = ActionRemove
 					}
 				}
-				continue
-			}
-			if h == lk.Dirhash {
+			case ActionInstalled:
 				deletable = append(deletable, dst)
-				entry.Targets = append(entry.Targets, dst)
-			} else {
-				entry.Note = i18n.Text("engine.prune.locally_modified_kept_files") + dst
+				target.Action = ActionRemove
+			case ActionDrift:
+				entryPartial = true
+				target.Action = ActionKeep
+				entry.Note = appendNote(entry.Note, i18n.Text("engine.prune.locally_modified_kept_files")+dst)
+			case ActionUnverifiable:
+				entryPartial = true
+				target.Action = ActionKeep
+				entry.Note = appendNote(entry.Note, i18n.Format("engine.remove.could_verify_kept_installed", dst, target.Note))
 			}
+			entry.TargetResults = append(entry.TargetResults, target)
 		}
-		entry.Action = "prune"
+		entry.Action = ActionPrune
+		if entryPartial {
+			entry.Action = ActionPartial
+		}
 		rep.Entries = append(rep.Entries, entry)
 	}
 
 	if len(deletable) > 0 {
-		io.printf(i18n.Text("engine.prune.following_directories_deleted"))
+		if err := io.printf(i18n.Text("engine.prune.following_directories_deleted")); err != nil {
+			return rep, err
+		}
 		for _, d := range deletable {
-			io.printf("  %s", d)
+			if err := io.printf("  %s", d); err != nil {
+				return rep, err
+			}
 		}
 	}
-	if io.DryRun {
+	if run.DryRun {
 		// dry-run must never require confirmation: the flag promises to list
 		// what would happen, so the gate below is skipped entirely.
 		rep.Notes = append(rep.Notes, i18n.Text("engine.prune.dry_run_files_deleted"))
 		return rep, nil
 	}
-	if err := confirmRemovals(io, deletable); err != nil {
+	if err := confirmRemovals(io, deletable, run.DryRun); err != nil {
 		return nil, err
 	}
 
@@ -112,6 +125,5 @@ func (e *Engine) Prune(ctx context.Context, io IO) (*Report, error) {
 	if err := finalize(true); err != nil {
 		return nil, err
 	}
-	io.printf(i18n.Text("engine.prune.pruned_stale_entries"), len(stale))
-	return rep, nil
+	return rep, io.printf(i18n.Text("engine.prune.pruned_stale_entries"), len(stale))
 }

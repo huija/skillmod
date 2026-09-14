@@ -17,6 +17,8 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/huija/skillmod/internal/address"
+	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/resolve"
@@ -58,7 +60,8 @@ func (s ModSkill) DirName() string {
 
 // Lock represents the tool-maintained SKILL.lock file, which must not be edited manually.
 type Lock struct {
-	Skills []LockSkill `toml:"skill,omitempty"`
+	SchemaVersion int         `toml:"schemaversion"`
+	Skills        []LockSkill `toml:"skill,omitempty"`
 }
 
 // LockSkill is one locked entry in SKILL.lock.
@@ -130,6 +133,16 @@ func ValidateMod(m *Mod) error {
 				return fmt.Errorf(i18n.Text("modfile.mod_invalid_alias"), sk.Name, err)
 			}
 		}
+		switch {
+		case sk.Local && (sk.Source != "" || sk.Version != ""):
+			return fmt.Errorf(i18n.Text("modfile.mod_local_with_remote_fields"), sk.Name)
+		case !sk.Local && sk.Source == "":
+			return fmt.Errorf(i18n.Text("modfile.mod_remote_missing_source"), sk.Name)
+		case !sk.Local:
+			if err := validateSource(sk.Source); err != nil {
+				return fmt.Errorf(i18n.Text("modfile.mod_invalid_source"), sk.Name, err)
+			}
+		}
 		entryKey := sk.Name + "\x00" + sk.Source + "\x00" + sk.Alias
 		if seenEntry[entryKey] {
 			return fmt.Errorf(i18n.Text("modfile.mod_duplicate_skill"), sk.Name)
@@ -146,6 +159,9 @@ func ValidateMod(m *Mod) error {
 // ValidateLock applies the same portable-name and fold-uniqueness rules to
 // SKILL.lock, plus validity of the recorded installation directory.
 func ValidateLock(l *Lock) error {
+	if l.SchemaVersion != SchemaVersion {
+		return fmt.Errorf(i18n.Text("modfile.lock_unsupported_schemaversion"), l.SchemaVersion, SchemaVersion)
+	}
 	seenEntry := map[string]bool{}
 	seenDir := map[string]string{}
 	for i := range l.Skills {
@@ -158,14 +174,17 @@ func ValidateLock(l *Lock) error {
 				return fmt.Errorf(i18n.Text("modfile.lock_invalid_directory"), sk.Name, err)
 			}
 		}
-		if sk.Dirhash == "" {
-			return fmt.Errorf(i18n.Text("modfile.lock_missing_dirhash"), sk.Name)
+		if err := dirhash.Validate(sk.Dirhash); err != nil {
+			return fmt.Errorf(i18n.Text("modfile.lock_invalid_dirhash"), sk.Name, err)
 		}
 		if sk.Source == "" {
 			if sk.Version != "" || sk.Commit != "" {
 				return fmt.Errorf(i18n.Text("modfile.lock_local_with_remote_version"), sk.Name)
 			}
 		} else {
+			if err := validateSource(sk.Source); err != nil {
+				return fmt.Errorf(i18n.Text("modfile.lock_invalid_source"), sk.Name, err)
+			}
 			if sk.Version == "" {
 				return fmt.Errorf(i18n.Text("modfile.lock_missing_version"), sk.Name)
 			}
@@ -183,6 +202,17 @@ func ValidateLock(l *Lock) error {
 			return fmt.Errorf(i18n.Text("modfile.lock_case_conflict"), prev, dir)
 		}
 		seenDir[fsutil.FoldKey(dir)] = dir
+	}
+	return nil
+}
+
+func validateSource(source string) error {
+	a, err := address.Parse(source)
+	if err != nil {
+		return err
+	}
+	if a.Ref != "" {
+		return fmt.Errorf("%s", i18n.Text("modfile.source_contains_version"))
 	}
 	return nil
 }

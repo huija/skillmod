@@ -17,10 +17,11 @@ import (
 	"strings"
 
 	"github.com/huija/skillmod/internal/i18n"
+	repoaddr "github.com/huija/skillmod/internal/repo"
 	"github.com/huija/skillmod/internal/resolve"
 )
 
-// RepoErrorKind classifies remote access failures, distinguishing not found from authentication failures as required by PRD §3.2.
+// RepoErrorKind classifies remote access failures, distinguishing not found from authentication failures.
 type RepoErrorKind int
 
 const (
@@ -116,17 +117,22 @@ func mapGitError(err error, stderr, repo string) error {
 		strings.Contains(stderr, "Permission denied"):
 		kind = RepoAuth
 	}
-	stderr = strings.TrimSpace(stderr)
+	stderr = strings.TrimSpace(repoaddr.RedactText(stderr, repo))
 	if len(stderr) > 300 {
 		stderr = stderr[:300] + "…"
 	}
-	return &RepoError{Kind: kind, Repo: repo, Stderr: stderr}
+	return &RepoError{Kind: kind, Repo: repoaddr.Redact(repo), Stderr: stderr}
 }
 
 // Refs obtains a remote-reference snapshot with one ls-remote call. Explicit
 // patterns retain HEAD, branches, and tags while excluding unrelated namespaces
 // such as GitHub pull-request refs.
 func (s *Source) Refs(ctx context.Context, repo string) (*resolve.Refs, error) {
+	var err error
+	repo, err = repoaddr.PersistedTransport(repo)
+	if err != nil {
+		return nil, err
+	}
 	out, err := s.run(ctx, "", "ls-remote", "--symref", repo, "HEAD", "refs/heads/*", "refs/tags/*")
 	if err != nil {
 		return nil, err

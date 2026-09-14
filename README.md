@@ -91,12 +91,14 @@ local = true
 
 ```toml
 # SKILL.lock (tool-managed; deterministic and timestamp-free)
+schemaversion = 1
+
 [[skill]]
 name = "code-review"
 source = "github.com/acme/agent-skills//code-review"
 version = "code-review/v1.2.0"
 commit = "7f3a9c1e00000000000000000000000000000000"
-dirhash = "h1:4wYq0b..."
+dirhash = "h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 ```
 
 ```bash
@@ -147,7 +149,7 @@ skillmod sync --relink --install-mode=copy  # Detach into independent, editable 
 
 Ordinary `sync` preserves matching installations and remains idempotent. `--relink` explicitly reinstalls remote entries using the selected mode. Both respect local-modification conflict handling; `--yes` does not force conflicting files to be overwritten. Local entries are recorded and verified without automatic migration.
 
-`get`, `sync`, `update`, and `remove` return exit code 3 when independent work completed but one or more targets were safely preserved. JSON reports include `targetResults` so automation can distinguish actions such as `install`, `installed`, `keep`, `skip`, `missing`, and `drift`. `update` never silently moves to a lower semantic version when a newer tag disappears; use `--allow-downgrade` for an intentional downgrade.
+`get`, `sync`, `update`, and `remove` return exit code 3 when independent work completed but one or more targets were safely preserved. In JSON, the top-level `action` identifies the command (`get`, `init`, `list`, `prune`, `remove`, `sync`, `update`, `verify`, or `why`); each entry's `action` is its aggregate outcome (`conflict`, `drift`, `install`, `installed`, `keep`, `local`, `local-drift`, `matched`, `missing`, `partial`, `prune`, `remove`, `skip`, `stale`, `unlocked`, `unresolved`, `unverifiable`, or `update`). Per-directory facts live only in `targetResults`, whose actions are `drift`, `install`, `installed`, `keep`, `missing`, `remove`, `skip`, `unlocked`, or `unverifiable`. Inspection reports (`list`, `why`, and `verify`) also include `requestedVersion` for remote entries: it is the exact `SKILL.mod` value (an empty string tracks latest), while `version` is the installed version from `SKILL.lock`. `update` never silently moves to a lower semantic version when a newer tag disappears; use `--allow-downgrade` for an intentional downgrade.
 
 `skillmod remove <name-or-alias>` removes matching declarations and clean managed installations as one recoverable transaction. Locally modified or unverifiable directories are preserved and produce partial completion. `skillmod why <name-or-alias>` shows the source, resolved version, commit, dirhash, alias directory, and status of every configured installation target.
 

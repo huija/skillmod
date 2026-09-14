@@ -182,6 +182,10 @@ msgid "dirhash.installation_symlink"
 msgstr "安装目录含 symlink，无法校验: %s"
 
 #, go-format
+msgid "dirhash.invalid_h1_digest"
+msgstr "dirhash 不是 base64 编码的 SHA-256 h1 摘要: %q"
+
+#, go-format
 msgid "dirhash.missing_h1_prefix"
 msgstr "dirhash 缺少 h1: 前缀: %q"
 
@@ -209,6 +213,9 @@ msgstr "正在从 %s 下载仓库快照"
 
 msgid "engine.drift_detected"
 msgstr "检测到漂移"
+
+msgid "engine.dry_run_files_written"
+msgstr "dry-run：未写任何文件"
 
 msgid "engine.fetching_git_objects"
 msgstr "正在获取 Git 对象"
@@ -244,8 +251,9 @@ msgstr "无 description"
 msgid "engine.get.discovering_skills"
 msgstr "正在发现仓库中的 skills"
 
-msgid "engine.get.dry_run_files_written"
-msgstr "dry-run：未写任何文件"
+#, go-format
+msgid "engine.get.dry_run_entry"
+msgstr "dry-run：%s %s（%s）"
 
 #, go-format
 msgid "engine.get.installed_skill_mod_skill"
@@ -391,6 +399,14 @@ msgstr "%s（不可读取或目录链接已失效：%v）"
 msgid "engine.init.unresolved_sources"
 msgstr "有 %d 个技能的来源已知但暂时无法解析；这些条目"
 "已保留为本地基线，之后可以重试"
+
+#, go-format
+msgid "engine.inspect.latest_lock"
+msgstr "manifest 跟踪 latest；lock 当前解析为 %s"
+
+#, go-format
+msgid "engine.inspect.version_mismatch"
+msgstr "manifest 请求 %s，lock 中为 %s；请运行 skillmod sync"
 
 #, go-format
 msgid "engine.install_rolling_back_changes"
@@ -668,6 +684,12 @@ msgstr "%s: %s（%s）"
 msgid "engine.update.entry_remote_has_default"
 msgstr "条目 %s: 远端无默认分支"
 
+msgid "engine.update.local_entry_skipped"
+msgstr "本地条目没有可更新的远程版本"
+
+msgid "engine.update.no_remote_entries"
+msgstr "无需更新：SKILL.mod 中没有远程条目"
+
 #, go-format
 msgid "engine.update.remote_latest_refusing"
 msgstr "远端最新版本为 %s；未指定 --allow-downgrade，拒绝从 "
@@ -728,6 +750,9 @@ msgstr "本地"
 #, go-format
 msgid "engine.why.why"
 msgstr "  %s：%s"
+
+msgid "engine.write_output"
+msgstr "写入命令输出"
 
 #, go-format
 msgid "fsutil.commit_disk"
@@ -823,8 +848,16 @@ msgid "modfile.lock_invalid_directory"
 msgstr "SKILL.lock 中 skill %q 的安装目录名不合法: %w"
 
 #, go-format
+msgid "modfile.lock_invalid_dirhash"
+msgstr "SKILL.lock 中 skill %q 的 dirhash 不合法: %w"
+
+#, go-format
 msgid "modfile.lock_invalid_name"
 msgstr "SKILL.lock 中 skill %q 的名称不合法: %w"
+
+#, go-format
+msgid "modfile.lock_invalid_source"
+msgstr "SKILL.lock 中 skill %q 的来源不合法: %w"
 
 #, go-format
 msgid "modfile.lock_local_with_remote_version"
@@ -832,12 +865,12 @@ msgstr "SKILL.lock 中的本地 skill %q 包含仅供远程条目使用的 "
 "version 或 commit 字段"
 
 #, go-format
-msgid "modfile.lock_missing_dirhash"
-msgstr "SKILL.lock 中的 skill %q 缺少 dirhash"
-
-#, go-format
 msgid "modfile.lock_missing_version"
 msgstr "SKILL.lock 中的远程 skill %q 缺少 version"
+
+#, go-format
+msgid "modfile.lock_unsupported_schemaversion"
+msgstr "SKILL.lock schemaversion=%d 不受支持；应为 %d"
 
 #, go-format
 msgid "modfile.mod_case_conflict"
@@ -857,6 +890,19 @@ msgid "modfile.mod_invalid_name"
 msgstr "SKILL.mod 中 skill %q 的名称不合法: %w"
 
 #, go-format
+msgid "modfile.mod_invalid_source"
+msgstr "SKILL.mod 中 skill %q 的来源不合法: %w"
+
+#, go-format
+msgid "modfile.mod_local_with_remote_fields"
+msgstr "SKILL.mod 中的本地 skill %q 包含仅供远程条目使用的 s"
+"ource 或 version 字段"
+
+#, go-format
+msgid "modfile.mod_remote_missing_source"
+msgstr "SKILL.mod 中的非本地 skill %q 缺少 source"
+
+#, go-format
 msgid "modfile.mod_unsupported_schemaversion"
 msgstr "SKILL.mod schemaversion=%d 不受支持；应为 %d"
 
@@ -871,6 +917,13 @@ msgstr "解析 SKILL.mod: %w"
 #, go-format
 msgid "modfile.restore_manifest_state"
 msgstr "恢复清单状态失败：%w"
+
+msgid "modfile.source_contains_version"
+msgstr "source 不得包含 @version 后缀，请使用 version 字段"
+
+msgid "repo.repository_address_unsafe"
+msgstr "仓库地址不得包含内嵌凭证、查询参数、片段、控"
+"制字符或不受支持的传输协议"
 
 #, go-format
 msgid "resolve.branch_not_lockable"
@@ -925,6 +978,9 @@ msgstr "读 blob %s 头失败: %w"
 
 msgid "source.fetch.frontmatter_has_name_field"
 msgstr "frontmatter 中无 name 字段"
+
+msgid "source.fetch.invalid_frontmatter"
+msgstr "YAML frontmatter 无效: "
 
 #, go-format
 msgid "source.fetch.malformed_cat_file_batch"
@@ -1060,6 +1116,9 @@ msgstr "解析缓存索引身份不匹配: %s"
 #, go-format
 msgid "store.metadata_identity_mismatch"
 msgstr "版本元数据 repo 身份不匹配: %s"
+
+msgid "store.metadata_transport_mismatch"
+msgstr "仓库元数据包含不安全或不匹配的传输地址"
 
 msgid "store.metadata_version_mismatch"
 msgstr "版本元数据的 repo/version 与目录身份不一致"

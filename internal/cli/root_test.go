@@ -71,9 +71,9 @@ func TestVersion(t *testing.T) {
 }
 
 func TestNewEngineAndIO(t *testing.T) {
-	preserveFlags(t)
 	project, storeRoot := isolateCLI(t)
-	eng, err := newEngine()
+	options := &rootOptions{}
+	eng, err := options.newEngine()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,27 +88,29 @@ func TestNewEngineAndIO(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
-	flagYes = true
-	flagDryRun = true
-	got := newIO(cmd)
-	if got.Out != &stdout || !got.Yes || !got.DryRun {
+	options.yes = true
+	options.dryRun = true
+	got := options.newIO(cmd)
+	if got.Out != &stdout || !got.Yes {
 		t.Fatalf("newIO = %+v", got)
 	}
-	flagJSON = true
-	got = newIO(cmd)
+	if !options.mutationOptions().DryRun {
+		t.Fatal("mutationOptions did not preserve --dry-run")
+	}
+	options.json = true
+	got = options.newIO(cmd)
 	if got.Out != &stderr {
 		t.Fatalf("--json must route engine summaries to stderr; newIO = %+v", got)
 	}
 }
 
 func TestOutputJSON(t *testing.T) {
-	preserveFlags(t)
+	options := &rootOptions{json: true}
 	cmd := NewRootCmd()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
-	flagJSON = true
-	rep := &engine.Report{Action: "verify", Entries: []engine.EntryReport{{Name: "demo", Action: "ok"}}}
-	if err := output(cmd, rep); err != nil {
+	rep := &engine.Report{Action: engine.CommandVerify, Entries: []engine.EntryReport{{Name: "demo", Action: engine.ActionInstalled}}}
+	if err := options.output(cmd, rep); err != nil {
 		t.Fatal(err)
 	}
 	var got engine.Report
@@ -120,23 +122,22 @@ func TestOutputJSON(t *testing.T) {
 	}
 
 	out.Reset()
-	flagJSON = false
-	if err := output(cmd, rep); err != nil || out.Len() != 0 {
+	options.json = false
+	if err := options.output(cmd, rep); err != nil || out.Len() != 0 {
 		t.Fatalf("plain output = %q, err = %v", out.String(), err)
 	}
-	flagJSON = true
-	if err := output(cmd, nil); err != nil || out.Len() != 0 {
+	options.json = true
+	if err := options.output(cmd, nil); err != nil || out.Len() != 0 {
 		t.Fatalf("nil report output = %q, err = %v", out.String(), err)
 	}
 }
 
 func TestJSONCommandsReturnOutputErrors(t *testing.T) {
-	preserveFlags(t)
 	project, _ := isolateCLI(t)
 	if err := modfile.SaveMod(project, &modfile.Mod{SchemaVersion: modfile.SchemaVersion}); err != nil {
 		t.Fatalf("SaveMod(%q): %v", project, err)
 	}
-	if err := modfile.SaveLock(project, &modfile.Lock{}); err != nil {
+	if err := modfile.SaveLock(project, &modfile.Lock{SchemaVersion: modfile.SchemaVersion}); err != nil {
 		t.Fatalf("SaveLock(%q): %v", project, err)
 	}
 
@@ -153,8 +154,41 @@ func TestJSONCommandsReturnOutputErrors(t *testing.T) {
 	}
 }
 
+func TestRootCommandsDoNotShareFlagState(t *testing.T) {
+	project, _ := isolateCLI(t)
+	if err := modfile.SaveState(project,
+		&modfile.Mod{SchemaVersion: modfile.SchemaVersion},
+		&modfile.Lock{SchemaVersion: modfile.SchemaVersion}); err != nil {
+		t.Fatal(err)
+	}
+
+	jsonCmd := NewRootCmd()
+	var jsonOut bytes.Buffer
+	jsonCmd.SetOut(&jsonOut)
+	jsonCmd.SetErr(io.Discard)
+	jsonCmd.SetArgs([]string{"--json", "list"})
+	if err := jsonCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(jsonOut.Bytes()) {
+		t.Fatalf("first command output = %q, want JSON", jsonOut.String())
+	}
+
+	plainCmd := NewRootCmd()
+	var plainOut bytes.Buffer
+	plainCmd.SetOut(&plainOut)
+	plainCmd.SetErr(io.Discard)
+	plainCmd.SetArgs([]string{"list"})
+	if err := plainCmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if plainOut.Len() != 0 {
+		t.Fatalf("second command inherited --json: %q", plainOut.String())
+	}
+}
+
 func TestExitCodePrefersOutputFailure(t *testing.T) {
-	rep := &engine.Report{Action: engine.Action("sync")}
+	rep := &engine.Report{Action: engine.CommandSync}
 	partial := &engine.PartialError{Report: rep}
 	if got := exitCode(errors.Join(partial, &outputError{err: errTestOutput})); got != ExitError {
 		t.Fatalf("partial plus output failure exit = %d, want %d", got, ExitError)
@@ -166,7 +200,6 @@ func TestExitCodePrefersOutputFailure(t *testing.T) {
 }
 
 func TestCommandWiring(t *testing.T) {
-	preserveFlags(t)
 	isolateCLI(t)
 
 	// Init can complete locally without touching the project in dry-run mode.
@@ -210,7 +243,6 @@ func TestCommandWiring(t *testing.T) {
 }
 
 func TestExecuteExitCodes(t *testing.T) {
-	preserveFlags(t)
 	project, _ := isolateCLI(t)
 	originalArgs := os.Args
 	t.Cleanup(func() { os.Args = originalArgs })
@@ -224,7 +256,7 @@ func TestExecuteExitCodes(t *testing.T) {
 	if err := modfile.SaveMod(project, m); err != nil {
 		t.Fatal(err)
 	}
-	l := &modfile.Lock{Skills: []modfile.LockSkill{{Name: "demo", Dirhash: "h1:missing"}}}
+	l := &modfile.Lock{SchemaVersion: modfile.SchemaVersion, Skills: []modfile.LockSkill{{Name: "demo", Dirhash: testutil.DirHash("missing")}}}
 	if err := modfile.SaveLock(project, l); err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +282,7 @@ func TestExecuteExitCodes(t *testing.T) {
 	r.CommitAll("init")
 	r.Tag("v1.0.0")
 	r.Finish()
-	eng, err := newEngine()
+	eng, err := (&rootOptions{}).newEngine()
 	if err != nil {
 		t.Fatalf("newEngine(): %v", err)
 	}
@@ -280,14 +312,4 @@ func isolateCLI(t *testing.T) (project, storeRoot string) {
 	t.Setenv("USERPROFILE", configRoot)
 	t.Setenv("AppData", configRoot)
 	return project, storeRoot
-}
-
-func preserveFlags(t *testing.T) {
-	t.Helper()
-	jsonFlag, yesFlag, dryRunFlag, globalFlag := flagJSON, flagYes, flagDryRun, flagGlobal
-	installMode := flagInstallMode
-	t.Cleanup(func() {
-		flagJSON, flagYes, flagDryRun, flagGlobal = jsonFlag, yesFlag, dryRunFlag, globalFlag
-		flagInstallMode = installMode
-	})
 }

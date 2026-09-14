@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newInitCmd() *cobra.Command {
+func newInitCmd(options *rootOptions) *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "init",
@@ -19,12 +19,12 @@ func newInitCmd() *cobra.Command {
 		Long:  i18n.Text("cli.init.long"),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			eng, err := newEngine()
+			eng, err := options.newEngine()
 			if err != nil {
 				return err
 			}
-			rep, err := eng.Init(cmd.Context(), force, newIO(cmd))
-			return errors.Join(err, output(cmd, rep))
+			rep, err := eng.Init(cmd.Context(), force, options.newIO(cmd), options.mutationOptions())
+			return errors.Join(err, options.output(cmd, rep))
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, i18n.Text("cli.init.flag_force"))

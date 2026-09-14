@@ -140,7 +140,7 @@ func assertCanonicalLockDir(t *testing.T, root, name string) {
 	}
 }
 
-// AC-1, first half: exercise the complete get flow and match installed content to the source.
+// Exercise the complete get flow and match installed content to the source.
 func TestGet_Tag(t *testing.T) {
 	r := newHelloRepo(t)
 	root := t.TempDir()
@@ -181,6 +181,27 @@ func TestGet_Tag(t *testing.T) {
 	}
 	if h != lk.Dirhash {
 		t.Errorf("recomputed installation hash %s != lock %s", h, lk.Dirhash)
+	}
+}
+
+func TestGetDryRunPrintsPlanWithoutWritingState(t *testing.T) {
+	r := newHelloRepo(t)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	var out bytes.Buffer
+
+	rep, err := eng.Get(ctx, r.URL+"@v1.0.0", "", engine.IO{Out: &out, Yes: true}, engine.MutationOptions{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Action != engine.ActionInstall {
+		t.Fatalf("Get(dry-run) entries = %+v, want one planned install", rep.Entries)
+	}
+	if !strings.Contains(out.String(), "dry-run:") || !strings.Contains(out.String(), "hello") {
+		t.Errorf("Get(dry-run) output = %q, want a visible plan", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, modfile.ModFileName)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Get(dry-run) wrote SKILL.mod: %v", err)
 	}
 }
 
@@ -404,17 +425,17 @@ type getSkillChooser struct {
 	options []ui.Option
 }
 
-func (*getSkillChooser) Confirm(string) bool { return false }
+func (*getSkillChooser) Confirm(string) (bool, error) { return false, nil }
 
-func (c *getSkillChooser) Choose(string, []string) int {
+func (c *getSkillChooser) Choose(string, []string) (int, error) {
 	c.calls++
-	return 0
+	return 0, nil
 }
 
-func (c *getSkillChooser) ChooseMany(_ string, options []ui.Option) []int {
+func (c *getSkillChooser) ChooseMany(_ string, options []ui.Option) ([]int, error) {
 	c.calls++
 	c.options = append([]ui.Option(nil), options...)
-	return c.choices
+	return c.choices, nil
 }
 
 func TestGet_DefaultTargetIsGenericAgents(t *testing.T) {
@@ -468,7 +489,7 @@ func TestUpdate_MovedTagConflictsWithImmutableSnapshot(t *testing.T) {
 	r.CommitAll("rewrite v1")
 	r.Evolve("v1.0.0", true)
 
-	_, err := eng.Update(ctx, []string{"hello"}, testIO())
+	_, err := eng.Update(ctx, []string{"hello"}, engine.UpdateOptions{}, testIO())
 	var conflict *store.SnapshotConflictError
 	if !errors.As(err, &conflict) {
 		t.Fatalf("err = %v (%T), want SnapshotConflictError", err, err)
@@ -509,7 +530,7 @@ func TestGet_ExactSnapshotSkipsGit(t *testing.T) {
 	}
 }
 
-// AC-1: cross-machine consistency; get on machine A, copy mod and lock to machine B with an independent store, then sync to identical hashes.
+// Cross-machine consistency: get on machine A, copy mod and lock to machine B with an independent store, then sync to identical hashes.
 func TestSync_CrossMachine(t *testing.T) {
 	r := newHelloRepo(t)
 	rootA := t.TempDir()
@@ -529,7 +550,7 @@ func TestSync_CrossMachine(t *testing.T) {
 		}
 	}
 	engB := newEngine(t, rootB, t.TempDir()) // An independent store represents a clean machine.
-	if _, err := engB.Sync(ctx, false, testIO()); err != nil {
+	if _, err := engB.Sync(ctx, engine.SyncOptions{}, testIO()); err != nil {
 		t.Fatalf("B sync: %v", err)
 	}
 	hA, _ := dirhash.HashDir(installedDir(rootA, "hello"))
@@ -540,7 +561,7 @@ func TestSync_CrossMachine(t *testing.T) {
 	}
 }
 
-// AC-2: idempotency; repeated sync reports no changes and performs no file writes.
+// Idempotency: repeated sync reports no changes and performs no file writes.
 func TestSync_Idempotent(t *testing.T) {
 	r := newHelloRepo(t)
 	root := t.TempDir()
@@ -551,7 +572,7 @@ func TestSync_Idempotent(t *testing.T) {
 	lockPath := filepath.Join(root, modfile.LockFileName)
 	st1, _ := os.Stat(lockPath)
 
-	rep, err := eng.Sync(ctx, false, testIO())
+	rep, err := eng.Sync(ctx, engine.SyncOptions{}, testIO())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -575,13 +596,13 @@ func TestSync_RepairsRedundantLockDirectory(t *testing.T) {
 	}
 	addRedundantLockDir(t, root, "hello")
 
-	if _, err := eng.Sync(ctx, false, testIO()); err != nil {
+	if _, err := eng.Sync(ctx, engine.SyncOptions{}, testIO()); err != nil {
 		t.Fatalf("Sync(redundant lock dir) error = %v, want nil", err)
 	}
 	assertCanonicalLockDir(t, root, "hello")
 }
 
-// AC-3: tamper protection; changing a locked dirhash makes sync fail without modifying the filesystem.
+// Tamper protection: changing a locked dirhash makes sync fail without modifying the filesystem.
 func TestSync_TamperedLock(t *testing.T) {
 	r := newHelloRepo(t)
 	root := t.TempDir()
@@ -599,14 +620,14 @@ func TestSync_TamperedLock(t *testing.T) {
 	storeDir := t.TempDir()
 	eng = newEngine(t, root, storeDir)
 
-	_, err := eng.Sync(ctx, false, testIO())
+	_, err := eng.Sync(ctx, engine.SyncOptions{}, testIO())
 	var te *engine.TamperError
 	if !errors.As(err, &te) {
 		t.Fatalf("err = %v (%T), want TamperError", err, err)
 	}
 }
 
-// AC-4: reject branch names.
+// Mutable branch names are rejected.
 func TestGet_BranchRejected(t *testing.T) {
 	r := newHelloRepo(t)
 	root := t.TempDir()
@@ -626,7 +647,7 @@ func TestGet_BranchRejected(t *testing.T) {
 	}
 }
 
-// AC-5: commit addressing records a pseudo-version in the lock and repeated runs are reproducible.
+// Commit addressing records a pseudo-version in the lock and repeated runs are reproducible.
 func TestGet_ByCommitSHA(t *testing.T) {
 	r := testutil.NewRepo(t)
 	r.WriteSkill("", "noskill-tag")
@@ -659,7 +680,7 @@ func TestGet_ByCommitSHA(t *testing.T) {
 	}
 }
 
-// AC-6: a monorepo subdirectory automatically prefixes a bare version and hashes only the subtree.
+// A monorepo subdirectory automatically prefixes a bare version and hashes only the subtree.
 func TestGet_MonorepoSubdir(t *testing.T) {
 	r := testutil.NewRepo(t)
 	r.WriteSkill("code-review", "code-review", "checklist.md")
@@ -809,7 +830,7 @@ func TestGet_ExplicitLocalRepoVersionWinsOverNewSubdirTag(t *testing.T) {
 	}
 }
 
-// AC-8: the same name from different sources conflicts, and --alias resolves it.
+// The same name from different sources conflicts, and --alias resolves it.
 func TestGet_NameConflict(t *testing.T) {
 	r1 := testutil.NewRepo(t)
 	r1.WriteSkill("", "dup")
@@ -990,7 +1011,7 @@ func caseInsensitiveFS(dir string) bool {
 	return err == nil
 }
 
-// AC-9: protect local modifications; sync does not overwrite them and reports a conflict, while --yes keeps and skips automatically.
+// Sync protects local modifications and reports a conflict, while --yes keeps and skips automatically.
 func TestSync_LocalModification(t *testing.T) {
 	r := newHelloRepo(t)
 	root := t.TempDir()
@@ -1003,7 +1024,7 @@ func TestSync_LocalModification(t *testing.T) {
 	if err := os.WriteFile(target, []byte("user modified\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	rep, err := eng.Sync(ctx, false, testIO())
+	rep, err := eng.Sync(ctx, engine.SyncOptions{}, testIO())
 	var partial *engine.PartialError
 	if !errors.As(err, &partial) {
 		t.Fatalf("Sync error = %v, want PartialError", err)
@@ -1036,14 +1057,14 @@ func TestSync_OverwriteConflictReportsInstallation(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	rep, err := eng.Sync(ctx, false, engine.IO{Out: &out, Confirm: &getSkillChooser{}})
+	rep, err := eng.Sync(ctx, engine.SyncOptions{}, engine.IO{Out: &out, Confirm: &getSkillChooser{}})
 	if err != nil {
 		t.Fatalf("Sync overwrite: %v", err)
 	}
-	if len(rep.Entries) != 1 || rep.Entries[0].Action != "install" || len(rep.Entries[0].Targets) != 1 || rep.Entries[0].Targets[0] != installedDir(root, "hello") {
+	if len(rep.Entries) != 1 || rep.Entries[0].Action != "install" {
 		t.Errorf("Sync overwrite report = %+v, want one installed target", rep.Entries)
 	}
-	if len(rep.Entries[0].TargetResults) != 1 || rep.Entries[0].TargetResults[0].Action != engine.ActionInstall {
+	if len(rep.Entries[0].TargetResults) != 1 || rep.Entries[0].TargetResults[0].Path != installedDir(root, "hello") || rep.Entries[0].TargetResults[0].Action != engine.ActionInstall {
 		t.Errorf("Sync overwrite target results = %+v, want installed", rep.Entries[0].TargetResults)
 	}
 	if !strings.Contains(out.String(), "synchronized 1") {
@@ -1077,12 +1098,12 @@ func TestSync_MixedInstallAndSkippedConflictReportsPartial(t *testing.T) {
 	claudeTarget := filepath.Join(claude.SkillsDir(root), "hello")
 
 	var out bytes.Buffer
-	rep, err := eng.Sync(ctx, false, engine.IO{Out: &out, Yes: true})
+	rep, err := eng.Sync(ctx, engine.SyncOptions{}, engine.IO{Out: &out, Yes: true})
 	var partial *engine.PartialError
 	if !errors.As(err, &partial) {
 		t.Fatalf("Sync mixed-target error = %v, want PartialError", err)
 	}
-	if len(rep.Entries) != 1 || rep.Entries[0].Action != "partial" || len(rep.Entries[0].Targets) != 1 || rep.Entries[0].Targets[0] != claudeTarget {
+	if len(rep.Entries) != 1 || rep.Entries[0].Action != "partial" {
 		t.Errorf("Sync mixed-target report = %+v, want partial with only Claude target installed", rep.Entries)
 	}
 	if len(rep.Entries[0].TargetResults) != 2 {
@@ -1103,7 +1124,7 @@ func TestSync_MixedInstallAndSkippedConflictReportsPartial(t *testing.T) {
 	}
 }
 
-// AC-10: the lock is authoritative and does not upgrade when a new remote tag appears.
+// The lock is authoritative and does not upgrade when a new remote tag appears.
 func TestSync_LockWins(t *testing.T) {
 	r := newHelloRepo(t)
 	root := t.TempDir()
@@ -1116,7 +1137,7 @@ func TestSync_LockWins(t *testing.T) {
 	r.CommitAll("v1.1")
 	r.Evolve("v1.1.0", false)
 
-	rep, err := eng.Sync(ctx, false, testIO())
+	rep, err := eng.Sync(ctx, engine.SyncOptions{}, testIO())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1134,7 +1155,7 @@ func TestSync_LockWins(t *testing.T) {
 	}
 }
 
-// AC-12: CI can consume verify results; detected drift returns DriftError, which the CLI maps to exit code 2.
+// CI can consume verify results; detected drift returns DriftError, which the CLI maps to exit code 2.
 func TestVerify_Drift(t *testing.T) {
 	r := newHelloRepo(t)
 	root := t.TempDir()
@@ -1156,13 +1177,13 @@ func TestVerify_Drift(t *testing.T) {
 		t.Fatalf("err = %v (%T), want DriftError", err, err)
 	}
 	// sync --check uses the same implementation.
-	_, err = eng.Sync(ctx, true, testIO())
+	_, err = eng.Sync(ctx, engine.SyncOptions{CheckOnly: true}, testIO())
 	if !errors.As(err, &de) {
 		t.Errorf("sync --check err = %v, want DriftError", err)
 	}
 }
 
-// AC-7: zero-migration init scans, suggests ls-remote matches, falls back to local entries, and does not modify original files.
+// Zero-migration init scans, suggests ls-remote matches, falls back to local entries, and does not modify original files.
 func TestInit_ScanAndMatch(t *testing.T) {
 	// Monorepo source containing a pdf/v1.0.0 tag.
 	mono := testutil.NewRepo(t)
@@ -1273,9 +1294,7 @@ func TestInit_DryRunDoesNotTouchBackup(t *testing.T) {
 
 	t.Run("does not create a backup", func(t *testing.T) {
 		root, modPath := setup(t, "")
-		dryRun := testIO()
-		dryRun.DryRun = true
-		if _, err := newEngine(t, root, t.TempDir()).Init(ctx, true, dryRun); err != nil {
+		if _, err := newEngine(t, root, t.TempDir()).Init(ctx, true, testIO(), engine.MutationOptions{DryRun: true}); err != nil {
 			t.Fatalf("init --force --dry-run: %v", err)
 		}
 		if _, err := os.Stat(modPath + ".bak"); !os.IsNotExist(err) {
@@ -1289,9 +1308,7 @@ func TestInit_DryRunDoesNotTouchBackup(t *testing.T) {
 	t.Run("does not overwrite an existing backup", func(t *testing.T) {
 		root, modPath := setup(t, "previous backup\n")
 		eng := newEngine(t, root, t.TempDir())
-		dryRun := testIO()
-		dryRun.DryRun = true
-		if _, err := eng.Init(ctx, true, dryRun); err != nil {
+		if _, err := eng.Init(ctx, true, testIO(), engine.MutationOptions{DryRun: true}); err != nil {
 			t.Fatalf("init --force --dry-run: %v", err)
 		}
 		if got := readFileString(t, modPath+".bak"); got != "previous backup\n" {
@@ -1419,7 +1436,7 @@ func TestUpdate(t *testing.T) {
 	r.CommitAll("v1.1")
 	r.Evolve("v1.1.0", false)
 
-	rep, err := eng.Update(ctx, nil, testIO())
+	rep, err := eng.Update(ctx, nil, engine.UpdateOptions{}, testIO())
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -1433,12 +1450,98 @@ func TestUpdate(t *testing.T) {
 	_ = rep
 
 	// A second update is already current.
-	rep, err = eng.Update(ctx, nil, testIO())
+	rep, err = eng.Update(ctx, nil, engine.UpdateOptions{}, testIO())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rep.Entries[0].Note != "already up to date" {
 		t.Errorf("second update = %+v, want already up to date", rep.Entries[0])
+	}
+}
+
+func TestFloatingManifestTracksLatestWithoutBecomingPinned(t *testing.T) {
+	r := newHelloRepo(t)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Skills[0].Version = ""
+	if err := modfile.SaveMod(root, m); err != nil {
+		t.Fatalf("SaveMod(floating entry): %v", err)
+	}
+	if _, err := eng.Sync(ctx, engine.SyncOptions{}, testIO()); err != nil {
+		t.Fatalf("Sync(floating entry): %v", err)
+	}
+	assertManifestVersion := func(want string) {
+		t.Helper()
+		got, err := modfile.LoadMod(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Skills[0].Version != want {
+			t.Errorf("manifest version = %q, want %q", got.Skills[0].Version, want)
+		}
+	}
+	assertManifestVersion("")
+	if got := loadLockSkill(t, root, "hello").Version; got != "v1.0.0" {
+		t.Fatalf("initial floating lock version = %q, want v1.0.0", got)
+	}
+
+	r.Write("v1.1.md", "v1.1\n")
+	r.CommitAll("v1.1")
+	r.Evolve("v1.1.0", false)
+	if _, err := eng.Sync(ctx, engine.SyncOptions{}, testIO()); err != nil {
+		t.Fatalf("Sync(floating entry after new tag): %v", err)
+	}
+	assertManifestVersion("")
+	if got := loadLockSkill(t, root, "hello").Version; got != "v1.1.0" {
+		t.Errorf("floating lock after sync = %q, want v1.1.0", got)
+	}
+
+	r.Write("v1.2.md", "v1.2\n")
+	r.CommitAll("v1.2")
+	r.Evolve("v1.2.0", false)
+	if _, err := eng.Update(ctx, nil, engine.UpdateOptions{}, testIO()); err != nil {
+		t.Fatalf("Update(floating entry): %v", err)
+	}
+	assertManifestVersion("")
+	if got := loadLockSkill(t, root, "hello").Version; got != "v1.2.0" {
+		t.Errorf("floating lock after update = %q, want v1.2.0", got)
+	}
+}
+
+func TestUpdateDryRunPrintsPlanWithoutWritingState(t *testing.T) {
+	r := newHelloRepo(t)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatal(err)
+	}
+	r.Write("v1.1.md", "v1.1\n")
+	r.CommitAll("v1.1")
+	r.Evolve("v1.1.0", false)
+	lockPath := filepath.Join(root, modfile.LockFileName)
+	before := readFileString(t, lockPath)
+	var out bytes.Buffer
+
+	rep, err := eng.Update(ctx, nil, engine.UpdateOptions{DryRun: true}, engine.IO{Out: &out, Yes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Action != engine.ActionUpdate {
+		t.Fatalf("Update(dry-run) entries = %+v, want one planned update", rep.Entries)
+	}
+	if !strings.Contains(out.String(), "hello") || !strings.Contains(out.String(), "dry-run:") {
+		t.Errorf("Update(dry-run) output = %q, want a visible plan", out.String())
+	}
+	if after := readFileString(t, lockPath); after != before {
+		t.Error("Update(dry-run) rewrote SKILL.lock")
 	}
 }
 
@@ -1458,7 +1561,7 @@ func TestUpdateRequiresOptInForDowngrade(t *testing.T) {
 	if out, err := deleteTag.CombinedOutput(); err != nil {
 		t.Fatalf("delete remote v2.0.0 tag: %v\n%s", err, out)
 	}
-	rep, err := eng.Update(ctx, nil, testIO())
+	rep, err := eng.Update(ctx, nil, engine.UpdateOptions{}, testIO())
 	if err != nil {
 		t.Fatalf("Update without downgrade opt-in: %v", err)
 	}
@@ -1469,9 +1572,7 @@ func TestUpdateRequiresOptInForDowngrade(t *testing.T) {
 		t.Errorf("version after guarded update = %q, want v2.0.0", got)
 	}
 
-	allow := testIO()
-	allow.AllowDowngrade = true
-	if _, err := eng.Update(ctx, nil, allow); err != nil {
+	if _, err := eng.Update(ctx, nil, engine.UpdateOptions{AllowDowngrade: true}, testIO()); err != nil {
 		t.Fatalf("Update with downgrade opt-in: %v", err)
 	}
 	if got := loadLockSkill(t, root, "hello").Version; got != "v1.0.0" {
@@ -1497,7 +1598,7 @@ func TestUpdateReportsSkippedInstallationConflict(t *testing.T) {
 	r.CommitAll("v1.1")
 	r.Evolve("v1.1.0", false)
 
-	rep, err := eng.Update(ctx, nil, testIO())
+	rep, err := eng.Update(ctx, nil, engine.UpdateOptions{}, testIO())
 	var partial *engine.PartialError
 	if !errors.As(err, &partial) {
 		t.Fatalf("Update conflict error = %v, want PartialError", err)
@@ -1525,7 +1626,7 @@ func TestUpdate_RepairsRedundantLockDirectory(t *testing.T) {
 	}
 	addRedundantLockDir(t, root, "hello")
 
-	if _, err := eng.Update(ctx, nil, testIO()); err != nil {
+	if _, err := eng.Update(ctx, nil, engine.UpdateOptions{}, testIO()); err != nil {
 		t.Fatalf("Update(redundant lock dir) error = %v, want nil", err)
 	}
 	assertCanonicalLockDir(t, root, "hello")
@@ -1558,7 +1659,7 @@ func TestUpdate_SameNameAliasesRemainIndependent(t *testing.T) {
 	r2.CommitAll("v1.2")
 	r2.Evolve("v1.2.0", false)
 
-	if _, err := eng.Update(ctx, []string{"dup-b"}, testIO()); err != nil {
+	if _, err := eng.Update(ctx, []string{"dup-b"}, engine.UpdateOptions{}, testIO()); err != nil {
 		t.Fatalf("Update(alias): %v", err)
 	}
 	m, err := modfile.LoadMod(root)
@@ -1573,7 +1674,7 @@ func TestUpdate_SameNameAliasesRemainIndependent(t *testing.T) {
 		t.Fatalf("versions after alias update = %v, want dup=v1.0.0 and dup-b=v1.2.0", versions)
 	}
 
-	if _, err := eng.Update(ctx, []string{"dup"}, testIO()); err != nil {
+	if _, err := eng.Update(ctx, []string{"dup"}, engine.UpdateOptions{}, testIO()); err != nil {
 		t.Fatalf("Update(published name): %v", err)
 	}
 	m, err = modfile.LoadMod(root)
@@ -1646,7 +1747,7 @@ exec "$SKILLMOD_REAL_GIT" "$@"
 
 	updateCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	if _, err := eng.Update(updateCtx, nil, testIO()); err != nil {
+	if _, err := eng.Update(updateCtx, nil, engine.UpdateOptions{}, testIO()); err != nil {
 		t.Fatalf("Update(two repositories) error = %v, want concurrent refs queries", err)
 	}
 	markers, err := os.ReadDir(markerDir)
@@ -1678,7 +1779,7 @@ func TestUpdate_PseudoVersion(t *testing.T) {
 	r.CommitAll("c2")
 	r.Evolve("", false)
 
-	if _, err := eng.Update(ctx, nil, testIO()); err != nil {
+	if _, err := eng.Update(ctx, nil, engine.UpdateOptions{}, testIO()); err != nil {
 		t.Fatal(err)
 	}
 	lk2 := loadLockSkill(t, root, "edge")
@@ -1723,7 +1824,7 @@ func TestPrune(t *testing.T) {
 	}
 
 	// sync reports the entry without deleting files.
-	rep, err := eng.Sync(ctx, false, testIO())
+	rep, err := eng.Sync(ctx, engine.SyncOptions{}, testIO())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1820,7 +1921,7 @@ func TestPrune_DryRunSkipsConfirmation(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	rep, err := eng.Prune(ctx, engine.IO{Out: &out, DryRun: true})
+	rep, err := eng.Prune(ctx, engine.IO{Out: &out}, engine.MutationOptions{DryRun: true})
 	if err != nil {
 		t.Fatalf("prune --dry-run was gated by confirmation: %v", err)
 	}
@@ -1846,7 +1947,7 @@ func TestSync_DryRunPrintsPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	rep, err := eng.Sync(ctx, false, engine.IO{Out: &out, DryRun: true})
+	rep, err := eng.Sync(ctx, engine.SyncOptions{DryRun: true}, engine.IO{Out: &out})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1878,7 +1979,7 @@ func TestSync_ReestablishesBaselineAfterRemoteToLocalConversion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rep, err := eng.Sync(ctx, false, testIO())
+	rep, err := eng.Sync(ctx, engine.SyncOptions{}, testIO())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1969,7 +2070,7 @@ func TestPrune_DoesNotDeleteDirectoryStillDeclaredWithNewSource(t *testing.T) {
 	}
 }
 
-// Offline hit: when the network is unavailable but the resolution index and version snapshot exist, continue and annotate the result (PRD §3.2 error table).
+// When the network is unavailable but the resolution index and version snapshot exist, continue and annotate the result.
 func TestGet_OfflineSnapshotHit(t *testing.T) {
 	r := newHelloRepo(t)
 	root1 := t.TempDir()
@@ -1996,7 +2097,7 @@ func TestGet_OfflineSnapshotHit(t *testing.T) {
 	}
 }
 
-// Reject installation of a skill containing a symlink (PRD §4).
+// Reject installation of a skill containing a symlink.
 func TestGet_SymlinkRejected(t *testing.T) {
 	r := testutil.NewRepo(t)
 	r.WriteSkill("", "linky")
@@ -2068,7 +2169,190 @@ func TestList(t *testing.T) {
 	}
 }
 
-func TestWhyReportsImmutableProvenanceAndTargets(t *testing.T) {
+func TestListDistinguishesRequestedAndInstalledVersions(t *testing.T) {
+	r := newHelloRepo(t)
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatal(err)
+	}
+	m, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Skills[0].Version = "v1.1.0"
+	if err := modfile.SaveMod(root, m); err != nil {
+		t.Fatal(err)
+	}
+
+	rep, err := eng.List(ctx, testIO())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := rep.Entries[0]
+	if entry.Version != "v1.0.0" || entry.RequestedVersion == nil || *entry.RequestedVersion != "v1.1.0" {
+		t.Fatalf("List version fields = installed %q, requested %v", entry.Version, entry.RequestedVersion)
+	}
+	if !strings.Contains(entry.Note, "manifest requests v1.1.0") || !strings.Contains(entry.Note, "lock contains v1.0.0") {
+		t.Errorf("List mismatch note = %q", entry.Note)
+	}
+
+	m.Skills[0].Version = ""
+	if err := modfile.SaveMod(root, m); err != nil {
+		t.Fatal(err)
+	}
+	rep, err = eng.List(ctx, testIO())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry = rep.Entries[0]
+	if entry.RequestedVersion == nil || *entry.RequestedVersion != "" {
+		t.Fatalf("List floating requestedVersion = %v, want pointer to empty string", entry.RequestedVersion)
+	}
+	if !strings.Contains(entry.Note, "tracks latest") {
+		t.Errorf("List floating note = %q", entry.Note)
+	}
+}
+
+func TestInspectionCommandsAgreeOnMissingLocalSkill(t *testing.T) {
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	m := &modfile.Mod{SchemaVersion: modfile.SchemaVersion, Skills: []modfile.ModSkill{{Name: "local", Local: true}}}
+	lock := &modfile.Lock{SchemaVersion: modfile.SchemaVersion, Skills: []modfile.LockSkill{{
+		Name: "local", Dirhash: testutil.DirHash("removed local skill"),
+	}}}
+	if err := modfile.SaveState(root, m, lock); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := eng.List(ctx, testIO())
+	if err != nil {
+		t.Fatal(err)
+	}
+	why, err := eng.Why(ctx, "local", testIO())
+	if err != nil {
+		t.Fatal(err)
+	}
+	verify, err := eng.Verify(ctx, testIO())
+	var drift *engine.DriftError
+	if !errors.As(err, &drift) {
+		t.Fatalf("Verify(missing local) error = %v, want DriftError", err)
+	}
+	for command, report := range map[string]*engine.Report{"list": list, "why": why, "verify": verify} {
+		if len(report.Entries) != 1 || report.Entries[0].Action != engine.ActionMissing {
+			t.Errorf("%s missing local entry = %+v, want one missing entry", command, report.Entries)
+			continue
+		}
+		entry := report.Entries[0]
+		if !entry.Local || len(entry.TargetResults) != 1 || entry.TargetResults[0].Action != engine.ActionMissing {
+			t.Errorf("%s missing local target = %+v, want local missing target", command, entry)
+		}
+	}
+}
+
+func TestInspectionCommandsAgreeOnUnverifiableLocalSkill(t *testing.T) {
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	target := installedDir(root, "local")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "SKILL.md"), []byte("---\nname: local\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("SKILL.md", filepath.Join(target, "linked.md")); err != nil {
+		t.Skipf("cannot create test symlink: %v", err)
+	}
+	m := &modfile.Mod{SchemaVersion: modfile.SchemaVersion, Skills: []modfile.ModSkill{{Name: "local", Local: true}}}
+	lock := &modfile.Lock{SchemaVersion: modfile.SchemaVersion, Skills: []modfile.LockSkill{{
+		Name: "local", Dirhash: testutil.DirHash("local baseline"),
+	}}}
+	if err := modfile.SaveState(root, m, lock); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := eng.List(ctx, testIO())
+	if err != nil {
+		t.Fatal(err)
+	}
+	why, err := eng.Why(ctx, "local", testIO())
+	if err != nil {
+		t.Fatal(err)
+	}
+	verify, err := eng.Verify(ctx, testIO())
+	var drift *engine.DriftError
+	if !errors.As(err, &drift) {
+		t.Fatalf("Verify(unverifiable local) error = %v, want DriftError", err)
+	}
+	for command, report := range map[string]*engine.Report{"list": list, "why": why, "verify": verify} {
+		if len(report.Entries) != 1 || report.Entries[0].Action != engine.ActionUnverifiable {
+			t.Errorf("%s unverifiable entry = %+v", command, report.Entries)
+			continue
+		}
+		targets := report.Entries[0].TargetResults
+		if len(targets) != 1 || targets[0].Action != engine.ActionUnverifiable || targets[0].Note == "" {
+			t.Errorf("%s unverifiable target = %+v", command, targets)
+		}
+	}
+}
+
+func TestUpdateExplicitLocalSelectionReportsSkipWithoutWritingState(t *testing.T) {
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	m := &modfile.Mod{SchemaVersion: modfile.SchemaVersion, Skills: []modfile.ModSkill{{Name: "local", Local: true}}}
+	lock := &modfile.Lock{SchemaVersion: modfile.SchemaVersion, Skills: []modfile.LockSkill{{
+		Name: "local", Dirhash: testutil.DirHash("local"),
+	}}}
+	if err := modfile.SaveState(root, m, lock); err != nil {
+		t.Fatal(err)
+	}
+	modPath := filepath.Join(root, modfile.ModFileName)
+	lockPath := filepath.Join(root, modfile.LockFileName)
+	beforeMod, err := os.Stat(modPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeLock, err := os.Stat(lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var noArgOut bytes.Buffer
+	noArgReport, err := eng.Update(ctx, nil, engine.UpdateOptions{}, engine.IO{Out: &noArgOut, Yes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(noArgReport.Entries) != 0 || len(noArgReport.Notes) != 1 {
+		t.Errorf("Update(all local) report = %+v, want one explanatory note", noArgReport)
+	}
+	if !strings.Contains(noArgOut.String(), "nothing to update") {
+		t.Errorf("Update(all local) output = %q, want nothing-to-update diagnostic", noArgOut.String())
+	}
+
+	var out bytes.Buffer
+	rep, err := eng.Update(ctx, []string{"local"}, engine.UpdateOptions{}, engine.IO{Out: &out, Yes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Action != engine.ActionSkip || !rep.Entries[0].Local {
+		t.Errorf("Update(local) entries = %+v, want one local skip", rep.Entries)
+	}
+	if out.Len() == 0 {
+		t.Error("Update(local) printed no skip diagnostic")
+	}
+	afterMod, err := os.Stat(modPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterLock, err := os.Stat(lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !afterMod.ModTime().Equal(beforeMod.ModTime()) || !afterLock.ModTime().Equal(beforeLock.ModTime()) {
+		t.Error("Update(local) rewrote manifest state")
+	}
+}
+
+func TestWhyReportsImmutableProvenanceAndTargetResults(t *testing.T) {
 	r := newHelloRepo(t)
 	root := t.TempDir()
 	eng := newEngine(t, root, t.TempDir())

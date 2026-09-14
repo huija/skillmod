@@ -29,24 +29,26 @@ import (
 const (
 	ExitOK      = 0
 	ExitError   = 1
-	ExitDrift   = 2 // verify detected drift; intended for CI use (AC-12)
+	ExitDrift   = 2 // verify detected drift; intended for CI use
 	ExitPartial = 3 // safe conflict handling skipped at least one target
 )
 
-// Global flags.
-var (
-	flagInstallMode string
-	flagGlobal      bool
-	flagJSON        bool
-	flagYes         bool
-	flagDryRun      bool
+// Version is set by main from the build-time version metadata.
+var Version = "dev"
 
-	// Version is set by main from the build-time version metadata.
-	Version = "dev"
-)
+// rootOptions belongs to one command tree. Keeping flag state on the tree
+// makes NewRootCmd safe to call repeatedly or concurrently in one process.
+type rootOptions struct {
+	installMode string
+	global      bool
+	json        bool
+	yes         bool
+	dryRun      bool
+}
 
 // NewRootCmd assembles the root command and all subcommands.
 func NewRootCmd() *cobra.Command {
+	options := &rootOptions{}
 	root := &cobra.Command{
 		Use:           "skillmod",
 		Version:       Version,
@@ -56,22 +58,22 @@ func NewRootCmd() *cobra.Command {
 		SilenceErrors: true,
 	}
 	pf := root.PersistentFlags()
-	pf.StringVar(&flagInstallMode, "install-mode", "", i18n.Text("cli.root.flag_install_mode"))
-	pf.BoolVar(&flagGlobal, "global", false, i18n.Text("cli.root.flag_global"))
-	pf.BoolVar(&flagJSON, "json", false, i18n.Text("cli.root.flag_json"))
-	pf.BoolVar(&flagYes, "yes", false, i18n.Text("cli.root.flag_yes"))
-	pf.BoolVar(&flagDryRun, "dry-run", false, i18n.Text("cli.root.flag_dry_run"))
+	pf.StringVar(&options.installMode, "install-mode", "", i18n.Text("cli.root.flag_install_mode"))
+	pf.BoolVar(&options.global, "global", false, i18n.Text("cli.root.flag_global"))
+	pf.BoolVar(&options.json, "json", false, i18n.Text("cli.root.flag_json"))
+	pf.BoolVar(&options.yes, "yes", false, i18n.Text("cli.root.flag_yes"))
+	pf.BoolVar(&options.dryRun, "dry-run", false, i18n.Text("cli.root.flag_dry_run"))
 
 	root.AddCommand(
-		newInitCmd(),
-		newGetCmd(),
-		newSyncCmd(),
-		newListCmd(),
-		newWhyCmd(),
-		newUpdateCmd(),
-		newRemoveCmd(),
-		newPruneCmd(),
-		newVerifyCmd(),
+		newInitCmd(options),
+		newGetCmd(options),
+		newSyncCmd(options),
+		newListCmd(options),
+		newWhyCmd(options),
+		newUpdateCmd(options),
+		newRemoveCmd(options),
+		newPruneCmd(options),
+		newVerifyCmd(options),
 	)
 	return root
 }
@@ -108,10 +110,10 @@ func exitCode(err error) int {
 }
 
 // newEngine selects declarations and installation roots while sharing one user store.
-func newEngine() (*engine.Engine, error) {
+func (options *rootOptions) newEngine() (*engine.Engine, error) {
 	var root string
 	var err error
-	if flagGlobal {
+	if options.global {
 		root, err = os.UserHomeDir()
 	} else {
 		root, err = os.Getwd()
@@ -127,14 +129,14 @@ func newEngine() (*engine.Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	if flagInstallMode != "" {
-		cfg.InstallMode = install.Mode(flagInstallMode)
+	if options.installMode != "" {
+		cfg.InstallMode = install.Mode(options.installMode)
 	}
 	if err := install.ValidateMode(cfg.InstallMode); err != nil {
 		return nil, err
 	}
 	manifestRoot := ""
-	if flagGlobal {
+	if options.global {
 		manifestRoot = filepath.Join(s.Root(), "global")
 	}
 	return &engine.Engine{
@@ -149,17 +151,16 @@ func newEngine() (*engine.Engine, error) {
 // newIO configures I/O channels from global flags and terminal state.
 // In --json mode stdout must carry only the machine-readable report, so
 // human-readable engine summaries are routed to stderr.
-func newIO(cmd *cobra.Command) engine.IO {
+func (options *rootOptions) newIO(cmd *cobra.Command) engine.IO {
 	out := cmd.OutOrStdout()
-	if flagJSON {
+	if options.json {
 		out = cmd.ErrOrStderr()
 	}
 	io := engine.IO{
-		Out:    out,
-		Yes:    flagYes,
-		DryRun: flagDryRun,
+		Out: out,
+		Yes: options.yes,
 	}
-	if !flagYes && isTerminal(os.Stdin) {
+	if !options.yes && isTerminal(os.Stdin) {
 		io.Confirm = ui.Interactive(os.Stdin, cmd.ErrOrStderr())
 	}
 	if isTerminal(os.Stderr) {
@@ -168,14 +169,18 @@ func newIO(cmd *cobra.Command) engine.IO {
 	return io
 }
 
+func (options *rootOptions) mutationOptions() engine.MutationOptions {
+	return engine.MutationOptions{DryRun: options.dryRun}
+}
+
 func isTerminal(f *os.File) bool {
 	// Use ioctl because /dev/null is also ModeCharDevice and a Stat-based check would misclassify it.
 	return term.IsTerminal(int(f.Fd()))
 }
 
 // output renders structured JSON for --json; otherwise the engine has already printed a summary.
-func output(cmd *cobra.Command, rep *engine.Report) error {
-	if !flagJSON || rep == nil {
+func (options *rootOptions) output(cmd *cobra.Command, rep *engine.Report) error {
+	if !options.json || rep == nil {
 		return nil
 	}
 	data, err := json.MarshalIndent(rep, "", "  ")

@@ -24,11 +24,14 @@ jobs:
       os: ${{ matrix.os }}
       race: ${{ matrix.race }}
 
+  quality:
+    uses: ./.github/workflows/quality.yml
+
   cross:
     uses: ./.github/workflows/cross.yml
 
   release:
-    needs: [test, cross]
+    needs: [quality, test, cross]
     runs-on: ubuntu-latest
     permissions:
       contents: write

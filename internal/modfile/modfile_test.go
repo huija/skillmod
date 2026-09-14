@@ -19,8 +19,8 @@ import (
 
 func TestMain(m *testing.M) { testutil.RunMain(m) }
 
-// This PRD §3.0 format example keeps the implementation textually aligned with the specification.
-const prdModExample = `schemaversion = 1
+// These examples mirror the public formats documented in the README.
+const modExample = `schemaversion = 1
 
 [[skill]]
 name = "code-review"
@@ -32,16 +32,18 @@ name = "legacy-notes"
 local = true
 `
 
-const prdLockExample = `[[skill]]
+const lockExample = `schemaversion = 1
+
+[[skill]]
 name = "code-review"
 source = "github.com/acme/agent-skills//code-review"
 version = "code-review/v1.2.0"
 commit = "7f3a9c1e00000000000000000000000000000000"
-dirhash = "h1:4wYq0b..."
+dirhash = "h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
 `
 
-func TestParseMod_PRDExample(t *testing.T) {
-	m, err := ParseMod([]byte(prdModExample))
+func TestParseMod_DocumentedExample(t *testing.T) {
+	m, err := ParseMod([]byte(modExample))
 	if err != nil {
 		t.Fatalf("ParseMod: %v", err)
 	}
@@ -60,18 +62,18 @@ func TestParseMod_PRDExample(t *testing.T) {
 	}
 }
 
-func TestParseLock_PRDExample(t *testing.T) {
-	l, err := ParseLock([]byte(prdLockExample))
+func TestParseLock_DocumentedExample(t *testing.T) {
+	l, err := ParseLock([]byte(lockExample))
 	if err != nil {
 		t.Fatalf("ParseLock: %v", err)
 	}
-	if len(l.Skills) != 1 || l.Skills[0].Dirhash != "h1:4wYq0b..." || l.Skills[0].InstallDir() != "code-review" {
+	if l.SchemaVersion != SchemaVersion || len(l.Skills) != 1 || l.Skills[0].Dirhash != "h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" || l.Skills[0].InstallDir() != "code-review" {
 		t.Errorf("Skills = %+v", l.Skills)
 	}
 }
 
 func TestParseLock_NormalizesRedundantDirectory(t *testing.T) {
-	data := []byte("[[skill]]\nname = \"algorithmic-art\"\ndirhash = \"h1:test\"\ndir = \"algorithmic-art\"\n")
+	data := []byte("schemaversion = 1\n\n[[skill]]\nname = \"algorithmic-art\"\ndirhash = \"h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\"\ndir = \"algorithmic-art\"\n")
 	l, err := ParseLock(data)
 	if err != nil {
 		t.Fatalf("ParseLock(redundant dir) error = %v, want nil", err)
@@ -136,11 +138,11 @@ func TestSkillInstallationDirectories(t *testing.T) {
 }
 
 func TestMarshalLock_Deterministic(t *testing.T) {
-	l := &Lock{Skills: []LockSkill{
-		{Name: "b", Source: "x//b", Version: "v1.0.0", Commit: strings.Repeat("b", 40), Dirhash: "h1:bbb"},
-		{Name: "a", Source: "x//a", Version: "v2.0.0", Commit: strings.Repeat("a", 40), Dirhash: "h1:aaa"},
-		{Name: "same", Source: "x//same", Version: "v1.0.0", Commit: strings.Repeat("c", 40), Dirhash: "h1:z", Dir: "same-z"},
-		{Name: "same", Source: "x//same", Version: "v1.0.0", Commit: strings.Repeat("d", 40), Dirhash: "h1:a", Dir: "same-a"},
+	l := &Lock{SchemaVersion: SchemaVersion, Skills: []LockSkill{
+		{Name: "b", Source: "x//b", Version: "v1.0.0", Commit: strings.Repeat("b", 40), Dirhash: testutil.DirHash("bbb")},
+		{Name: "a", Source: "x//a", Version: "v2.0.0", Commit: strings.Repeat("a", 40), Dirhash: testutil.DirHash("aaa")},
+		{Name: "same", Source: "x//same", Version: "v1.0.0", Commit: strings.Repeat("c", 40), Dirhash: testutil.DirHash("z"), Dir: "same-z"},
+		{Name: "same", Source: "x//same", Version: "v1.0.0", Commit: strings.Repeat("d", 40), Dirhash: testutil.DirHash("a"), Dir: "same-a"},
 	}}
 	first, err := MarshalLock(l)
 	if err != nil {
@@ -156,7 +158,7 @@ func TestMarshalLock_Deterministic(t *testing.T) {
 		}
 	}
 	// Entry sorting makes unordered input produce the same bytes as ordered input.
-	rev := &Lock{Skills: []LockSkill{l.Skills[3], l.Skills[2], l.Skills[1], l.Skills[0]}}
+	rev := &Lock{SchemaVersion: SchemaVersion, Skills: []LockSkill{l.Skills[3], l.Skills[2], l.Skills[1], l.Skills[0]}}
 	revOut, err := MarshalLock(rev)
 	if err != nil {
 		t.Fatal(err)
@@ -174,14 +176,14 @@ func TestMarshalLock_Deterministic(t *testing.T) {
 }
 
 func TestMarshalLock_OmitsDefaultDirectory(t *testing.T) {
-	plain, err := MarshalLock(&Lock{Skills: []LockSkill{{Name: "plain", Dirhash: "h1:x"}}})
+	plain, err := MarshalLock(&Lock{SchemaVersion: SchemaVersion, Skills: []LockSkill{{Name: "plain", Dirhash: testutil.DirHash("x")}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Contains(plain, []byte("dir =")) {
 		t.Errorf("MarshalLock(plain) = %s, want dir omitted", plain)
 	}
-	redundant, err := MarshalLock(&Lock{Skills: []LockSkill{{Name: "plain", Dir: "plain", Dirhash: "h1:x"}}})
+	redundant, err := MarshalLock(&Lock{SchemaVersion: SchemaVersion, Skills: []LockSkill{{Name: "plain", Dir: "plain", Dirhash: testutil.DirHash("x")}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +191,7 @@ func TestMarshalLock_OmitsDefaultDirectory(t *testing.T) {
 		t.Errorf("MarshalLock(redundant dir) = %s, want dir omitted", redundant)
 	}
 
-	aliased, err := MarshalLock(&Lock{Skills: []LockSkill{{Name: "published", Dir: "installed", Dirhash: "h1:x"}}})
+	aliased, err := MarshalLock(&Lock{SchemaVersion: SchemaVersion, Skills: []LockSkill{{Name: "published", Dir: "installed", Dirhash: testutil.DirHash("x")}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,8 +265,9 @@ func TestSaveAndLoad_Atomic(t *testing.T) {
 		t.Fatalf("LoadMod = %+v", loadedMod.Skills)
 	}
 
-	l := &Lock{Skills: []LockSkill{{
-		Name: "a", Source: "s", Version: "v1.0.0", Commit: strings.Repeat("a", 40), Dirhash: "h1:x",
+	wantHash := testutil.DirHash("x")
+	l := &Lock{SchemaVersion: SchemaVersion, Skills: []LockSkill{{
+		Name: "a", Source: "s", Version: "v1.0.0", Commit: strings.Repeat("a", 40), Dirhash: wantHash,
 	}}}
 	if err := SaveLock(dir, l); err != nil {
 		t.Fatal(err)
@@ -277,7 +280,7 @@ func TestSaveAndLoad_Atomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(back.Skills) != 1 || back.Skills[0].Dirhash != "h1:x" {
+	if len(back.Skills) != 1 || back.Skills[0].Dirhash != wantHash {
 		t.Errorf("LoadLock = %+v", back.Skills)
 	}
 	if err := os.Remove(filepath.Join(dir, ModFileName)); err != nil {
@@ -291,7 +294,7 @@ func TestSaveAndLoad_Atomic(t *testing.T) {
 func TestSaveStateRestoresBothFilesWhenSecondWriteFails(t *testing.T) {
 	dir := t.TempDir()
 	oldMod := &Mod{SchemaVersion: SchemaVersion, Skills: []ModSkill{{Name: "old", Local: true}}}
-	oldLock := &Lock{Skills: []LockSkill{{Name: "old", Dirhash: "h1:old"}}}
+	oldLock := &Lock{SchemaVersion: SchemaVersion, Skills: []LockSkill{{Name: "old", Dirhash: testutil.DirHash("old")}}}
 	if err := SaveState(dir, oldMod, oldLock); err != nil {
 		t.Fatalf("SaveState(old): %v", err)
 	}
@@ -317,7 +320,7 @@ func TestSaveStateRestoresBothFilesWhenSecondWriteFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MarshalMod(new): %v", err)
 	}
-	newLock, err := MarshalLock(&Lock{Skills: []LockSkill{{Name: "new", Dirhash: "h1:new"}}})
+	newLock, err := MarshalLock(&Lock{SchemaVersion: SchemaVersion, Skills: []LockSkill{{Name: "new", Dirhash: testutil.DirHash("new")}}})
 	if err != nil {
 		t.Fatalf("MarshalLock(new): %v", err)
 	}
@@ -382,17 +385,23 @@ func TestValidateMod(t *testing.T) {
 		t.Fatalf("ValidateMod(valid) = %v, want nil", err)
 	}
 	invalid := map[string]Mod{
-		"invalid name":      {Skills: []ModSkill{{Name: "a:b"}}},
-		"reserved name":     {Skills: []ModSkill{{Name: "CON"}}},
-		"trailing dot":      {Skills: []ModSkill{{Name: "demo."}}},
-		"empty name":        {Skills: []ModSkill{{Name: ""}}},
-		"invalid alias":     {Skills: []ModSkill{{Name: "a", Alias: "a:b"}}},
-		"reserved alias":    {Skills: []ModSkill{{Name: "a", Alias: "con"}}},
-		"duplicate name":    {Skills: []ModSkill{{Name: "a"}, {Name: "a"}}},
-		"case dir conflict": {Skills: []ModSkill{{Name: "Demo"}, {Name: "demo"}}},
+		"invalid name":    {Skills: []ModSkill{{Name: "a:b", Local: true}}},
+		"reserved name":   {Skills: []ModSkill{{Name: "CON", Local: true}}},
+		"trailing dot":    {Skills: []ModSkill{{Name: "demo.", Local: true}}},
+		"empty name":      {Skills: []ModSkill{{Name: "", Local: true}}},
+		"invalid alias":   {Skills: []ModSkill{{Name: "a", Alias: "a:b", Local: true}}},
+		"reserved alias":  {Skills: []ModSkill{{Name: "a", Alias: "con", Local: true}}},
+		"missing source":  {Skills: []ModSkill{{Name: "a"}}},
+		"invalid source":  {Skills: []ModSkill{{Name: "a", Source: "https://user:secret@example.com/repo"}}},
+		"source with ref": {Skills: []ModSkill{{Name: "a", Source: "example.com/repo@v1.0.0"}}},
+		"local remote fields": {Skills: []ModSkill{{
+			Name: "a", Local: true, Source: "example.com/repo", Version: "v1.0.0",
+		}}},
+		"duplicate name":    {Skills: []ModSkill{{Name: "a", Local: true}, {Name: "a", Local: true}}},
+		"case dir conflict": {Skills: []ModSkill{{Name: "Demo", Local: true}, {Name: "demo", Local: true}}},
 		"alias dir conflict": {Skills: []ModSkill{
-			{Name: "a", Alias: "shared"},
-			{Name: "b", Alias: "SHARED"},
+			{Name: "a", Alias: "shared", Local: true},
+			{Name: "b", Alias: "SHARED", Local: true},
 		}},
 	}
 	for label, m := range invalid {
@@ -403,13 +412,28 @@ func TestValidateMod(t *testing.T) {
 	}
 }
 
+func TestParseLock_UnsupportedSchemaRejected(t *testing.T) {
+	for name, data := range map[string]string{
+		"missing":  "",
+		"zero":     "schemaversion = 0\n",
+		"negative": "schemaversion = -1\n",
+		"future":   "schemaversion = 99\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseLock([]byte(data)); err == nil {
+				t.Fatalf("ParseLock(%q) succeeded, want unsupported schema error", data)
+			}
+		})
+	}
+}
+
 func TestValidateLock(t *testing.T) {
-	valid := &Lock{Skills: []LockSkill{
-		{Name: "demo", Dirhash: "h1:a"},
-		{Name: "plain", Dir: "plain", Dirhash: "h1:e"},
-		{Name: "demo", Source: "other//demo", Version: "v1.0.0", Commit: strings.Repeat("a", 40), Dir: "other-demo", Dirhash: "h1:c"},
-		{Name: "Demo", Source: "capital//demo", Version: "v1.0.0", Commit: strings.Repeat("b", 40), Dir: "capital-demo", Dirhash: "h1:d"},
-		{Name: "cr", Dir: "cr-alias", Dirhash: "h1:b"},
+	valid := &Lock{SchemaVersion: SchemaVersion, Skills: []LockSkill{
+		{Name: "demo", Dirhash: testutil.DirHash("a")},
+		{Name: "plain", Dir: "plain", Dirhash: testutil.DirHash("e")},
+		{Name: "demo", Source: "other//demo", Version: "v1.0.0", Commit: strings.Repeat("a", 40), Dir: "other-demo", Dirhash: testutil.DirHash("c")},
+		{Name: "Demo", Source: "capital//demo", Version: "v1.0.0", Commit: strings.Repeat("b", 40), Dir: "capital-demo", Dirhash: testutil.DirHash("d")},
+		{Name: "cr", Dir: "cr-alias", Dirhash: testutil.DirHash("b")},
 	}}
 	if err := ValidateLock(valid); err != nil {
 		t.Fatalf("ValidateLock(valid) = %v, want nil", err)
@@ -418,19 +442,21 @@ func TestValidateLock(t *testing.T) {
 		"invalid name":    {Skills: []LockSkill{{Name: "a*b", Dirhash: "h1:x"}}},
 		"invalid dir":     {Skills: []LockSkill{{Name: "a", Dir: "con", Dirhash: "h1:x"}}},
 		"missing dirhash": {Skills: []LockSkill{{Name: "a"}}},
+		"invalid dirhash": {Skills: []LockSkill{{Name: "a", Dirhash: "h1:not-a-digest"}}},
 		"local remote fields": {Skills: []LockSkill{{
-			Name: "a", Version: "v1.0.0", Commit: strings.Repeat("a", 40), Dirhash: "h1:x",
+			Name: "a", Version: "v1.0.0", Commit: strings.Repeat("a", 40), Dirhash: testutil.DirHash("x"),
 		}}},
 		"missing version": {Skills: []LockSkill{{
-			Name: "a", Source: "repo", Commit: strings.Repeat("a", 40), Dirhash: "h1:x",
+			Name: "a", Source: "repo", Commit: strings.Repeat("a", 40), Dirhash: testutil.DirHash("x"),
 		}}},
-		"missing commit":    {Skills: []LockSkill{{Name: "a", Source: "repo", Version: "v1.0.0", Dirhash: "h1:x"}}},
-		"invalid commit":    {Skills: []LockSkill{{Name: "a", Source: "repo", Version: "v1.0.0", Commit: "abc", Dirhash: "h1:x"}}},
-		"duplicate name":    {Skills: []LockSkill{{Name: "a", Dirhash: "h1:x"}, {Name: "a", Dirhash: "h1:x"}}},
-		"case dir conflict": {Skills: []LockSkill{{Name: "Demo", Dirhash: "h1:x"}, {Name: "demo", Dirhash: "h1:y"}}},
-		"dir conflict":      {Skills: []LockSkill{{Name: "a", Dir: "shared", Dirhash: "h1:x"}, {Name: "b", Dir: "SHARED", Dirhash: "h1:y"}}},
+		"missing commit":    {Skills: []LockSkill{{Name: "a", Source: "repo", Version: "v1.0.0", Dirhash: testutil.DirHash("x")}}},
+		"invalid commit":    {Skills: []LockSkill{{Name: "a", Source: "repo", Version: "v1.0.0", Commit: "abc", Dirhash: testutil.DirHash("x")}}},
+		"duplicate name":    {Skills: []LockSkill{{Name: "a", Dirhash: testutil.DirHash("x")}, {Name: "a", Dirhash: testutil.DirHash("x")}}},
+		"case dir conflict": {Skills: []LockSkill{{Name: "Demo", Dirhash: testutil.DirHash("x")}, {Name: "demo", Dirhash: testutil.DirHash("y")}}},
+		"dir conflict":      {Skills: []LockSkill{{Name: "a", Dir: "shared", Dirhash: testutil.DirHash("x")}, {Name: "b", Dir: "SHARED", Dirhash: testutil.DirHash("y")}}},
 	}
 	for label, l := range invalid {
+		l.SchemaVersion = SchemaVersion
 		if err := ValidateLock(&l); err == nil {
 			t.Errorf("ValidateLock(%s) = nil, want error", label)
 		}

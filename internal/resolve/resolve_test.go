@@ -81,7 +81,7 @@ func TestResolve_BranchErrorMessage(t *testing.T) {
 	if !errors.As(err, &be) {
 		t.Fatalf("err = %v", err)
 	}
-	// Exact wording required by PRD §3.2, pinned literally so a catalog edit
+	// Pin the remediation wording so a catalog edit
 	// cannot silently change the contract.
 	const want = `branches cannot be locked; use a tag or commit SHA ("main" is a branch name)`
 	if be.Error() != want {

@@ -11,18 +11,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newPruneCmd() *cobra.Command {
+func newPruneCmd(options *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "prune",
 		Short: i18n.Text("cli.prune.short"),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			eng, err := newEngine()
+			eng, err := options.newEngine()
 			if err != nil {
 				return err
 			}
-			rep, err := eng.Prune(cmd.Context(), newIO(cmd))
-			return errors.Join(err, output(cmd, rep))
+			rep, err := eng.Prune(cmd.Context(), options.newIO(cmd), options.mutationOptions())
+			return errors.Join(err, options.output(cmd, rep))
 		},
 	}
 }

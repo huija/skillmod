@@ -146,7 +146,7 @@ func englishCatalog(t *testing.T) map[string]string {
 }
 
 // TestContractWordingIsPinned pins the wording other artifacts depend on: the
-// lock rejection the PRD fixes verbatim, the command usage lines published in
+// lock rejection used by the CLI, the command usage lines published in
 // help and the README, and the canonical missing-manifest errors. Rewording any
 // of them is a deliberate act that must update this table in the same change.
 func TestContractWordingIsPinned(t *testing.T) {

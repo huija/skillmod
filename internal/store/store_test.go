@@ -18,6 +18,7 @@ import (
 
 	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/fsutil"
+	repoaddr "github.com/huija/skillmod/internal/repo"
 	"github.com/huija/skillmod/internal/resolve"
 	"github.com/huija/skillmod/internal/source"
 	"github.com/huija/skillmod/internal/testutil"
@@ -120,6 +121,8 @@ func TestSnapshot_RoundTripAndConflict(t *testing.T) {
 	if got.Info.Format != "" {
 		t.Fatalf("Format = %q, want empty for a test store", got.Info.Format)
 	}
+	info.Transport = info.Repo
+	info.Repo = repoaddr.Identity(info.Repo)
 	info.Format = got.Info.Format
 	if !reflect.DeepEqual(got.Info, info) {
 		t.Fatalf("Info = %+v, want %+v", got.Info, info)
@@ -144,6 +147,26 @@ func TestSnapshot_RoundTripAndConflict(t *testing.T) {
 	var conflict *SnapshotConflictError
 	if !errors.As(err, &conflict) {
 		t.Fatalf("err = %v (%T), want SnapshotConflictError", err, err)
+	}
+}
+
+func TestSnapshotPreservesSSHTransportSeparatelyFromIdentity(t *testing.T) {
+	s := New(t.TempDir())
+	files := testFiles()
+	transport := "git@example.com:acme/skills.git"
+	info := SnapshotInfo{
+		Repo: transport, Version: "v1.0.0", Commit: strings.Repeat("a", 40),
+		Treehash: hashFiles(t, files),
+	}
+	snap, err := s.PutSnapshot(info, files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := snap.Info.Repository(); got != transport {
+		t.Errorf("SnapshotInfo.Repository() = %q, want %q", got, transport)
+	}
+	if got, want := snap.Info.Repo, repoaddr.Identity(transport); got != want {
+		t.Errorf("SnapshotInfo.Repo = %q, want identity %q", got, want)
 	}
 }
 

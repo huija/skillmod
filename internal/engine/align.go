@@ -23,10 +23,10 @@ type alignEntry struct {
 // align reconciles the mod and lock files and materializes all remote entries in phase 1, which reads only remotes and the global store.
 // It does not touch installation directories or write mod or lock files, so failure leaves the project unchanged.
 //
-// Authority rule (PRD §3.3 rule 1): when mod and lock agree, follow the lock exactly;
+// Authority rule: when mod and lock agree, follow the lock exactly;
 // when the mod version was edited, resolve the entry again and update the lock.
 func (e *Engine) align(ctx context.Context, m *modfile.Mod, lock *modfile.Lock) ([]alignEntry, *modfile.Lock, error) {
-	newLock := &modfile.Lock{Skills: append([]modfile.LockSkill(nil), lock.Skills...)}
+	newLock := &modfile.Lock{SchemaVersion: modfile.SchemaVersion, Skills: append([]modfile.LockSkill(nil), lock.Skills...)}
 	var out []alignEntry
 	memo := newOperationMemo(nil)
 	for _, sk := range m.Skills {
@@ -39,7 +39,7 @@ func (e *Engine) align(ctx context.Context, m *modfile.Mod, lock *modfile.Lock) 
 			return nil, nil, err
 		}
 		if lk != nil && lk.Version == sk.Version {
-			// Agreement path: the lock is authoritative (AC-10), so do not call ls-remote.
+			// Agreement path: the lock is authoritative, so do not call ls-remote.
 			dir, err := e.materializeLocked(ctx, repo, subdir, *lk, memo)
 			if err != nil {
 				return nil, nil, err

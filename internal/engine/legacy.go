@@ -20,6 +20,7 @@ import (
 	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/modfile"
+	repoaddr "github.com/huija/skillmod/internal/repo"
 	"github.com/huija/skillmod/internal/resolve"
 	"github.com/huija/skillmod/internal/source"
 )
@@ -110,7 +111,7 @@ func (sk legacySkill) location() (repo, subdir string, err error) {
 	// Only native Git transports are accepted, never executable remote helpers.
 	transport := a.Repo
 	if !strings.Contains(transport, "://") {
-		transport = source.RepoIdentity(transport) // scp-style SSH
+		transport = repoaddr.Identity(transport) // scp-style SSH
 	}
 	u, err := url.Parse(transport)
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http" && u.Scheme != "ssh" && u.Scheme != "file") {
@@ -205,7 +206,10 @@ func (im *legacyImporter) match(ctx context.Context, old legacySkill, name, alia
 	// old installer), so a hash mismatch is reported by init but does not erase
 	// the recoverable source declaration. The lock records the source revision's
 	// hash; a subsequent verify reports drift and sync can align the directory.
-	src := source.RepoIdentity(repo)
+	src, err := repoaddr.PersistedTransport(repo)
+	if err != nil {
+		return nil, nil, err
+	}
 	if subdir != "" {
 		src += subdirSuffix(subdir)
 	}
