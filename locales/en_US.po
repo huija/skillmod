@@ -49,6 +49,10 @@ msgstr "subdirectory must use / separators: %q"
 msgid "address.version_whitespace"
 msgstr "version reference contains whitespace: %q"
 
+#, go-format
+msgid "agents.unknown_target"
+msgstr "unknown agent %q; registered agents: %s"
+
 msgid "cli.get.flag_alias"
 msgstr "installation directory alias (resolves name conflicts)"
 
@@ -129,6 +133,53 @@ msgid "cli.root.short"
 msgstr "go mod for Agent Skills: SKILL.mod declarations + SKILL.lock pinnin"
 "g + sync alignment"
 
+msgid "cli.share.flag_agent"
+msgstr "registered agent targets to link into (repeatable or comma-separate"
+"d); omit to choose interactively"
+
+msgid "cli.share.flag_all"
+msgstr "share every installed skill without asking"
+
+msgid "cli.share.flag_dir"
+msgstr "an extra destination directory (repeatable); relative paths resolve"
+" against the scope root"
+
+msgid "cli.share.flag_on_conflict"
+msgstr "what to do when a destination already exists: ask (default), overwr"
+"ite, or skip"
+
+msgid "cli.share.flag_skill"
+msgstr "skills to share (repeatable or comma-separated); omit to choose int"
+"eractively"
+
+msgid "cli.share.long"
+msgstr "Link installed skills from the managed skills directory into other "
+"AI-agent directories, such as .claude or .codex. Each destination entry is"
+" a symlink to the managed copy - the same representation get uses with the"
+" auto install mode - so edits to the managed skill are visible through eve"
+"ry link at once, and a filesystem that forbids symlinks falls back to a by"
+"te-preserving copy. Destinations are unmanaged: skillmod records them nowh"
+"ere and verify never checks them, so re-running share restores links that "
+"were replaced or fell back to copies. Without --skill or positional skill "
+"names the command lists the installed skills for an interactive choice, an"
+"d without --agent or --dir it lists the registered agent directories. When"
+" a destination already holds different content, share asks per conflict; -"
+"-on-conflict=overwrite or =skip answers them all, and --yes skips conflict"
+"s safely.AI-agent directories, such as .claude or .codex. Destinations are"
+" unmanaged copies: skillmod records them nowhere and verify never checks t"
+"hem, so re-running share is how a copy gets refreshed. Without --skill or "
+"positional skill names the command lists the installed skills for an inter"
+"active choice, and without --agent or --dir it lists the registered agent "
+"directories. When a destination already holds different content, share ask"
+"s per conflict; --on-conflict=overwrite or =skip answers them all, and --y"
+"es skips conflicts safely."
+
+msgid "cli.share.short"
+msgstr "Copy installed skills into other agent directories"
+
+msgid "cli.share.use"
+msgstr "share [skills...]"
+
 msgid "cli.sync.flag_check"
 msgstr "verify without modifying anything (alias for skillmod verify)"
 
@@ -173,6 +224,11 @@ msgid "cli.why.use"
 msgstr "why <name-or-alias>"
 
 #, go-format
+msgid "config.agents_setting_removed"
+msgstr "the agents setting was removed; skillmod manages one installation d"
+"irectory now. Remove the %q entry from %s"
+
+#, go-format
 msgid "config.parse"
 msgstr "parse %s: %w"
 
@@ -208,6 +264,37 @@ msgstr "checking cached content integrity"
 msgid "engine.checking_remote_versions"
 msgstr "checking remote versions for %s"
 
+msgid "engine.conflict.abort"
+msgstr "abort"
+
+msgid "engine.conflict.aborted"
+msgstr "aborted by user"
+
+msgid "engine.conflict.detected"
+msgstr "conflicts detected (destinations exist with different content):"
+
+#, go-format
+msgid "engine.conflict.exists_mismatch"
+msgstr "conflict: %s exists with different content"
+
+msgid "engine.conflict.overwrite"
+msgstr "overwrite"
+
+msgid "engine.conflict.review"
+msgstr "Review the conflicts and retry interactively, or use --yes to keep "
+"and skip them."
+
+msgid "engine.conflict.skip"
+msgstr "keep and skip"
+
+#, go-format
+msgid "engine.conflict.skipped_yes"
+msgstr "conflict (--yes automatically kept and skipped): %s"
+
+#, go-format
+msgid "engine.conflict.unknown_policy"
+msgstr "unknown conflict policy %q; expected ask, overwrite, or skip"
+
 msgid "engine.contacting_git_server"
 msgstr "contacting the Git server"
 
@@ -224,31 +311,12 @@ msgstr "dry-run: no files were written"
 msgid "engine.fetching_git_objects"
 msgstr "fetching Git objects"
 
-msgid "engine.get.abort"
-msgstr "abort"
-
-msgid "engine.get.aborted_user"
-msgstr "aborted by user"
-
 msgid "engine.get.alias_requires_one_skill"
 msgstr "--alias can only be used when exactly one skill is selected"
 
 #, go-format
 msgid "engine.get.confirm_install"
 msgstr "install %s from %s?\n%s"
-
-#, go-format
-msgid "engine.get.conflict_exists_mismatch"
-msgstr "Conflict: %s exists and its contents do not match the lock (it may "
-"have local changes)"
-
-#, go-format
-msgid "engine.get.conflict_yes_automatically"
-msgstr "conflict (--yes automatically kept and skipped): %s"
-
-msgid "engine.get.conflicts_detected_targets"
-msgstr "Conflicts detected (targets exist and their contents do not match t"
-"he lock):"
 
 msgid "engine.get.description"
 msgstr "no description"
@@ -263,9 +331,6 @@ msgstr "dry-run: %s %s (%s)"
 #, go-format
 msgid "engine.get.installed_skill_mod_skill"
 msgstr "installed %s %s; SKILL.mod and SKILL.lock were updated"
-
-msgid "engine.get.keep_skip"
-msgstr "keep and skip"
 
 msgid "engine.get.matching_requested_skill_name"
 msgstr "matching the requested skill name"
@@ -291,15 +356,8 @@ msgstr "notice: changing installation directory from %q to %q keeps the old"
 msgid "engine.get.option_format"
 msgstr "%s — %s\n  %s"
 
-msgid "engine.get.overwrite"
-msgstr "overwrite"
-
 msgid "engine.get.reading_skill_metadata"
 msgstr "reading skill metadata"
-
-msgid "engine.get.review_conflicts_retry"
-msgstr "Review the conflicts and retry interactively, or use --yes to keep "
-"and skip them automatically"
 
 msgid "engine.get.skill_md_missing_repository"
 msgstr "SKILL.md is missing from the repository root and every descendant o"
@@ -330,11 +388,6 @@ msgstr "ambiguous previous installer records for directory %q and skill nam"
 #, go-format
 msgid "engine.init.backup_failed"
 msgstr "backup failed: %w"
-
-#, go-format
-msgid "engine.init.cannot_import_different_skills"
-msgstr "cannot import different skills at %s and %s under the same director"
-"y name; reconcile them or rename one first"
 
 msgid "engine.init.confirmed_non_interactive"
 msgstr "not confirmed in a non-interactive environment; rerun with --yes to"
@@ -389,10 +442,6 @@ msgstr "installed provenance could not be recovered: %v"
 #, go-format
 msgid "engine.init.recovering_installed_skill"
 msgstr "recovering installed skill provenance: %s"
-
-msgid "engine.init.skill_same_name_appears"
-msgstr "a skill with the same name appears in multiple platform directories"
-"; merged into one entry"
 
 msgid "engine.init.skills_found_generated_empty"
 msgstr "no skills found; generated an empty manifest—use skillmod get to "
@@ -573,6 +622,71 @@ msgstr "resolved using the same-repository reference cache; remote was not "
 #, go-format
 msgid "engine.rollback_also_failed"
 msgstr "rollback also failed: %w"
+
+#, go-format
+msgid "engine.share.confirm_one"
+msgstr "share %s?"
+
+#, go-format
+msgid "engine.share.confirm_target"
+msgstr "share into %s (%s)?"
+
+msgid "engine.share.dry_run_note"
+msgstr "dry run: nothing was copied"
+
+#, go-format
+msgid "engine.share.identical_note"
+msgstr "%s already holds the same content"
+
+#, go-format
+msgid "engine.share.linked"
+msgstr "linked %s to %s"
+
+#, go-format
+msgid "engine.share.linked_note"
+msgstr "%s already links to the managed copy"
+
+msgid "engine.share.local_description"
+msgstr "local declaration, no version"
+
+#, go-format
+msgid "engine.share.no_skills_installed"
+msgstr "no installed skills were found in %s"
+
+msgid "engine.share.no_skills_selected"
+msgstr "no skills were selected"
+
+msgid "engine.share.no_targets"
+msgstr "no share destinations were requested; pass --agent or --dir"
+
+msgid "engine.share.non_interactive_selection"
+msgstr "no skills or destinations were requested; pass --skill or --all and"
+" --agent or --dir, or run share in a terminal"
+
+#, go-format
+msgid "engine.share.overlap_managed"
+msgstr "share destination %s overlaps the managed skills directory %s"
+
+#, go-format
+msgid "engine.share.plan"
+msgstr "Sharing %d skill(s) to %d destination(s)"
+
+msgid "engine.share.planned_note"
+msgstr "planned for copying"
+
+msgid "engine.share.select_skills"
+msgstr "Select the skills to share"
+
+msgid "engine.share.select_targets"
+msgstr "Select the agent directories to share into"
+
+#, go-format
+msgid "engine.share.skill_matches_multiple"
+msgstr "%q matches several installed skills: %s"
+
+#, go-format
+msgid "engine.share.skill_not_found"
+msgstr "no installed skill matches %q; installed skills: %s"
 
 msgid "engine.skill_lock_tool_maintained"
 msgstr "SKILL.lock is tool-maintained; repair the listed entry by hand, or "
@@ -838,10 +952,6 @@ msgstr "stage installation failed: %w"
 #, go-format
 msgid "install.unknown_install_mode"
 msgstr "unknown install mode %q; expected auto or copy"
-
-#, go-format
-msgid "install.unsupported_platform"
-msgstr "unsupported platform %q; supported platforms: %s"
 
 #, go-format
 msgid "install.write_disk_failed"

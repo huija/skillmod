@@ -26,7 +26,7 @@ import (
 var (
 	documentedCommands = []string{
 		string(engine.CommandGet), string(engine.CommandInit), string(engine.CommandList),
-		string(engine.CommandPrune), string(engine.CommandRemove), string(engine.CommandSync),
+		string(engine.CommandPrune), string(engine.CommandRemove), string(engine.CommandShare), string(engine.CommandSync),
 		string(engine.CommandUpdate), string(engine.CommandVerify), string(engine.CommandWhy),
 	}
 	documentedEntryActions = []string{

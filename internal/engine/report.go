@@ -21,6 +21,7 @@ const (
 	CommandList   Command = "list"
 	CommandPrune  Command = "prune"
 	CommandRemove Command = "remove"
+	CommandShare  Command = "share"
 	CommandSync   Command = "sync"
 	CommandUpdate Command = "update"
 	CommandVerify Command = "verify"
@@ -114,9 +115,9 @@ func printReportNotes(rep *Report, io IO) error {
 	return nil
 }
 
-// mergeInspectionStatus retains the most actionable aggregate status when a
-// skill is installed into more than one adapter directory. It keeps results
-// independent of adapter order while targetResults preserves every detail.
+// mergeInspectionStatus folds a target's outcome into the entry's aggregate
+// status, keeping the most actionable result while targetResults preserves the
+// per-directory detail.
 func mergeInspectionStatus(current EntryStatus, next TargetStatus) EntryStatus {
 	candidate := EntryStatus(next)
 	if inspectionSeverity(candidate) > inspectionSeverity(current) {

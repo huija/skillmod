@@ -10,13 +10,12 @@ import (
 
 	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/i18n"
-	"github.com/huija/skillmod/internal/install"
 	"github.com/huija/skillmod/internal/modfile"
 )
 
 // inspectSkill applies the same filesystem classification to list, verify, and
 // why so those commands cannot disagree about missing or unreadable targets.
-func (e *Engine) inspectSkill(sk modfile.ModSkill, locked *modfile.LockSkill, adapters []install.Adapter) EntryReport {
+func (e *Engine) inspectSkill(sk modfile.ModSkill, locked *modfile.LockSkill) EntryReport {
 	entry := EntryReport{
 		Name: sk.Name, Source: sk.Source, Local: sk.Local, Version: sk.Version,
 		Directory: sk.DirName(), Action: ActionInstalled,
@@ -37,12 +36,9 @@ func (e *Engine) inspectSkill(sk modfile.ModSkill, locked *modfile.LockSkill, ad
 			entry.Note = i18n.Format("engine.inspect.version_mismatch", sk.Version, locked.Version)
 		}
 	}
-	for _, adapter := range adapters {
-		path := adapterDir(adapter, e.Root, sk.DirName())
-		target := inspectTarget(path, locked)
-		entry.TargetResults = append(entry.TargetResults, target)
-		entry.Action = mergeInspectionStatus(entry.Action, target.Action)
-	}
+	target := inspectTarget(e.skillDir(sk.DirName()), locked)
+	entry.TargetResults = append(entry.TargetResults, target)
+	entry.Action = mergeInspectionStatus(entry.Action, target.Action)
 	return entry
 }
 

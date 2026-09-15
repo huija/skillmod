@@ -30,51 +30,6 @@ type conflict struct {
 	dir  string
 }
 
-// resolveConflicts applies interactive or non-interactive conflict rules and returns directories to keep and skip.
-// Supported choices are overwrite, keep and skip, or abort; non-interactive operation without --yes aborts.
-func resolveConflicts(io IO, conflicts []conflict) (skip map[string]bool, err error) {
-	skip = map[string]bool{}
-	if len(conflicts) == 0 {
-		return skip, nil
-	}
-	if io.Yes {
-		for _, c := range conflicts {
-			skip[c.dir] = true
-			if err := io.printf(i18n.Text("engine.get.conflict_yes_automatically"), c.dir); err != nil {
-				return nil, err
-			}
-		}
-		return skip, nil
-	}
-	if io.Confirm != nil {
-		for _, c := range conflicts {
-			choice, err := io.Confirm.Choose(
-				i18n.Format("engine.get.conflict_exists_mismatch", c.dir),
-				[]string{
-					i18n.Text("engine.get.overwrite"),
-					i18n.Text("engine.get.keep_skip"),
-					i18n.Text("engine.get.abort"),
-				})
-			if err != nil {
-				return nil, err
-			}
-			switch choice {
-			case 0: // Overwrite.
-			case 1:
-				skip[c.dir] = true
-			default:
-				return nil, fmt.Errorf("%s", i18n.Text("engine.get.aborted_user"))
-			}
-		}
-		return skip, nil
-	}
-	msg := i18n.Text("engine.get.conflicts_detected_targets")
-	for _, c := range conflicts {
-		msg += "\n  " + c.dir
-	}
-	return nil, fmt.Errorf("%s\n%s", msg, i18n.Text("engine.get.review_conflicts_retry"))
-}
-
 // Get implements skillmod get: resolve, download, validate, install, then write SKILL.mod and SKILL.lock.
 // A failure at any step leaves no partially updated state.
 func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO, options ...MutationOptions) (*Report, error) {
@@ -163,30 +118,24 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO, options 
 	}
 
 	// Classify targets: install absent or clean old versions, skip matching versions, and flag local modifications as conflicts.
-	adapters, err := e.adapters()
-	if err != nil {
-		return nil, err
-	}
 	var conflicts []conflict
 	for i := range entries {
 		prevHash := ""
 		if old := findLock(lock, entries[i].modSkill()); old != nil {
 			prevHash = old.Dirhash
 		}
-		for _, adapter := range adapters {
-			dst := adapterDir(adapter, e.Root, entries[i].dir)
-			action := classifyTarget(dst, entries[i].mat.dirhash, prevHash)
-			entries[i].targetResults = append(entries[i].targetResults, TargetReport{Path: dst, Action: action})
-			switch action {
-			case ActionInstall:
-				entries[i].targets = append(entries[i].targets, dst)
-			case ActionConflict:
-				conflicts = append(conflicts, conflict{name: entries[i].dir, dir: dst})
-			}
+		dst := e.skillDir(entries[i].dir)
+		action := classifyTarget(dst, entries[i].mat.dirhash, prevHash)
+		entries[i].targetResults = append(entries[i].targetResults, TargetReport{Path: dst, Action: action})
+		switch action {
+		case ActionInstall:
+			entries[i].targets = append(entries[i].targets, dst)
+		case ActionConflict:
+			conflicts = append(conflicts, conflict{name: entries[i].dir, dir: dst})
 		}
 	}
 	io.stopProgress()
-	skip, err := resolveConflicts(io, conflicts)
+	skip, err := resolveConflicts(io, conflicts, ConflictAsk)
 	if err != nil {
 		return nil, err
 	}
@@ -205,8 +154,6 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO, options 
 	for _, entry := range entries {
 		action := EntryStatus(ActionInstall)
 		switch {
-		case len(entry.targets) > 0 && len(entry.skippedTargets) > 0:
-			action = ActionPartial
 		case len(entry.targets) == 0 && len(entry.skippedTargets) > 0:
 			action = ActionConflict
 		case len(entry.targets) == 0:

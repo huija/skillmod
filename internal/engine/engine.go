@@ -40,7 +40,7 @@ type Engine struct {
 	ManifestRoot string         // declaration directory; empty uses Root
 	Source       *source.Source // Git interactions
 	Store        *store.Store   // persistent version snapshots and resolution index
-	Config       *config.Config // machine-level settings such as platform selection
+	Config       *config.Config // machine-level settings such as install mode and known sources
 }
 
 // IO contains the input, output, and confirmation channels for one command run.
@@ -120,8 +120,14 @@ func (e *NameConflictError) Error() string {
 	return i18n.Format("engine.local_name_conflict_already", e.Name, e.Existing, e.Incoming, e.Incoming)
 }
 
-func (e *Engine) adapters() ([]install.Adapter, error) {
-	return install.ByNames(e.Config.Agents)
+// skillsDir returns the installation directory for this engine's scope.
+func (e *Engine) skillsDir() string {
+	return install.SkillsDir(e.Root)
+}
+
+// skillDir returns one skill's installation directory in this scope.
+func (e *Engine) skillDir(dirName string) string {
+	return install.SkillDir(e.Root, dirName)
 }
 
 func (e *Engine) manifestRoot() string {

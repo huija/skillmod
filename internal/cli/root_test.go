@@ -80,8 +80,8 @@ func TestNewEngineAndIO(t *testing.T) {
 	if eng.Root != project || eng.Store.Root() != storeRoot {
 		t.Fatalf("engine roots = project %q, store %q", eng.Root, eng.Store.Root())
 	}
-	if len(eng.Config.Agents) != 1 || eng.Config.Agents[0] != "agents" {
-		t.Fatalf("engine config = %+v", eng.Config)
+	if eng.Config == nil {
+		t.Fatal("engine has no configuration")
 	}
 
 	cmd := NewRootCmd()

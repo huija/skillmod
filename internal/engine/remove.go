@@ -32,10 +32,6 @@ func (e *Engine) Remove(_ context.Context, names []string, io IO, options ...Mut
 	if err != nil {
 		return nil, err
 	}
-	adapters, err := e.adapters()
-	if err != nil {
-		return nil, err
-	}
 
 	want := make(map[string]bool, len(names))
 	for _, name := range names {
@@ -84,8 +80,8 @@ func (e *Engine) Remove(_ context.Context, names []string, io IO, options ...Mut
 		entry := EntryReport{Name: skill.Name, Source: skill.Source, Version: skill.Version, Action: ActionRemove}
 		locked := findLock(lock, skill)
 		entryPartial := false
-		for _, adapter := range adapters {
-			dst := adapterDir(adapter, e.Root, skill.DirName())
+		{
+			dst := e.skillDir(skill.DirName())
 			target := inspectTarget(dst, locked)
 			switch target.Action {
 			case ActionMissing:

@@ -174,6 +174,7 @@ remotes additionally require `ssh` on `PATH`.
 | `verify` | Check installed content against the lock; the CI gate |
 | `remove <selector>` | Delete a declaration and its clean managed installations |
 | `prune` | Drop stale installations and lock records left behind by hand edits |
+| `share` | Link installed skills into other agent directories such as `.claude` or `.codex` |
 
 Every command accepts `--json` for machine-readable output and `--global` to
 operate on user-wide skills instead of the current project; mutations accept

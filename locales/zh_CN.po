@@ -49,6 +49,10 @@ msgstr "子目录须用 / 分隔: %q"
 msgid "address.version_whitespace"
 msgstr "版本引用含空白字符: %q"
 
+#, go-format
+msgid "agents.unknown_target"
+msgstr "未知的 agent %q；已注册的 agent：%s"
+
 msgid "cli.get.flag_alias"
 msgstr "安装目录别名（解决同名冲突）"
 
@@ -128,6 +132,51 @@ msgid "cli.root.short"
 msgstr "go mod for Agent Skills：SKILL.mod 声明 + SKILL.lock 锁定 + sy"
 "nc 对齐"
 
+msgid "cli.share.flag_agent"
+msgstr "要链接到的已注册 agent 目录（可重复或逗号分隔）"
+"；省略时交互选择"
+
+msgid "cli.share.flag_all"
+msgstr "分享所有已安装技能，不再询问"
+
+msgid "cli.share.flag_dir"
+msgstr "额外的目标目录（可重复）；相对路径相对于作用"
+"域根目录解析"
+
+msgid "cli.share.flag_on_conflict"
+msgstr "目标位置已存在时的处理策略：ask（默认）、overwri"
+"te 或 skip"
+
+msgid "cli.share.flag_skill"
+msgstr "要分享的技能（可重复或逗号分隔）；省略时交互"
+"选择"
+
+msgid "cli.share.long"
+msgstr "把受管技能目录中已安装的技能链接到其他 AI agent "
+"的目录（如 .claude、.codex）。每个目标条目是指向受管副"
+"本的软链接——与 get 在 auto 安装模式下使用的形态一致"
+"——对受管技能的修改会同时透过所有链接生效，不支"
+"持软链接的文件系统会退回字节保真复制。目标位置是"
+"非受管的：skillmod 不记录它们，verify 也不检查它们，重"
+"新运行 share 即可恢复被替换或退化为副本的链接。不传 "
+"--skill 或位置参数技能名时，命令会列出已安装技能供交"
+"互勾选；不传 --agent 或 --dir 时会列出已注册的 agent 目录"
+"。目标位置已有不同内容时，share 会逐个冲突询问；--on-"
+"conflict=overwrite 或 =skip 可统一处理，--yes 会安全地跳过冲"
+"突。的目录（如 .claude、.codex）。目标位置是非受管的副"
+"本：skillmod 不记录它们，verify 也不检查它们，重新运行 "
+"share 即可刷新副本。不传 --skill 或位置参数技能名时，"
+"命令会列出已安装技能供交互勾选；不传 --agent 或 --dir "
+"时会列出已注册的 agent 目录。目标位置已有不同内容时"
+"，share 会逐个冲突询问；--on-conflict=overwrite 或 =skip 可统"
+"一处理，--yes 会安全地跳过冲突。"
+
+msgid "cli.share.short"
+msgstr "把已安装技能复制到其他 agent 目录"
+
+msgid "cli.share.use"
+msgstr "share [技能名...]"
+
 msgid "cli.sync.flag_check"
 msgstr "只校验不修改（skillmod verify 的别名）"
 
@@ -170,6 +219,11 @@ msgid "cli.why.use"
 msgstr "why <名称或别名>"
 
 #, go-format
+msgid "config.agents_setting_removed"
+msgstr "agents 设置已移除，skillmod 现在只管理一个安装目录"
+"；请删除 %q 项（位于 %s）"
+
+#, go-format
 msgid "config.parse"
 msgstr "解析 %s: %w"
 
@@ -204,6 +258,37 @@ msgstr "正在检查缓存内容完整性"
 msgid "engine.checking_remote_versions"
 msgstr "正在检查 %s 的远程版本"
 
+msgid "engine.conflict.abort"
+msgstr "中止"
+
+msgid "engine.conflict.aborted"
+msgstr "用户中止"
+
+msgid "engine.conflict.detected"
+msgstr "检测到冲突（目标已存在且内容不同）："
+
+#, go-format
+msgid "engine.conflict.exists_mismatch"
+msgstr "冲突：%s 已存在且内容不同"
+
+msgid "engine.conflict.overwrite"
+msgstr "覆盖"
+
+msgid "engine.conflict.review"
+msgstr "建议人工确认后重试（交互模式逐条选择），或 --y"
+"es 全部保留并跳过。"
+
+msgid "engine.conflict.skip"
+msgstr "保留并跳过"
+
+#, go-format
+msgid "engine.conflict.skipped_yes"
+msgstr "冲突（--yes 自动保留并跳过）：%s"
+
+#, go-format
+msgid "engine.conflict.unknown_policy"
+msgstr "未知的冲突策略 %q；可选 ask、overwrite 或 skip"
+
 msgid "engine.contacting_git_server"
 msgstr "正在连接 Git 服务器"
 
@@ -220,30 +305,12 @@ msgstr "dry-run：未写任何文件"
 msgid "engine.fetching_git_objects"
 msgstr "正在获取 Git 对象"
 
-msgid "engine.get.abort"
-msgstr "中止"
-
-msgid "engine.get.aborted_user"
-msgstr "用户中止"
-
 msgid "engine.get.alias_requires_one_skill"
 msgstr "仅选择一个 skill 时才能使用 --alias"
 
 #, go-format
 msgid "engine.get.confirm_install"
 msgstr "要从 %s 安装 %s 吗？\n%s"
-
-#, go-format
-msgid "engine.get.conflict_exists_mismatch"
-msgstr "冲突: %s 已存在且内容与锁定不符（本地可能被修"
-"改过）"
-
-#, go-format
-msgid "engine.get.conflict_yes_automatically"
-msgstr "冲突（--yes 自动保留并跳过）: %s"
-
-msgid "engine.get.conflicts_detected_targets"
-msgstr "检测到冲突（目标已存在且内容与锁定不符）："
 
 msgid "engine.get.description"
 msgstr "无 description"
@@ -258,9 +325,6 @@ msgstr "dry-run：%s %s（%s）"
 #, go-format
 msgid "engine.get.installed_skill_mod_skill"
 msgstr "已安装 %s %s，SKILL.mod 与 SKILL.lock 已更新"
-
-msgid "engine.get.keep_skip"
-msgstr "保留并跳过"
 
 msgid "engine.get.matching_requested_skill_name"
 msgstr "正在匹配请求的 skill 名称"
@@ -286,15 +350,8 @@ msgstr "提示：安装目录从 %q 更改为 %q 时会保留旧目录；"
 msgid "engine.get.option_format"
 msgstr "%s — %s\n  %s"
 
-msgid "engine.get.overwrite"
-msgstr "覆盖"
-
 msgid "engine.get.reading_skill_metadata"
 msgstr "正在读取 skill 元数据"
-
-msgid "engine.get.review_conflicts_retry"
-msgstr "建议人工确认后重试（交互模式逐条选择），或 --y"
-"es 自动保留并跳过"
 
 msgid "engine.get.skill_md_missing_repository"
 msgstr "仓库根目录及 skills/ 下所有子目录中均未找到 SKILL."
@@ -325,11 +382,6 @@ msgstr "旧安装器中目录 %q 与 skill 名称 %q 的记录有歧义；"
 #, go-format
 msgid "engine.init.backup_failed"
 msgstr "备份失败: %w"
-
-#, go-format
-msgid "engine.init.cannot_import_different_skills"
-msgstr "无法将 %s 和 %s 中内容不同的技能导入为同一个目"
-"录名；请先统一内容或重命名其中一个"
 
 msgid "engine.init.confirmed_non_interactive"
 msgstr "非交互环境未确认：重跑加 --yes 全部采纳"
@@ -380,9 +432,6 @@ msgstr "无法恢复已安装内容的来源：%v"
 #, go-format
 msgid "engine.init.recovering_installed_skill"
 msgstr "正在恢复已安装技能来源：%s"
-
-msgid "engine.init.skill_same_name_appears"
-msgstr "同名 skill 出现在多个平台目录，已合并为一条"
 
 msgid "engine.init.skills_found_generated_empty"
 msgstr "未发现 skill，已生成空清单，可用 skillmod get 添加"
@@ -559,6 +608,71 @@ msgstr "使用同仓引用缓存解析，未刷新远端"
 #, go-format
 msgid "engine.rollback_also_failed"
 msgstr "回滚也失败: %w"
+
+#, go-format
+msgid "engine.share.confirm_one"
+msgstr "分享 %s？"
+
+#, go-format
+msgid "engine.share.confirm_target"
+msgstr "分享到 %s（%s）？"
+
+msgid "engine.share.dry_run_note"
+msgstr "dry run：未写入任何文件"
+
+#, go-format
+msgid "engine.share.identical_note"
+msgstr "%s 的内容已与源一致"
+
+#, go-format
+msgid "engine.share.linked"
+msgstr "已链接 %s 到 %s"
+
+#, go-format
+msgid "engine.share.linked_note"
+msgstr "%s 已链接到受管副本"
+
+msgid "engine.share.local_description"
+msgstr "本地声明，无版本"
+
+#, go-format
+msgid "engine.share.no_skills_installed"
+msgstr "在 %s 中没有找到已安装的技能"
+
+msgid "engine.share.no_skills_selected"
+msgstr "未选择任何技能"
+
+msgid "engine.share.no_targets"
+msgstr "未指定分享目标；请通过 --agent 或 --dir 指定"
+
+msgid "engine.share.non_interactive_selection"
+msgstr "未指定技能或目标；请传 --skill 或 --all 以及 --agent "
+"或 --dir，或在终端中运行 share"
+
+#, go-format
+msgid "engine.share.overlap_managed"
+msgstr "分享目标 %s 与受管技能目录 %s 重叠"
+
+#, go-format
+msgid "engine.share.plan"
+msgstr "准备分享 %d 个技能到 %d 个目标目录"
+
+msgid "engine.share.planned_note"
+msgstr "计划复制"
+
+msgid "engine.share.select_skills"
+msgstr "选择要分享的技能"
+
+msgid "engine.share.select_targets"
+msgstr "选择要分享到的 agent 目录"
+
+#, go-format
+msgid "engine.share.skill_matches_multiple"
+msgstr "%q 匹配到多个已安装技能：%s"
+
+#, go-format
+msgid "engine.share.skill_not_found"
+msgstr "没有已安装技能匹配 %q；已安装技能：%s"
 
 msgid "engine.skill_lock_tool_maintained"
 msgstr "SKILL.lock 由工具维护；请手工修复出错的条目，或"
@@ -821,10 +935,6 @@ msgstr "准备临时安装失败：%w"
 #, go-format
 msgid "install.unknown_install_mode"
 msgstr "未知安装模式 %q；应为 auto 或 copy"
-
-#, go-format
-msgid "install.unsupported_platform"
-msgstr "不支持的平台 %q，当前支持: %s"
 
 #, go-format
 msgid "install.write_disk_failed"

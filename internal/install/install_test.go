@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/huija/skillmod/internal/testutil"
@@ -16,40 +15,15 @@ import (
 
 func TestMain(m *testing.M) { testutil.RunMain(m) }
 
-func TestDefaultAndExplicitAdapters(t *testing.T) {
-	adapters, err := ByNames(nil)
-	if err != nil {
-		t.Fatal(err)
+func TestManagedDirectories(t *testing.T) {
+	if got := SkillsDir("/project"); got != filepath.Join("/project", ".agents", "skills") {
+		t.Fatalf("SkillsDir = %q", got)
 	}
-	if len(adapters) != 1 || adapters[0].Name() != "agents" {
-		t.Fatalf("default adapters = %v, want [agents]", Names())
+	if got := SkillDir("/project", "demo"); got != filepath.Join("/project", ".agents", "skills", "demo") {
+		t.Fatalf("SkillDir = %q", got)
 	}
-	if got := adapters[0].SkillsDir("/project"); got != filepath.Join("/project", ".agents", "skills") {
-		t.Fatalf("agents SkillsDir = %q", got)
-	}
-
-	adapters, err = ByNames([]string{"agents", "claude-code"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(adapters) != 2 || adapters[1].SkillsDir("/project") != filepath.Join("/project", ".claude", "skills") {
-		t.Fatalf("explicit adapters = %+v", adapters)
-	}
-}
-
-func TestAllIsStable(t *testing.T) {
-	all := All()
-	if len(all) != 2 || all[0].Name() != "agents" || all[1].Name() != "claude-code" {
-		t.Fatalf("All = %+v", all)
-	}
-}
-
-func TestByNameRejectsUnsupportedPlatform(t *testing.T) {
-	if _, err := ByName("unknown"); err == nil || !strings.Contains(err.Error(), "agents, claude-code") {
-		t.Fatalf("ByName error = %v", err)
-	}
-	if _, err := ByNames([]string{"agents", "unknown"}); err == nil {
-		t.Fatal("ByNames accepted an unsupported platform")
+	if SkillsDirName != ".agents/skills" {
+		t.Fatalf("SkillsDirName = %q, want the single managed convention", SkillsDirName)
 	}
 }
 

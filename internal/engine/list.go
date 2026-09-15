@@ -28,10 +28,6 @@ func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 	if err != nil {
 		return nil, err
 	}
-	adapters, err := e.adapters()
-	if err != nil {
-		return nil, err
-	}
 
 	// Call ls-remote once per unique repository on a best-effort basis.
 	type latestKey struct{ repo, subdir string }
@@ -52,7 +48,7 @@ func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 	rep := &Report{Action: CommandList}
 	for _, sk := range m.Skills {
 		lk := findLock(lock, sk)
-		entry := e.inspectSkill(sk, lk, adapters)
+		entry := e.inspectSkill(sk, lk)
 
 		// Upgrade detection; defer pseudo-version comparisons to update.
 		repo, subdir, err := splitSource(sk.Source)

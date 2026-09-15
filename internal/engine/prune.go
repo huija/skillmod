@@ -39,10 +39,6 @@ func (e *Engine) Prune(ctx context.Context, io IO, options ...MutationOptions) (
 		return rep, io.printf(i18n.Text("engine.prune.stale_entries"))
 	}
 
-	adapters, err := e.adapters()
-	if err != nil {
-		return nil, err
-	}
 	var deletable []string
 	newLock := &modfile.Lock{SchemaVersion: modfile.SchemaVersion}
 	staleDirs := map[string]bool{}
@@ -61,8 +57,8 @@ func (e *Engine) Prune(ctx context.Context, io IO, options ...MutationOptions) (
 		// mod file; without it, an aliased install could never be located
 		// again and would leak as an orphan directory.
 		dirName := lk.InstallDir()
-		for _, a := range adapters {
-			dst := adapterDir(a, e.Root, dirName)
+		{
+			dst := e.skillDir(dirName)
 			target := inspectTarget(dst, &lk)
 			switch target.Action {
 			case ActionMissing:

@@ -19,7 +19,6 @@ import (
 	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
-	"github.com/huija/skillmod/internal/install"
 	"github.com/huija/skillmod/internal/modfile"
 	repoaddr "github.com/huija/skillmod/internal/repo"
 	"github.com/huija/skillmod/internal/resolve"
@@ -47,31 +46,24 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO, options ...Mutatio
 	}
 	defer io.stopProgress()
 
-	// init is the migration and discovery entry point; scan all known platform directories independently of configured installation targets.
-	adapters := install.All()
-
-	// Scan first-level subdirectories in each platform's skill directory.
+	// init is the migration and discovery entry point; it scans the installation
+	// directory even when no declaration currently installs into it.
 	type scanned struct {
 		name    string // SKILL.md frontmatter name; use the directory name as a placeholder on parse failure
 		dirName string
-		srcDirs []string // every identical installation found across platform adapters
+		dir     string
 		note    string
 		hash    string
 	}
-	// The installation directory, not frontmatter name, identifies an entry.
-	// The same directory is intentionally merged across platform adapters,
-	// while two aliases carrying the same published name remain independent.
+	// The installation directory, not the frontmatter name, identifies an entry.
 	seen := map[string]*scanned{}
 	var skipped []string
-	for _, a := range adapters {
-		base := a.SkillsDir(e.Root)
-		dents, err := os.ReadDir(base)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
+	base := e.skillsDir()
+	dents, err := os.ReadDir(base)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	if err == nil {
 		for _, d := range dents {
 			dir := filepath.Join(base, d.Name())
 			st, statErr := os.Stat(dir)
@@ -85,7 +77,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO, options ...Mutatio
 			if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil {
 				continue
 			}
-			s := &scanned{dirName: d.Name(), srcDirs: []string{dir}}
+			s := &scanned{dirName: d.Name(), dir: dir}
 			name, err := source.SkillNameFromDir(dir)
 			if err != nil {
 				// Use the directory name so an invalid SKILL.md can still be identified,
@@ -111,14 +103,6 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO, options ...Mutatio
 				continue
 			}
 			s.hash = h
-			if prev, ok := seen[s.dirName]; ok {
-				if prev.hash != h || prev.name != s.name {
-					return nil, fmt.Errorf(i18n.Text("engine.init.cannot_import_different_skills"), prev.srcDirs[0], dir)
-				}
-				prev.srcDirs = append(prev.srcDirs, dir)
-				prev.note = appendNote(prev.note, i18n.Text("engine.init.skill_same_name_appears"))
-				continue // Treat the same installation directory as one skill.
-			}
 			seen[s.dirName] = s
 		}
 	}
@@ -128,7 +112,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO, options ...Mutatio
 	for _, s := range seen {
 		key := fsutil.FoldKey(s.dirName)
 		if prev, ok := folded[key]; ok {
-			return nil, fmt.Errorf(i18n.Text("engine.init.init_found_skills_differ"), prev, seen[prev].srcDirs[0], s.dirName, s.srcDirs[0])
+			return nil, fmt.Errorf(i18n.Text("engine.init.init_found_skills_differ"), prev, seen[prev].dir, s.dirName, s.dir)
 		}
 		folded[key] = s.dirName
 	}
@@ -204,7 +188,7 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO, options ...Mutatio
 			alias = s.dirName
 		}
 		entry := EntryReport{Name: name}
-		matched, matchedLock, identifyErr := e.identifyInstalled(s.srcDirs, name, alias, s.hash, lock, locator)
+		matched, matchedLock, identifyErr := e.identifyInstalled(s.dir, name, alias, s.hash, lock, locator)
 		if identifyErr != nil {
 			entry.Note = i18n.Format("engine.init.provenance_unrecoverable", identifyErr)
 		}
@@ -233,11 +217,9 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO, options ...Mutatio
 					}
 				}
 				entry.Note = appendNote(entry.Note, err.Error())
-				for _, dir := range s.srcDirs {
-					entry.TargetResults = append(entry.TargetResults, TargetReport{
-						Path: dir, Action: ActionUnverifiable, Note: err.Error(),
-					})
-				}
+				entry.TargetResults = append(entry.TargetResults, TargetReport{
+					Path: s.dir, Action: ActionUnverifiable, Note: err.Error(),
+				})
 				// Preserve a usable declaration and baseline even when the old
 				// installer record cannot be verified today. The source is kept in
 				// the report so the user can retry or repair it later; treating this

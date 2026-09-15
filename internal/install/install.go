@@ -2,9 +2,9 @@
 //
 // SPDX-License-Identifier: MIT
 
-// Package install provides platform adapters and byte-preserving installation.
-// Adapters may only choose installation directories; they must not change file names or content.
-// This guarantees identical dirhash values across platform-specific copies.
+// Package install provides byte-preserving installation. skillmod manages one
+// installation directory convention, so file names and content are never
+// changed to suit a platform and dirhash values stay comparable everywhere.
 package install
 
 import (
@@ -13,78 +13,23 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 
 	"github.com/huija/skillmod/internal/i18n"
 )
 
-// Adapter defines directory conventions for a target platform.
-type Adapter interface {
-	Name() string
-	// SkillsDir returns this platform's skill installation directory under the project root.
-	SkillsDir(projectRoot string) string
+// SkillsDirName is the installation directory, relative to a scope root, that
+// skillmod manages. There is deliberately one convention: a project has a
+// single place to review, and one content hash describes a skill everywhere.
+const SkillsDirName = ".agents/skills"
+
+// SkillsDir returns the skill installation directory under a scope root.
+func SkillsDir(root string) string {
+	return filepath.Join(root, filepath.FromSlash(SkillsDirName))
 }
 
-type claudeCode struct{}
-
-func (claudeCode) Name() string                 { return "claude-code" }
-func (claudeCode) SkillsDir(root string) string { return filepath.Join(root, ".claude", "skills") }
-
-type agentSkills struct{}
-
-func (agentSkills) Name() string                 { return "agents" }
-func (agentSkills) SkillsDir(root string) string { return filepath.Join(root, ".agents", "skills") }
-
-var registry = map[string]Adapter{
-	"claude-code": claudeCode{},
-	"agents":      agentSkills{},
-}
-
-// ByName returns a named adapter or an error listing supported names.
-func ByName(name string) (Adapter, error) {
-	a, ok := registry[name]
-	if !ok {
-		return nil, fmt.Errorf(i18n.Text("install.unsupported_platform"), name, strings.Join(Names(), ", "))
-	}
-	return a, nil
-}
-
-// Names returns supported platforms in stable sorted order.
-func Names() []string {
-	names := make([]string, 0, len(registry))
-	for n := range registry {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	return names
-}
-
-// ByNames resolves multiple adapters, falling back to the default platform for an empty list.
-func ByNames(names []string) ([]Adapter, error) {
-	if len(names) == 0 {
-		names = []string{"agents"}
-	}
-	out := make([]Adapter, 0, len(names))
-	for _, n := range names {
-		a, err := ByName(n)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, a)
-	}
-	return out, nil
-}
-
-// All returns every known adapter in stable name order. Discovery uses this
-// independently of the configured installation targets.
-func All() []Adapter {
-	names := Names()
-	out := make([]Adapter, 0, len(names))
-	for _, name := range names {
-		out = append(out, registry[name])
-	}
-	return out
+// SkillDir returns one skill's installation directory under a scope root.
+func SkillDir(root, dirName string) string {
+	return filepath.Join(SkillsDir(root), dirName)
 }
 
 // CopyDir copies src to a nonexistent dst byte for byte and preserves executable bits on regular files.
@@ -153,6 +98,20 @@ func ValidateMode(mode Mode) error {
 // Auto falls back to Copy when Windows privileges or the filesystem forbid links.
 func InstallWithMode(srcDir, dst string, mode Mode) (restore func() error, commit func(), err error) {
 	return installWithLink(srcDir, dst, mode, os.Symlink)
+}
+
+// Link installs a symlink to srcDir itself, preserving that path even when it
+// currently points at a snapshot. Replacing the source link later therefore
+// updates the shared installation too. Platforms without symlink support get
+// a byte-preserving copy. The returned callbacks have Install's semantics.
+func Link(srcDir, dst string) (restore func() error, commit func(), err error) {
+	linkTarget, err := filepath.Abs(srcDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	return installWithLink(srcDir, dst, Auto, func(_ string, staged string) error {
+		return os.Symlink(linkTarget, staged)
+	})
 }
 
 func installWithLink(srcDir, dst string, mode Mode, link func(string, string) error) (restore func() error, commit func(), err error) {

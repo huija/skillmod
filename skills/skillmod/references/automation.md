@@ -26,7 +26,7 @@ of each installation directory.
 
 | Field | Meaning | `action` values |
 | --- | --- | --- |
-| `action` | The command that produced the report | `get`, `init`, `list`, `prune`, `remove`, `sync`, `update`, `verify`, `why` |
+| `action` | The command that produced the report | `get`, `init`, `list`, `prune`, `remove`, `share`, `sync`, `update`, `verify`, `why` |
 | `entries[].action` | The aggregate outcome of one declaration | `conflict`, `drift`, `install`, `installed`, `keep`, `local`, `local-drift`, `matched`, `missing`, `partial`, `prune`, `remove`, `skip`, `stale`, `unlocked`, `unresolved`, `unverifiable`, `update` |
 | `entries[].targetResults[].action` | The outcome of one installation directory | `drift`, `install`, `installed`, `keep`, `missing`, `remove`, `skip`, `unlocked`, `unverifiable` |
 

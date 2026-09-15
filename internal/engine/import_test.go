@@ -91,53 +91,6 @@ func TestInitRecoversSnapshotLinkWithoutLock(t *testing.T) {
 	}
 }
 
-func TestInitRecoversSnapshotLinkFromDuplicateAdapters(t *testing.T) {
-	r := newHelloRepo(t)
-	producer := newEngine(t, t.TempDir(), t.TempDir())
-	if _, err := producer.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
-		t.Fatalf("Get(%q): %v", r.URL+"@v1.0.0", err)
-	}
-	snapshot, err := producer.Store.SnapshotPath(r.URL, "v1.0.0")
-	if err != nil {
-		t.Fatalf("SnapshotPath(%q, v1.0.0): %v", r.URL, err)
-	}
-
-	root := t.TempDir()
-	agents, err := install.ByName("agents")
-	if err != nil {
-		t.Fatalf("install.ByName(agents): %v", err)
-	}
-	claude, err := install.ByName("claude-code")
-	if err != nil {
-		t.Fatalf("install.ByName(claude-code): %v", err)
-	}
-	agentDir := filepath.Join(agents.SkillsDir(root), "hello")
-	if err := install.CopyDir(snapshot, agentDir); err != nil {
-		t.Fatalf("CopyDir(%q, %q): %v", snapshot, agentDir, err)
-	}
-	claudeDir := filepath.Join(claude.SkillsDir(root), "hello")
-	if err := os.MkdirAll(filepath.Dir(claudeDir), 0o755); err != nil {
-		t.Fatalf("MkdirAll(%q): %v", filepath.Dir(claudeDir), err)
-	}
-	if err := os.Symlink(snapshot, claudeDir); err != nil {
-		t.Skipf("directory symlinks unavailable: %v", err)
-	}
-
-	eng := newEngine(t, root, t.TempDir())
-	eng.Store = producer.Store
-	eng.Source.Git = filepath.Join(t.TempDir(), "no-network")
-	if _, err := eng.Init(ctx, false, testIO()); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
-	m, err := modfile.LoadMod(root)
-	if err != nil {
-		t.Fatalf("LoadMod(%q): %v", root, err)
-	}
-	if len(m.Skills) != 1 || m.Skills[0].Local || m.Skills[0].Source != r.URL || m.Skills[0].Version != "v1.0.0" {
-		t.Errorf("Init duplicate-adapter declaration = %+v, want recovered remote %s@v1.0.0", m.Skills, r.URL)
-	}
-}
-
 func TestInitContinuesWhenInstalledSnapshotIsCorrupt(t *testing.T) {
 	sourceRoot := t.TempDir()
 	producer := newEngine(t, sourceRoot, t.TempDir())
@@ -571,20 +524,26 @@ func TestInitDoesNotGuessBetweenAmbiguousLegacyNames(t *testing.T) {
 	}
 }
 
-func TestInitRejectsDifferentContentsAcrossAdapters(t *testing.T) {
+// Init rejects case-folded directory collisions so declarations stay portable
+// to case-insensitive filesystems. The fixture requires two distinct paths.
+func TestInitRejectsCaseCollidingDirectories(t *testing.T) {
 	root := t.TempDir()
-	for _, a := range install.All() {
-		dir := filepath.Join(a.SkillsDir(root), "demo")
+	if caseInsensitiveFS(root) {
+		t.Skip("requires a case-sensitive filesystem")
+	}
+	for _, dirName := range []string{"Demo", "demo"} {
+		dir := filepath.Join(install.SkillsDir(root), dirName)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: demo\n---\n"+a.Name()), 0o644); err != nil {
+		body := "---\nname: " + dirName + "\n---\n# demo\n"
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	eng := newEngine(t, root, t.TempDir())
 	if _, err := eng.Init(ctx, false, testIO()); err == nil {
-		t.Error("Init accepted divergent installations with one directory name")
+		t.Error("Init accepted installation directories that collide when case is folded")
 	}
 	if _, err := os.Stat(filepath.Join(root, modfile.ModFileName)); !os.IsNotExist(err) {
 		t.Errorf("failed import wrote SKILL.mod: %v", err)

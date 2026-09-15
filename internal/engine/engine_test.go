@@ -42,7 +42,7 @@ func newEngine(t *testing.T, root, storeDir string) *engine.Engine {
 		Root:   root,
 		Source: &source.Source{VCSRoot: s.VCSRoot()},
 		Store:  s,
-		Config: &config.Config{Agents: []string{"agents"}, InstallMode: install.Copy},
+		Config: &config.Config{InstallMode: install.Copy},
 	}
 }
 
@@ -438,41 +438,24 @@ func (c *getSkillChooser) ChooseMany(_ string, options []ui.Option) ([]int, erro
 	return c.choices, nil
 }
 
-func TestGet_DefaultTargetIsGenericAgents(t *testing.T) {
+func TestGet_InstallsIntoTheManagedDirectory(t *testing.T) {
 	r := newHelloRepo(t)
 	root := t.TempDir()
 	eng := newEngine(t, root, t.TempDir())
 	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".agents", "skills", "hello", "SKILL.md")); err != nil {
-		t.Fatalf("generic target was not installed: %v", err)
+	if _, err := os.Stat(filepath.Join(install.SkillsDir(root), "hello", "SKILL.md")); err != nil {
+		t.Fatalf("skill was not installed: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".claude")); !os.IsNotExist(err) {
-		t.Fatalf("default target unexpectedly created .claude; stat error = %v", err)
-	}
-}
-
-func TestGet_MultiTargetAgentsAndClaude(t *testing.T) {
-	r := newHelloRepo(t)
-	root := t.TempDir()
-	eng := newEngine(t, root, t.TempDir())
-	eng.Config.Agents = []string{"agents", "claude-code"}
-	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
-		t.Fatal(err)
-	}
-	generic := filepath.Join(root, ".agents", "skills", "hello")
-	claude := filepath.Join(root, ".claude", "skills", "hello")
-	hGeneric, err := dirhash.HashDir(generic)
+	entries, err := os.ReadDir(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	hClaude, err := dirhash.HashDir(claude)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if hGeneric != hClaude {
-		t.Fatalf("target dirhash values differ: agents=%s claude=%s", hGeneric, hClaude)
+	for _, entry := range entries {
+		if entry.IsDir() && entry.Name() != ".agents" {
+			t.Fatalf("default target created directory %q; only .agents must be managed", entry.Name())
+		}
 	}
 }
 
@@ -1079,48 +1062,42 @@ func TestSync_OverwriteConflictReportsInstallation(t *testing.T) {
 	}
 }
 
-func TestSync_MixedInstallAndSkippedConflictReportsPartial(t *testing.T) {
+// A single locally modified installation is reported as a conflict, and the
+// command still exits with the partial-completion code so CI can distinguish
+// "nothing happened" from "some work was safely skipped".
+func TestSync_SkippedConflictReportsConflict(t *testing.T) {
 	r := newHelloRepo(t)
 	root := t.TempDir()
 	eng := newEngine(t, root, t.TempDir())
 	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
 		t.Fatalf("Get(%q): %v", r.URL+"@v1.0.0", err)
 	}
-	agentTarget := filepath.Join(installedDir(root, "hello"), "SKILL.md")
-	if err := os.WriteFile(agentTarget, []byte("user modified\n"), 0o644); err != nil {
-		t.Fatalf("modify %q: %v", agentTarget, err)
+	target := filepath.Join(installedDir(root, "hello"), "SKILL.md")
+	if err := os.WriteFile(target, []byte("user modified\n"), 0o644); err != nil {
+		t.Fatalf("modify %q: %v", target, err)
 	}
-	eng.Config.Agents = []string{"agents", "claude-code"}
-	claude, err := install.ByName("claude-code")
-	if err != nil {
-		t.Fatalf("install.ByName(claude-code): %v", err)
-	}
-	claudeTarget := filepath.Join(claude.SkillsDir(root), "hello")
 
 	var out bytes.Buffer
 	rep, err := eng.Sync(ctx, engine.SyncOptions{}, engine.IO{Out: &out, Yes: true})
 	var partial *engine.PartialError
 	if !errors.As(err, &partial) {
-		t.Fatalf("Sync mixed-target error = %v, want PartialError", err)
+		t.Fatalf("Sync conflict error = %v, want PartialError", err)
 	}
-	if len(rep.Entries) != 1 || rep.Entries[0].Action != "partial" {
-		t.Errorf("Sync mixed-target report = %+v, want partial with only Claude target installed", rep.Entries)
+	if len(rep.Entries) != 1 || rep.Entries[0].Action != engine.ActionConflict {
+		t.Errorf("Sync conflict report = %+v, want one conflict entry", rep.Entries)
 	}
-	if len(rep.Entries[0].TargetResults) != 2 {
-		t.Errorf("Sync mixed-target results = %+v, want two targets", rep.Entries[0].TargetResults)
+	if len(rep.Entries[0].TargetResults) != 1 || rep.Entries[0].TargetResults[0].Action != engine.ActionSkip {
+		t.Errorf("Sync conflict results = %+v, want the single target skipped", rep.Entries[0].TargetResults)
 	}
-	if !strings.Contains(rep.Entries[0].Note, "kept and skipped") || !strings.Contains(out.String(), "synchronized 1") {
-		t.Errorf("Sync mixed-target note/output = %q / %q", rep.Entries[0].Note, out.String())
+	if !strings.Contains(rep.Entries[0].Note, "kept and skipped") || !strings.Contains(out.String(), "1 conflicting") {
+		t.Errorf("Sync conflict note/output = %q / %q", rep.Entries[0].Note, out.String())
 	}
-	data, err := os.ReadFile(agentTarget)
+	data, err := os.ReadFile(target)
 	if err != nil {
-		t.Fatalf("ReadFile(%q): %v", agentTarget, err)
+		t.Fatalf("ReadFile(%q): %v", target, err)
 	}
 	if string(data) != "user modified\n" {
-		t.Errorf("skipped agent target = %q, want user modification", data)
-	}
-	if _, err := os.Stat(filepath.Join(claudeTarget, "SKILL.md")); err != nil {
-		t.Errorf("Claude target was not installed: %v", err)
+		t.Errorf("skipped target = %q, want the user modification preserved", data)
 	}
 }
 
@@ -1333,23 +1310,18 @@ func readFileString(t *testing.T, path string) string {
 	return string(data)
 }
 
-func TestInit_ScansAllKnownAdapters(t *testing.T) {
+func TestInit_ScansTheManagedDirectory(t *testing.T) {
 	root := t.TempDir()
-	writeLocalSkill := func(base, name string) {
-		dir := filepath.Join(root, base, "skills", name)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		body := "---\nname: " + name + "\ndescription: local\n---\n# local\n"
-		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
+	dir := filepath.Join(install.SkillsDir(root), "local-skill")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	writeLocalSkill(".agents", "generic-local")
-	writeLocalSkill(".claude", "claude-local")
+	body := "---\nname: local-skill\ndescription: local\n---\n# local\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	eng := newEngine(t, root, t.TempDir())
-	eng.Config.Agents = []string{"agents"}
 	if _, err := eng.Init(ctx, false, testIO()); err != nil {
 		t.Fatal(err)
 	}
@@ -1357,14 +1329,8 @@ func TestInit_ScansAllKnownAdapters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	found := map[string]bool{}
-	for _, sk := range m.Skills {
-		found[sk.Name] = true
-	}
-	for _, name := range []string{"generic-local", "claude-local"} {
-		if !found[name] {
-			t.Fatalf("init did not discover %s: %+v", name, m.Skills)
-		}
+	if len(m.Skills) != 1 || m.Skills[0].Name != "local-skill" || !m.Skills[0].Local {
+		t.Fatalf("init declarations = %+v, want the installed skill discovered", m.Skills)
 	}
 }
 

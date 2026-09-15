@@ -97,10 +97,6 @@ func (e *Engine) Update(ctx context.Context, names []string, options UpdateOptio
 	contentByDir := map[string]string{}
 	reportByDir := map[string]int{}
 	memo := newOperationMemo(io.Progress)
-	adapters, err := e.adapters()
-	if err != nil {
-		return nil, err
-	}
 	repositories, err := updateRepositories(targets)
 	if err != nil {
 		return nil, err
@@ -186,8 +182,8 @@ func (e *Engine) Update(ctx context.Context, names []string, options UpdateOptio
 		}
 		var tgts []string
 		var targetResults []TargetReport
-		for _, a := range adapters {
-			dst := adapterDir(a, e.Root, sk.DirName())
+		{
+			dst := e.skillDir(sk.DirName())
 			action := classifyTarget(dst, mat.dirhash, prevHash)
 			targetResults = append(targetResults, TargetReport{Path: dst, Action: action})
 			switch action {
@@ -218,7 +214,7 @@ func (e *Engine) Update(ctx context.Context, names []string, options UpdateOptio
 	}
 
 	io.stopProgress()
-	skip, err := resolveConflicts(io, conflicts)
+	skip, err := resolveConflicts(io, conflicts, ConflictAsk)
 	if err != nil {
 		return nil, err
 	}

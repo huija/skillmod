@@ -30,16 +30,12 @@ func (e *Engine) Verify(ctx context.Context, io IO) (*Report, error) {
 	if err != nil {
 		return nil, err
 	}
-	adapters, err := e.adapters()
-	if err != nil {
-		return nil, err
-	}
 
 	rep := &Report{Action: CommandVerify}
 	drift := false
 	for _, sk := range m.Skills {
 		lk := findLock(lock, sk)
-		entry := e.inspectSkill(sk, lk, adapters)
+		entry := e.inspectSkill(sk, lk)
 		if lk == nil {
 			entry.Note = i18n.Text("engine.verify.record_skill_lock_run")
 		}

@@ -27,10 +27,6 @@ func (e *Engine) Why(_ context.Context, name string, io IO) (*Report, error) {
 	if err != nil {
 		return nil, err
 	}
-	adapters, err := e.adapters()
-	if err != nil {
-		return nil, err
-	}
 
 	rep := &Report{Action: CommandWhy}
 	for _, skill := range m.Skills {
@@ -38,7 +34,7 @@ func (e *Engine) Why(_ context.Context, name string, io IO) (*Report, error) {
 			continue
 		}
 		locked := findLock(lock, skill)
-		entry := e.inspectSkill(skill, locked, adapters)
+		entry := e.inspectSkill(skill, locked)
 		rep.Entries = append(rep.Entries, entry)
 	}
 	if len(rep.Entries) == 0 {

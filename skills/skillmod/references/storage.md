@@ -11,9 +11,9 @@ the same repository again.
 | Project (default) | `SKILL.mod` and `SKILL.lock` in the current directory | `.agents/skills/` in the current directory |
 | Global (`--global`) | `$SKILLMOD_HOME/global/`, default `~/.agents/skillmod/global/` | `~/.agents/skills/` |
 
-With the Claude Code adapter enabled, installations also go to
-`.claude/skills/` in the same scope. All commands accept `--global`; ordinary
-commands do not merge the project and global manifests.
+A skill installs into `.agents/skills/` in the selected scope, and skillmod
+manages no other directory convention. All commands accept `--global`
+(`-g`); ordinary commands do not merge the project and global manifests.
 
 ## The cache
 
@@ -60,6 +60,18 @@ editing through a link edits that shared content. Detach before editing:
 skillmod sync --relink --install-mode=copy
 ```
 
+## Sharing to other agents
+
+`share` places a symlink named after each skill into the chosen agent
+directory, such as `.claude/skills/<skill>`, and points it at the managed
+`.agents/skills/<skill>`. The managed directory stays the one real copy:
+editing the managed skill is visible through every link at once, and there is
+nothing to synchronize. Links use the same `auto` fallback as installs, so a
+filesystem without symlink support receives a byte-preserving copy instead,
+and re-running `share` restores links that were replaced. Destinations are
+unmanaged: they appear in no manifest or lock file, and `verify` never reads
+them.
+
 Symlinks inside skill contents remain unsupported.
 
 `prune` removes stale installation entries without deleting link targets or
@@ -79,11 +91,26 @@ Machine-level settings live in a config file whose location follows
 | Windows | `%AppData%\skillmod\config.toml` |
 
 ```toml
-agents = ["agents", "claude-code"]
 install_mode = "auto" # auto / copy
+known_sources = ["github.com/acme/agent-skills"]
 ```
 
+There is no installation-directory setting: skillmod manages `.agents/skills/`,
+and only that, so a project has one place to review. `known_sources` lists the
+repositories `init` and `list` look in when recovering provenance; it is a
+discovery hint, never a declaration.
+
+The `agents` setting was removed together with the platform adapters. A
+configuration that still selects a platform skillmod no longer manages, such as
+`claude-code`, fails every command with a message naming the file and the
+offending entry, because skillmod would otherwise install somewhere other than
+the configuration says. Deleting the entry is the fix; `agents = ["agents"]` is
+tolerated silently, because it described the one directory skillmod still
+manages. Installations that were placed in a removed directory are no longer
+seen: `verify` reports them missing until `sync` recreates them under
+`.agents/skills/`, and the old copies can be deleted once the project verifies
+clean.
+
 Installation directories are artifacts reconstructed from the lock file.
-Projects should add `.agents/skills/` to `.gitignore`, and `.claude/skills/`
-when the Claude adapter is enabled, and commit only `SKILL.mod` and
-`SKILL.lock`.
+Projects should add `.agents/skills/` to `.gitignore` and commit only
+`SKILL.mod` and `SKILL.lock`.

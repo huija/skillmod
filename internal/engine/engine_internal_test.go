@@ -358,26 +358,34 @@ func TestSnapshotSkillDirRejectsUnmaterializablePaths(t *testing.T) {
 func TestResolveConflicts(t *testing.T) {
 	conflicts := []conflict{{name: "a", dir: "/skills/a"}, {name: "b", dir: "/skills/b"}}
 
-	if skip, err := resolveConflicts(IO{}, nil); err != nil || len(skip) != 0 {
+	if skip, err := resolveConflicts(IO{}, nil, ConflictAsk); err != nil || len(skip) != 0 {
 		t.Fatalf("no conflicts = %v, %v", skip, err)
 	}
-	if _, err := resolveConflicts(IO{}, conflicts); err == nil || !strings.Contains(err.Error(), "/skills/a") {
+	if _, err := resolveConflicts(IO{}, conflicts, ConflictAsk); err == nil || !strings.Contains(err.Error(), "/skills/a") {
 		t.Fatalf("non-interactive conflict error = %v", err)
+	}
+	skip, err := resolveConflicts(IO{}, conflicts, ConflictOverwrite)
+	if err != nil || len(skip) != 0 {
+		t.Fatalf("overwrite policy = %v, %v; want everything overwritten", skip, err)
+	}
+	skip, err = resolveConflicts(IO{}, conflicts, ConflictSkip)
+	if err != nil || !skip["/skills/a"] || !skip["/skills/b"] {
+		t.Fatalf("skip policy = %v, %v; want everything skipped", skip, err)
 	}
 
 	var out bytes.Buffer
-	skip, err := resolveConflicts(IO{Yes: true, Out: &out}, conflicts)
+	skip, err = resolveConflicts(IO{Yes: true, Out: &out}, conflicts, ConflictAsk)
 	if err != nil || !skip["/skills/a"] || !skip["/skills/b"] || !strings.Contains(out.String(), "/skills/a") {
 		t.Fatalf("--yes conflicts = %v, %v, output %q", skip, err, out.String())
 	}
 	neverPrompt := &choiceConfirmer{choices: []int{2}}
-	skip, err = resolveConflicts(IO{Yes: true, Confirm: neverPrompt}, conflicts)
+	skip, err = resolveConflicts(IO{Yes: true, Confirm: neverPrompt}, conflicts, ConflictAsk)
 	if err != nil || !skip["/skills/a"] || neverPrompt.calls != 0 {
 		t.Fatalf("--yes with confirmer = %v, %v, confirmer calls %d; want skips, nil, 0", skip, err, neverPrompt.calls)
 	}
 
 	chooser := &choiceConfirmer{choices: []int{0, 1}}
-	skip, err = resolveConflicts(IO{Confirm: chooser}, conflicts)
+	skip, err = resolveConflicts(IO{Confirm: chooser}, conflicts, ConflictAsk)
 	if err != nil || skip["/skills/a"] || !skip["/skills/b"] {
 		t.Fatalf("interactive conflicts = %v, %v", skip, err)
 	}
@@ -385,7 +393,7 @@ func TestResolveConflicts(t *testing.T) {
 		t.Fatalf("Choose calls = %d, want 2", chooser.calls)
 	}
 
-	if _, err := resolveConflicts(IO{Confirm: &choiceConfirmer{choices: []int{2}}}, conflicts[:1]); err == nil {
+	if _, err := resolveConflicts(IO{Confirm: &choiceConfirmer{choices: []int{2}}}, conflicts[:1], ConflictAsk); err == nil {
 		t.Fatal("abort choice did not return an error")
 	}
 }

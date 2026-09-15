@@ -16,10 +16,10 @@ import (
 
 func TestMain(m *testing.M) { testutil.RunMain(m) }
 
-func TestDefaultAgentTarget(t *testing.T) {
+func TestDefaultConfiguration(t *testing.T) {
 	cfg := Default()
-	if len(cfg.Agents) != 1 || cfg.Agents[0] != "agents" {
-		t.Fatalf("Default Agents = %v, want [agents]", cfg.Agents)
+	if cfg.InstallMode != "" || len(cfg.KnownSources) != 0 {
+		t.Fatalf("Default = %+v, want an empty configuration", cfg)
 	}
 }
 
@@ -45,7 +45,7 @@ func TestPathAndLoad(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(wantPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	data := []byte("agents = [\"agents\", \"claude-code\"]\nknown_sources = [\"https://example.com/acme/skills\"]\n")
+	data := []byte("install_mode = \"copy\"\nknown_sources = [\"https://example.com/acme/skills\"]\n")
 	if err := os.WriteFile(wantPath, data, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -53,13 +53,12 @@ func TestPathAndLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(cfg.Agents, []string{"agents", "claude-code"}) ||
-		!reflect.DeepEqual(cfg.KnownSources, []string{"https://example.com/acme/skills"}) {
+	if cfg.InstallMode != "copy" || !reflect.DeepEqual(cfg.KnownSources, []string{"https://example.com/acme/skills"}) {
 		t.Fatalf("loaded config = %+v", cfg)
 	}
 }
 
-func TestLoadEmptyAgentsFallsBackToDefault(t *testing.T) {
+func TestLoadKeepsKnownSources(t *testing.T) {
 	p := isolatedConfigPath(t)
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		t.Fatal(err)
@@ -71,8 +70,50 @@ func TestLoadEmptyAgentsFallsBackToDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(cfg.Agents, []string{"agents"}) || !reflect.DeepEqual(cfg.KnownSources, []string{"file:///repo"}) {
+	if !reflect.DeepEqual(cfg.KnownSources, []string{"file:///repo"}) {
 		t.Fatalf("config = %+v", cfg)
+	}
+}
+
+// A configuration that selected an installation platform asks for a directory
+// skillmod no longer manages, so it fails loudly instead of installing somewhere
+// the file does not describe.
+func TestLoadRejectsRemovedInstallationPlatform(t *testing.T) {
+	for _, agents := range []string{
+		"agents = [\"claude-code\"]\n",
+		"agents = [\"agents\", \"claude-code\"]\ninstall_mode = \"copy\"\n",
+	} {
+		p := isolatedConfigPath(t)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(agents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load()
+		if err == nil {
+			t.Fatalf("Load(%q) succeeded, want the removed setting rejected", agents)
+		}
+		for _, want := range []string{"agents", "claude-code", p} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("Load(%q) error = %q, want it to name %q", agents, err, want)
+			}
+		}
+	}
+}
+
+// The adapter name for the directory skillmod still manages described exactly
+// today's behavior, so a configuration carrying only it keeps working.
+func TestLoadToleratesRemainingAgentName(t *testing.T) {
+	p := isolatedConfigPath(t)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("agents = [\"agents\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(); err != nil {
+		t.Fatalf("Load: %v", err)
 	}
 }
 
