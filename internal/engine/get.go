@@ -355,7 +355,18 @@ func (e *Engine) findSkillByName(ctx context.Context, repo, name, ref string, me
 	}
 	switch len(matches) {
 	case 0:
-		return skillCandidate{}, false, nil
+		// Report the repository's skills rather than the missing subdirectory:
+		// the argument was a skill name, so the names it could have matched are
+		// what the caller needs next.
+		if len(candidates) == 0 {
+			return skillCandidate{}, false, nil
+		}
+		names := make([]string, 0, len(candidates))
+		for _, candidate := range candidates {
+			names = append(names, candidate.name)
+		}
+		return skillCandidate{}, false, fmt.Errorf(i18n.Text("engine.get.no_skill_named"),
+			name, repoaddr.Identity(repo), strings.Join(names, ", "))
 	case 1:
 		return matches[0], true, nil
 	default:

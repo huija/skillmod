@@ -27,6 +27,6 @@ func newGetCmd(options *rootOptions) *cobra.Command {
 			return errors.Join(err, options.output(cmd, rep))
 		},
 	}
-	cmd.Flags().StringVar(&alias, "alias", "", i18n.Text("cli.get.flag_alias"))
+	cmd.Flags().StringVarP(&alias, "alias", "a", "", i18n.Text("cli.get.flag_alias"))
 	return cmd
 }

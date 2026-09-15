@@ -57,12 +57,16 @@ func NewRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	// The persistent flags that appear on ordinary commands carry a one-letter
+	// shorthand. --install-mode deliberately has none: "m" collides with the
+	// usual meaning of "message" and the flag is typed rarely, so the long
+	// spelling is clearer than an ambiguous letter.
 	pf := root.PersistentFlags()
 	pf.StringVar(&options.installMode, "install-mode", "", i18n.Text("cli.root.flag_install_mode"))
-	pf.BoolVar(&options.global, "global", false, i18n.Text("cli.root.flag_global"))
-	pf.BoolVar(&options.json, "json", false, i18n.Text("cli.root.flag_json"))
-	pf.BoolVar(&options.yes, "yes", false, i18n.Text("cli.root.flag_yes"))
-	pf.BoolVar(&options.dryRun, "dry-run", false, i18n.Text("cli.root.flag_dry_run"))
+	pf.BoolVarP(&options.global, "global", "g", false, i18n.Text("cli.root.flag_global"))
+	pf.BoolVarP(&options.json, "json", "j", false, i18n.Text("cli.root.flag_json"))
+	pf.BoolVarP(&options.yes, "yes", "y", false, i18n.Text("cli.root.flag_yes"))
+	pf.BoolVarP(&options.dryRun, "dry-run", "n", false, i18n.Text("cli.root.flag_dry_run"))
 
 	root.AddCommand(
 		newInitCmd(options),

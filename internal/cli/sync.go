@@ -30,8 +30,8 @@ func newSyncCmd(options *rootOptions) *cobra.Command {
 			return errors.Join(err, options.output(cmd, rep))
 		},
 	}
-	cmd.Flags().BoolVar(&check, "check", false, i18n.Text("cli.sync.flag_check"))
-	cmd.Flags().BoolVar(&relink, "relink", false, i18n.Text("cli.sync.flag_relink"))
+	cmd.Flags().BoolVarP(&check, "check", "c", false, i18n.Text("cli.sync.flag_check"))
+	cmd.Flags().BoolVarP(&relink, "relink", "r", false, i18n.Text("cli.sync.flag_relink"))
 	cmd.MarkFlagsMutuallyExclusive("check", "relink")
 	return cmd
 }

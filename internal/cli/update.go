@@ -29,6 +29,8 @@ func newUpdateCmd(options *rootOptions) *cobra.Command {
 			return errors.Join(err, options.output(cmd, rep))
 		},
 	}
+	// --allow-downgrade deliberately has no shorthand: it overrides a safety
+	// check, so it is typed rarely and earned by spelling it out.
 	cmd.Flags().BoolVar(&allowDowngrade, "allow-downgrade", false, i18n.Text("cli.update.flag_allow_downgrade"))
 	return cmd
 }

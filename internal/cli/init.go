@@ -27,6 +27,6 @@ func newInitCmd(options *rootOptions) *cobra.Command {
 			return errors.Join(err, options.output(cmd, rep))
 		},
 	}
-	cmd.Flags().BoolVar(&force, "force", false, i18n.Text("cli.init.flag_force"))
+	cmd.Flags().BoolVarP(&force, "force", "f", false, i18n.Text("cli.init.flag_force"))
 	return cmd
 }

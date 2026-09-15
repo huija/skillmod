@@ -344,6 +344,10 @@ msgstr "multiple skills found in %s; rerun interactively to select one or m"
 msgid "engine.get.multiple_skills_found_select"
 msgstr "multiple skills found in %s; select one or more"
 
+#, go-format
+msgid "engine.get.no_skill_named"
+msgstr "no skill named %q in %s; the repository provides: %s"
+
 msgid "engine.get.no_skills_selected"
 msgstr "no skills selected"
 

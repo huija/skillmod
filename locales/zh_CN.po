@@ -338,6 +338,10 @@ msgstr "在 %s 中发现多个 skill；请在交互模式选择一个或多"
 msgid "engine.get.multiple_skills_found_select"
 msgstr "在 %s 中发现多个 skill；请选择一个或多个"
 
+#, go-format
+msgid "engine.get.no_skill_named"
+msgstr "%q 不在 %s 中；该仓库提供的技能：%s"
+
 msgid "engine.get.no_skills_selected"
 msgstr "未选择任何 skill"
 
