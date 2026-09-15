@@ -95,6 +95,19 @@ func (r *Repo) SHA(ref string) string {
 	return strings.TrimSpace(r.git(r.Work, "rev-parse", ref))
 }
 
+// FileURL converts a native filesystem path into the file:// URL form Git and
+// the address validator accept. Backslashes are normalized explicitly instead
+// of relying on filepath.ToSlash, which only converts on Windows: a
+// Windows-shaped path therefore converts identically on every host, so the
+// conversion is testable off Windows.
+func FileURL(fsPath string) string {
+	slash := strings.ReplaceAll(filepath.ToSlash(fsPath), `\`, "/")
+	if !strings.HasPrefix(slash, "/") {
+		slash = "/" + slash
+	}
+	return (&url.URL{Scheme: "file", Path: slash}).String()
+}
+
 // Finish creates the bare repository, connects origin, and returns its file:// URL.
 func (r *Repo) Finish() string {
 	r.t.Helper()
@@ -107,11 +120,7 @@ func (r *Repo) FinishNamed(name string) string {
 	r.Bare = filepath.Join(r.t.TempDir(), name+".git")
 	r.git("", "clone", "--bare", "--quiet", r.Work, r.Bare)
 	r.git(r.Work, "remote", "add", "origin", r.Bare)
-	urlPath := filepath.ToSlash(r.Bare)
-	if !strings.HasPrefix(urlPath, "/") {
-		urlPath = "/" + urlPath
-	}
-	r.URL = (&url.URL{Scheme: "file", Path: urlPath}).String()
+	r.URL = FileURL(r.Bare)
 	return r.URL
 }
 

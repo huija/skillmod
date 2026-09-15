@@ -86,6 +86,21 @@ func TestSupportedTransport(t *testing.T) {
 	}
 }
 
+// Local fixtures address repositories through file://, and a Windows fixture
+// produces a drive-letter path. Both spellings must survive validation, since a
+// rejected fixture address fails every test before it reaches the code under
+// test.
+func TestPersistedTransportAcceptsLocalFileURLs(t *testing.T) {
+	for _, remote := range []string{
+		"file:///tmp/TestX/001/repo.git",
+		"file:///C:/Users/runner/AppData/Local/Temp/TestX/001/repo.git",
+	} {
+		if got, err := PersistedTransport(remote); err != nil || got != remote {
+			t.Errorf("PersistedTransport(%q) = %q, %v, want unchanged, nil", remote, got, err)
+		}
+	}
+}
+
 func TestPersistedTransportRejectsUnsupportedScheme(t *testing.T) {
 	remote := "git://github.com/acme/skills"
 	if got, err := PersistedTransport(remote); err == nil {

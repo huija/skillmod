@@ -284,8 +284,18 @@ func TestOpenRepo_ReusesCanonicalIdentity(t *testing.T) {
 // subdirectory tag lark-doc/v0.8.1, and a dev branch.
 func newFixtureRepo(t *testing.T) (url string, headSHA string) {
 	t.Helper()
-	bare, headSHA := newFixtureBareRepo(t)
-	return "file://" + bare, headSHA
+	url, _, headSHA = newFixtureRepoPath(t)
+	return url, headSHA
+}
+
+// newFixtureRepoPath is newFixtureRepo plus the bare repository's native path,
+// for tests that touch the fixture through the filesystem. Those tests must use
+// the returned path rather than deriving one from the file:// URL, which is not
+// a native path on Windows.
+func newFixtureRepoPath(t *testing.T) (url, bare, headSHA string) {
+	t.Helper()
+	bare, headSHA = newFixtureBareRepo(t)
+	return testutil.FileURL(bare), bare, headSHA
 }
 
 // newFixtureBareRepo builds the fixture on disk so a test can reach it over a
@@ -610,7 +620,7 @@ func TestRefs_NotFound(t *testing.T) {
 }
 
 func TestFetchRef_PersistentTargetedRepo(t *testing.T) {
-	url, headSHA := newFixtureRepo(t)
+	url, bare, headSHA := newFixtureRepoPath(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	vcsRoot := t.TempDir()
@@ -664,7 +674,7 @@ func TestFetchRef_PersistentTargetedRepo(t *testing.T) {
 		t.Fatalf("bare repository count after two fetches = %d, want 1", dirCount)
 	}
 
-	if err := os.Rename(strings.TrimPrefix(url, "file://"), strings.TrimPrefix(url, "file://")+".gone"); err != nil {
+	if err := os.Rename(bare, bare+".gone"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.FetchRef(ctx, url, headSHA, "refs/tags/lark-doc/v0.8.1"); err != nil {
