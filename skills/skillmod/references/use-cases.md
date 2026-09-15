@@ -12,7 +12,8 @@ current directory and installs into project adapter directories such as
 Use `--global` only for user-wide skills. Global declarations live below the
 skillmod store, while installations normally go into the user's agent skill
 directories. Project and global declarations are intentionally not merged by
-ordinary commands.
+ordinary commands. [storage.md](storage.md) lists the exact locations, the
+shared cache, and the configuration file.
 
 Before a project-scoped mutation, confirm that the working directory is the
 intended project root. Before a global mutation, state explicitly that it will
@@ -27,10 +28,25 @@ skillmod init --yes --dry-run
 skillmod init --yes
 ```
 
-Review the dry-run report before the write. `init` preserves installed files,
-attempts to recover verified provenance, and keeps unknown sources as local
-baselines. A project with an existing `SKILL.mod` requires `--force`; preview
-that operation first because the declaration will be rebuilt and backed up.
+Review the dry-run report before the write. `init` scans `.agents/skills/` and
+`.claude/skills/` in the selected scope without changing existing directories,
+links, or files: directory links are followed for content verification, while
+broken links, unverifiable contents, and invalid directory names are reported
+and skipped. Identical entries across adapters are merged, with every candidate
+path kept for provenance recovery. The same directory name holding different
+contents on two platforms must be reconciled or renamed first.
+
+Provenance is recovered from matching lock records or verified snapshots,
+including monorepo subdirectories and aliases. `init --global` also imports the
+upstream installer's `.skill-lock.json`, while project init reads
+`skills-lock.json`. A recorded Git source and revision stay authoritative even
+when the installed directory has drifted; when an upstream record omits its
+revision, init adopts the latest immutable resolution only if the contents match
+exactly. Sources that cannot be resolved safely are kept as local baselines so
+one unresolved entry does not discard the rest of the import.
+
+Import writes both `SKILL.mod` and `SKILL.lock`. Replacing an existing
+declaration requires `--force`, which first backs it up as `SKILL.mod.bak`.
 
 Use global scope only when requested:
 
@@ -56,7 +72,23 @@ skillmod get github.com/acme/single-skill
 ```
 
 Omitting a version asks skillmod to resolve the latest immutable tag, with a
-pseudo-version fallback for an untagged repository. A branch name is rejected.
+pseudo-version fallback for an untagged repository. A branch name is rejected,
+and the address must be credential-free. [manifests.md](manifests.md) states the
+accepted transports, the version forms, and the rules a hand-edited declaration
+must satisfy.
+
+Interactive terminals show one line per candidate: use ↑/← and ↓/→ to move,
+Space to toggle a selection, D to show or hide the current description and
+command, and Enter to confirm. `--yes` installs every discovered skill, so use
+it only when the selection is already clear; for a repository that holds several
+skills, interactive selection is preferable unless the user asked for all of
+them.
+
+Long-running `get` and `update` runs show a compact animated status block on
+interactive terminals. Remote version checks request only HEAD, branch, and tag
+refs, `update` deduplicates equivalent repository URLs and checks up to four
+distinct repositories concurrently, and a repository snapshot is
+integrity-checked once per command and reused across skill discovery.
 
 When two sources publish the same skill name, install the additional entry with
 an explicit directory alias:
@@ -65,9 +97,8 @@ an explicit directory alias:
 skillmod get --alias review-acme github.com/acme/agent-skills//review
 ```
 
-Use `--yes` only when the requested selection is already clear. For a repository
-that contains several skills, interactive selection is preferable unless the
-user asked to install all discovered skills.
+See [manifests.md](manifests.md) for the alias and installation-directory
+uniqueness rules.
 
 ## Reproduce a declared environment
 
@@ -98,6 +129,11 @@ Use `list` for the complete declaration overview:
 skillmod list
 ```
 
+`list`, `why`, and `verify` classify every installation directory the same way,
+so they cannot disagree about a target. They also inspect local entries against
+the recorded baseline: an edited local entry is reported as `local-drift`, not
+as a plain `local`, and an unreadable directory is `unverifiable` everywhere.
+
 Use `why` for one published name or installation alias:
 
 ```sh
@@ -125,8 +161,10 @@ Interpret exits as:
 | `2` | Drift detected |
 | `3` | Partial completion for commands that safely preserved targets |
 
-For machine consumption, add `--json`. Parse action fields and structured
-target results; do not branch on translated notes or terminal text.
+For machine consumption, add `--json` and branch on the command and action
+identifiers rather than on translated notes or terminal text.
+[automation.md](automation.md) lists the full action vocabulary and the report
+shape.
 
 ## Update dependencies
 
@@ -170,7 +208,9 @@ skillmod prune --dry-run
 skillmod prune
 ```
 
-Do not replace either command with manual cache deletion.
+Do not replace either command with manual cache deletion. `prune` never deletes
+link targets or shared snapshots, and there is no automatic cache eviction; see
+[storage.md](storage.md) before deleting a snapshot by hand.
 
 ## Installation modes
 
@@ -184,7 +224,12 @@ skillmod sync --relink --install-mode=copy
 ```
 
 Use copies when the user needs to edit an installed skill. Do not edit a shared
-snapshot through a linked installation.
+snapshot through a linked installation; a link points at content shared with
+every other project on the machine. Ordinary `sync` preserves matching
+installations and is idempotent, while `--relink` deliberately recreates remote
+installations in the selected mode. Both respect local modifications, and
+`--yes` never forces a conflicting file to be overwritten. Local entries are
+recorded and verified without automatic migration.
 
 ## Diagnose common failures
 
@@ -204,5 +249,14 @@ Common interpretations:
   offline, but latest-version resolution requires remote references.
 - Branch rejected: select a tag, a full commit SHA, or omit the version for
   immutable resolution.
+- Address rejected as unsafe: remove the embedded password or token, the query
+  string, and the fragment from the URL, and move an `@version` suffix in
+  `source` into the `version` field. Credentials belong in a Git credential
+  helper, an SSH agent, or the environment.
+- Manifest validation error: the declaration and the lock are validated when
+  they are read, so report the exact message rather than rewriting the file by
+  guesswork. A `SKILL.lock` without `schemaversion` predates schema versioning
+  and is treated as schema version 1; explicit unsupported versions still need
+  user intervention.
 - Snapshot integrity error: do not suppress it. Preserve diagnostics and move
   to the issue-reporting workflow if the source and local state appear valid.

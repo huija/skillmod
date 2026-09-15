@@ -93,6 +93,7 @@ func ParseMod(data []byte) (*Mod, error) {
 	if err := toml.NewDecoder(bytes.NewReader(data)).DisallowUnknownFields().Decode(&m); err != nil {
 		return nil, fmt.Errorf(i18n.Text("modfile.parse_mod"), err)
 	}
+	normalizeMod(&m)
 	if err := ValidateMod(&m); err != nil {
 		return nil, err
 	}
@@ -101,7 +102,10 @@ func ParseMod(data []byte) (*Mod, error) {
 
 // ParseLock parses SKILL.lock bytes and validates the locked entries.
 func ParseLock(data []byte) (*Lock, error) {
-	var l Lock
+	// Locks written before schema versioning used the current schema but omitted
+	// the field. Preseeding the value preserves that format while still allowing
+	// an explicit zero or unknown version to be rejected by ValidateLock.
+	l := Lock{SchemaVersion: SchemaVersion}
 	if err := toml.NewDecoder(bytes.NewReader(data)).DisallowUnknownFields().Decode(&l); err != nil {
 		return nil, fmt.Errorf(i18n.Text("modfile.parse_lock"), err)
 	}
@@ -206,6 +210,8 @@ func ValidateLock(l *Lock) error {
 	return nil
 }
 
+// validateSource rejects a source that is not a valid credential-free address or
+// that carries a version inside the source field.
 func validateSource(source string) error {
 	a, err := address.Parse(source)
 	if err != nil {
@@ -215,6 +221,16 @@ func validateSource(source string) error {
 		return fmt.Errorf("%s", i18n.Text("modfile.source_contains_version"))
 	}
 	return nil
+}
+
+// normalizeMod records every remote declaration in its canonical manifest form.
+// A source that does not parse is left untouched so ValidateMod reports it.
+func normalizeMod(m *Mod) {
+	for i := range m.Skills {
+		if !m.Skills[i].Local {
+			m.Skills[i].Source = address.ManifestSource(m.Skills[i].Source)
+		}
+	}
 }
 
 // MarshalMod serializes SKILL.mod deterministically by sorting entries by (name, source, alias),
@@ -234,9 +250,12 @@ func MarshalLock(l *Lock) ([]byte, error) {
 }
 
 // normalizeLock removes representationally redundant fields while preserving
-// the installation directory represented by every entry.
+// the installation directory and source represented by every entry.
 func normalizeLock(l *Lock) {
 	for i := range l.Skills {
+		if l.Skills[i].Source != "" {
+			l.Skills[i].Source = address.ManifestSource(l.Skills[i].Source)
+		}
 		if l.Skills[i].Dir == l.Skills[i].Name {
 			l.Skills[i].Dir = ""
 		}
@@ -258,6 +277,7 @@ func marshalDeterministic(v any) ([]byte, error) {
 func sortedModSkills(skills []ModSkill) []ModSkill {
 	cp := make([]ModSkill, len(skills))
 	copy(cp, skills)
+	normalizeMod(&Mod{Skills: cp})
 	sort.SliceStable(cp, func(i, j int) bool {
 		if cp[i].Name != cp[j].Name {
 			return cp[i].Name < cp[j].Name
@@ -330,7 +350,8 @@ func SaveLock(dir string, l *Lock) error {
 
 // SaveState writes SKILL.mod and SKILL.lock as one recoverable state change.
 // Each file replacement is atomic; if either replacement fails, both files
-// are restored to the bytes (or absence) observed before the operation.
+// are restored to the bytes (or absence) observed before the operation. State
+// that already matches both serialized manifests is left untouched.
 func SaveState(dir string, m *Mod, l *Lock) error {
 	if err := ValidateMod(m); err != nil {
 		return err
@@ -370,6 +391,10 @@ func saveState(dir string, modData, lockData []byte, writeFile writeFileFunc) er
 		default:
 			return err
 		}
+	}
+	if previous[0].existed && bytes.Equal(previous[0].data, modData) &&
+		previous[1].existed && bytes.Equal(previous[1].data, lockData) {
+		return nil
 	}
 	restore := func() error {
 		var restoreErrs []error

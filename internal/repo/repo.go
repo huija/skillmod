@@ -21,6 +21,23 @@ var scpRemotePattern = regexp.MustCompile(`^[^/@:]+@([^/:]+):(.+)$`)
 
 const redactedRepository = "<redacted-repository>"
 
+// SupportedTransport reports whether a repository transport is one skillmod
+// accepts, so validation, redaction, and provenance import cannot disagree
+// about which addresses are usable. The scp-like form has its own pattern
+// because it carries no scheme.
+//
+// git:// is deliberately absent: it is unauthenticated and unencrypted, no
+// supported workflow produces it, and every other transport covers the
+// remaining cases, including file:// for local and mirrored repositories.
+func SupportedTransport(scheme string) bool {
+	switch strings.ToLower(scheme) {
+	case "file", "http", "https", "ssh":
+		return true
+	default:
+		return false
+	}
+}
+
 // PersistedTransport validates a repository transport before it is written to
 // a manifest, cache metadata, or Git configuration. SSH usernames are
 // transport details and remain intact; embedded secrets and URL suffixes that
@@ -41,9 +58,7 @@ func PersistedTransport(remote string) (string, error) {
 		return "", unsafeRepositoryError()
 	}
 	scheme := strings.ToLower(u.Scheme)
-	switch scheme {
-	case "file", "git", "http", "https", "ssh":
-	default:
+	if !SupportedTransport(scheme) {
 		return "", unsafeRepositoryError()
 	}
 	if scheme != "file" && u.Host == "" {
@@ -77,9 +92,7 @@ func Redact(remote string) string {
 		return redactedRepository
 	}
 	scheme := strings.ToLower(u.Scheme)
-	switch scheme {
-	case "file", "git", "http", "https", "ssh":
-	default:
+	if !SupportedTransport(scheme) {
 		return redactedRepository
 	}
 	if scheme != "file" && u.Host == "" {

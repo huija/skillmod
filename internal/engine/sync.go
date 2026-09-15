@@ -208,7 +208,7 @@ func (e *Engine) Sync(ctx context.Context, options SyncOptions, io IO) (*Report,
 	if err != nil {
 		return nil, err
 	}
-	if err := e.saveLockIfChanged(newLock); err != nil {
+	if err := e.saveState(m, newLock); err != nil {
 		return nil, errors.Join(err, finalize(false))
 	}
 	if err := finalize(true); err != nil {

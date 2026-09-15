@@ -414,7 +414,6 @@ func TestValidateMod(t *testing.T) {
 
 func TestParseLock_UnsupportedSchemaRejected(t *testing.T) {
 	for name, data := range map[string]string{
-		"missing":  "",
 		"zero":     "schemaversion = 0\n",
 		"negative": "schemaversion = -1\n",
 		"future":   "schemaversion = 99\n",
@@ -424,6 +423,29 @@ func TestParseLock_UnsupportedSchemaRejected(t *testing.T) {
 				t.Fatalf("ParseLock(%q) succeeded, want unsupported schema error", data)
 			}
 		})
+	}
+}
+
+func TestParseLock_MissingSchemaDefaultsToVersionOne(t *testing.T) {
+	const legacy = `[[skill]]
+name = 'demo'
+source = 'https://example.com/acme/skills//demo'
+version = 'v0.0.0-20260624023612-49f948faa925'
+commit = '49f948faa9258a0c61caceaf225e179651397431'
+dirhash = 'h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+`
+	lock, err := ParseLock([]byte(legacy))
+	if err != nil {
+		t.Fatalf("ParseLock(legacy lock) error = %v, want nil", err)
+	}
+	if lock.SchemaVersion != SchemaVersion {
+		t.Errorf("ParseLock(legacy lock).SchemaVersion = %d, want %d", lock.SchemaVersion, SchemaVersion)
+	}
+	if len(lock.Skills) != 1 {
+		t.Fatalf("ParseLock(legacy lock) returned %d skills, want 1", len(lock.Skills))
+	}
+	if got := lock.Skills[0].Commit; got != "49f948faa9258a0c61caceaf225e179651397431" {
+		t.Errorf("ParseLock(legacy lock).Skills[0].Commit = %q, want the full legacy commit", got)
 	}
 }
 
@@ -473,5 +495,73 @@ func TestParseMod_RejectsInvalidEntries(t *testing.T) {
 		if _, err := ParseMod([]byte(data)); err == nil {
 			t.Errorf("ParseMod(%s) = nil error, want rejection", label)
 		}
+	}
+}
+
+func TestParse_RecordsSourceWithoutImpliedTransport(t *testing.T) {
+	mod, err := ParseMod([]byte("schemaversion = 1\n\n[[skill]]\nname = \"code-review\"\nsource = \"https://github.com/acme/agent-skills//code-review\"\nversion = \"v1.2.0\"\n"))
+	if err != nil {
+		t.Fatalf("ParseMod: %v", err)
+	}
+	if got := mod.Skills[0].Source; got != "github.com/acme/agent-skills//code-review" {
+		t.Errorf("ParseMod source = %q, want the implied https transport dropped", got)
+	}
+
+	lock, err := ParseLock([]byte("schemaversion = 1\n\n[[skill]]\nname = \"code-review\"\nsource = \"https://github.com/acme/agent-skills//code-review\"\nversion = \"v1.2.0\"\ncommit = \"7f3a9c1e00000000000000000000000000000000\"\ndirhash = \"h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\"\n"))
+	if err != nil {
+		t.Fatalf("ParseLock: %v", err)
+	}
+	if got := lock.Skills[0].Source; got != "github.com/acme/agent-skills//code-review" {
+		t.Errorf("ParseLock source = %q, want the implied https transport dropped", got)
+	}
+}
+
+func TestMarshal_RecordsSourceWithoutImpliedTransport(t *testing.T) {
+	// get and init build declarations in memory rather than by parsing, so the
+	// serialized form has to canonicalize on its own.
+	mod := &Mod{SchemaVersion: SchemaVersion, Skills: []ModSkill{
+		{Name: "web", Source: "https://github.com/acme/agent-skills//code-review", Version: "v1.2.0"},
+		{Name: "private", Source: "ssh://git@example.com/acme/skills", Version: "v1.0.0"},
+		{Name: "notes", Local: true},
+	}}
+	data, err := MarshalMod(mod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte("https://")) {
+		t.Errorf("MarshalMod = %s, want no recorded https transport", data)
+	}
+	for _, want := range []string{"github.com/acme/agent-skills//code-review", "ssh://git@example.com/acme/skills"} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Errorf("MarshalMod = %s, want source %q", data, want)
+		}
+	}
+	if mod.Skills[0].Source != "https://github.com/acme/agent-skills//code-review" {
+		t.Error("MarshalMod mutated the caller's declaration")
+	}
+
+	lock := &Lock{SchemaVersion: SchemaVersion, Skills: []LockSkill{{
+		Name: "web", Source: "https://github.com/acme/agent-skills//code-review",
+		Version: "v1.2.0", Commit: "7f3a9c1e00000000000000000000000000000000", Dirhash: testutil.DirHash("web"),
+	}}}
+	lockData, err := MarshalLock(lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(lockData, []byte("https://")) {
+		t.Errorf("MarshalLock = %s, want no recorded https transport", lockData)
+	}
+	if !bytes.Contains(lockData, []byte("github.com/acme/agent-skills//code-review")) {
+		t.Errorf("MarshalLock = %s, want the bare repository", lockData)
+	}
+}
+
+func TestParse_RejectsVersionInsideSourceAfterCanonicalizing(t *testing.T) {
+	_, err := ParseMod([]byte("schemaversion = 1\n\n[[skill]]\nname = \"a\"\nsource = \"https://example.com/repo@v1.0.0\"\n"))
+	if err == nil {
+		t.Fatal("ParseMod(source with @version) = nil, want rejection")
+	}
+	if !strings.Contains(err.Error(), "version") {
+		t.Errorf("ParseMod(source with @version) error = %v, want the version-field diagnostic", err)
 	}
 }

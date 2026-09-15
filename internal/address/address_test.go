@@ -59,6 +59,8 @@ func TestParse(t *testing.T) {
 		{"subdirectory redundant slash", "github.com/a/b//x//y", nil, "non-canonical"},
 		{"escaped at subdirectory", "github.com/a/b//foo@@bar", nil, "must not contain @"},
 		{"slash-bearing full tag", "github.com/a/b//code-review@code-review/v1.2.0", nil, "must not contain @"},
+		{"unsupported git transport", "git://github.com/a/b", nil, "unsupported transport"},
+		{"unsupported svn transport", "svn+ssh://github.com/a/b", nil, "unsupported transport"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -109,5 +111,64 @@ func TestAddress_String(t *testing.T) {
 	a.Ref = ""
 	if got := a.String(); got != "https://github.com/a/b//sub" {
 		t.Errorf("String() no ref = %q", got)
+	}
+}
+
+func TestManifestSource_DropsImpliedHTTPSAndKeepsExplicitTransports(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"bare path is already canonical", "github.com/a/b", "github.com/a/b"},
+		{"https prefix is not recorded", "https://github.com/a/b", "github.com/a/b"},
+		{"uppercase https prefix is not recorded", "HTTPS://github.com/a/b", "github.com/a/b"},
+		{"https with subdirectory", "https://github.com/a/b//sub/dir", "github.com/a/b//sub/dir"},
+		{"non-default port survives", "https://github.com:8443/a/b", "github.com:8443/a/b"},
+		// Every other transport changes how the repository is fetched.
+		{"http stays explicit", "http://github.com/a/b", "http://github.com/a/b"},
+		{"ssh stays explicit", "ssh://git@github.com/a/b", "ssh://git@github.com/a/b"},
+		{"scp-like stays explicit", "git@github.com:a/b", "git@github.com:a/b"},
+		{"file stays explicit", "file:///tmp/repo//skill", "file:///tmp/repo//skill"},
+		// Rewriting must never swallow a diagnostic or a version.
+		{"unsupported transport is unchanged", "git://github.com/a/b", "git://github.com/a/b"},
+		{"unparseable source is unchanged", "https://example.com/repo//", "https://example.com/repo//"},
+		{"version-bearing source is unchanged", "github.com/a/b//sub@v1.0.0", "github.com/a/b//sub@v1.0.0"},
+		{"credential-bearing source is unchanged", "https://user:secret@github.com/a/b", "https://user:secret@github.com/a/b"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ManifestSource(tt.raw); got != tt.want {
+				t.Errorf("ManifestSource(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestManifestSource_RoundTripsThroughParse(t *testing.T) {
+	for _, raw := range []string{
+		"github.com/a/b",
+		"https://github.com/a/b//sub",
+		"http://github.com/a/b//sub",
+		"ssh://git@github.com/a/b",
+		"git@github.com:a/b//sub",
+		"file:///tmp/repo//skill",
+	} {
+		canonical := ManifestSource(raw)
+		a, err := Parse(canonical)
+		if err != nil {
+			t.Fatalf("Parse(ManifestSource(%q)) error = %v", raw, err)
+		}
+		if got := ManifestSource(canonical); got != canonical {
+			t.Errorf("ManifestSource is not idempotent: %q -> %q", canonical, got)
+		}
+		original, err := Parse(raw)
+		if err != nil {
+			t.Fatalf("Parse(%q) error = %v", raw, err)
+		}
+		if a.Repo != original.Repo || a.Subdir != original.Subdir {
+			t.Errorf("ManifestSource(%q) = %q resolves to %q//%q, want %q//%q",
+				raw, canonical, a.Repo, a.Subdir, original.Repo, original.Subdir)
+		}
 	}
 }

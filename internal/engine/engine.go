@@ -211,19 +211,6 @@ func sameSource(a, b string) bool {
 	return sameRemoteSource(a, b)
 }
 
-// saveLockIfChanged writes SKILL.lock only when content changes, avoiding writes when already converged.
-func (e *Engine) saveLockIfChanged(lock *modfile.Lock) error {
-	newBytes, err := modfile.MarshalLock(lock)
-	if err != nil {
-		return err
-	}
-	old, err := os.ReadFile(filepath.Join(e.manifestRoot(), modfile.LockFileName))
-	if err == nil && bytes.Equal(old, newBytes) {
-		return nil
-	}
-	return modfile.SaveLock(e.manifestRoot(), lock)
-}
-
 func upsertLock(l *modfile.Lock, e modfile.LockSkill) {
 	for i := range l.Skills {
 		existing := &l.Skills[i]

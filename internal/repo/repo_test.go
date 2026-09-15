@@ -70,3 +70,32 @@ func TestDiagnosticsRedactSecrets(t *testing.T) {
 		t.Errorf("RedactText(malformed URL) = %q, want credentials redacted", got)
 	}
 }
+
+func TestSupportedTransport(t *testing.T) {
+	for _, scheme := range []string{"file", "http", "https", "ssh", "HTTPS", "SSH"} {
+		if !SupportedTransport(scheme) {
+			t.Errorf("SupportedTransport(%q) = false, want true", scheme)
+		}
+	}
+	// git:// is unauthenticated and unencrypted, and no supported workflow
+	// produces it, so an address that uses it is refused rather than fetched.
+	for _, scheme := range []string{"git", "GIT", "ftp", "svn+ssh", ""} {
+		if SupportedTransport(scheme) {
+			t.Errorf("SupportedTransport(%q) = true, want false", scheme)
+		}
+	}
+}
+
+func TestPersistedTransportRejectsUnsupportedScheme(t *testing.T) {
+	remote := "git://github.com/acme/skills"
+	if got, err := PersistedTransport(remote); err == nil {
+		t.Errorf("PersistedTransport(%q) = %q, want error", remote, got)
+	}
+	if got := Redact(remote); got != redactedRepository {
+		t.Errorf("Redact(%q) = %q, want %q", remote, got, redactedRepository)
+	}
+	// The scp-like form carries no scheme and stays supported.
+	if got, err := PersistedTransport("git@github.com:acme/skills"); err != nil || got != "git@github.com:acme/skills" {
+		t.Errorf("PersistedTransport(scp-like) = %q, %v, want unchanged, nil", got, err)
+	}
+}

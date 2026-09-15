@@ -129,6 +129,36 @@ func normalizeRepo(repo string) string {
 	return "https://" + repo
 }
 
+// ManifestSource returns the address form recorded in SKILL.mod and SKILL.lock.
+// A bare host/owner/repo and its https:// spelling are the same repository, so
+// repeating the implied transport in a reviewed file adds nothing. Every other
+// transport stays explicit because it changes how the repository is fetched.
+//
+// A source that does not parse, or that carries a version, is returned unchanged
+// so ValidateMod and ValidateLock report it themselves rather than letting this
+// rewrite discard the offending part.
+func ManifestSource(raw string) string {
+	a, err := Parse(raw)
+	if err != nil || a.Ref != "" {
+		return raw
+	}
+	repo := dropDefaultTransport(a.Repo)
+	if a.Subdir == "" {
+		return repo
+	}
+	return repo + "//" + a.Subdir
+}
+
+// dropDefaultTransport removes the https:// prefix that Parse restores from a
+// bare path, and leaves any explicit transport untouched.
+func dropDefaultTransport(repo string) string {
+	const httpsScheme = "https://"
+	if len(repo) > len(httpsScheme) && strings.EqualFold(repo[:len(httpsScheme)], httpsScheme) {
+		return repo[len(httpsScheme):]
+	}
+	return repo
+}
+
 // cleanSubdir validates a canonical slash-separated Git path with no redundant or escaping segments.
 func cleanSubdir(s string) (string, error) {
 	if strings.Contains(s, "\\") {

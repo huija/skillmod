@@ -610,3 +610,58 @@ func assertInstallationContent(t *testing.T, target, want string) {
 		t.Fatalf("installation content = %q, want %q", data, want)
 	}
 }
+
+// TestSaveState_RecordsCanonicalSource covers reconciliation recording a
+// declaration in its canonical form: a file that still spells out the implied
+// HTTPS transport is rewritten once, and converged state is left alone.
+func TestSaveState_RecordsCanonicalSource(t *testing.T) {
+	root := t.TempDir()
+	e := &Engine{Root: root, Store: store.New(t.TempDir())}
+	modPath := filepath.Join(root, modfile.ModFileName)
+	lockPath := filepath.Join(root, modfile.LockFileName)
+	declared := "schemaversion = 1\n\n[[skill]]\nname = 'code-review'\n" +
+		"source = 'https://github.com/acme/agent-skills//code-review'\nversion = 'v1.2.0'\n"
+	if err := os.WriteFile(modPath, []byte(declared), 0o644); err != nil {
+		t.Fatalf("WriteFile(%s): %v", modfile.ModFileName, err)
+	}
+	lock := &modfile.Lock{SchemaVersion: modfile.SchemaVersion}
+	if err := modfile.SaveLock(root, lock); err != nil {
+		t.Fatalf("SaveLock(): %v", err)
+	}
+	m, err := e.loadMod()
+	if err != nil {
+		t.Fatalf("loadMod(): %v", err)
+	}
+	if err := e.saveState(m, lock); err != nil {
+		t.Fatalf("saveState(): %v", err)
+	}
+	written, err := os.ReadFile(modPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%s): %v", modfile.ModFileName, err)
+	}
+	if !bytes.Contains(written, []byte("source = 'github.com/acme/agent-skills//code-review'")) {
+		t.Errorf("SKILL.mod =\n%s\nwant the implied transport dropped", written)
+	}
+	if bytes.Contains(written, []byte("https://")) {
+		t.Errorf("SKILL.mod =\n%s\nwant no recorded https transport", written)
+	}
+
+	converged := time.Now().Add(-time.Hour)
+	for _, path := range []string{modPath, lockPath} {
+		if err := os.Chtimes(path, converged, converged); err != nil {
+			t.Fatalf("Chtimes(%s): %v", filepath.Base(path), err)
+		}
+	}
+	if err := e.saveState(m, lock); err != nil {
+		t.Fatalf("second saveState(): %v", err)
+	}
+	for _, path := range []string{modPath, lockPath} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("Stat(%s): %v", filepath.Base(path), err)
+		}
+		if !info.ModTime().Equal(converged) {
+			t.Errorf("saveState rewrote converged %s", filepath.Base(path))
+		}
+	}
+}

@@ -114,7 +114,7 @@ func (sk legacySkill) location() (repo, subdir string, err error) {
 		transport = repoaddr.Identity(transport) // scp-style SSH
 	}
 	u, err := url.Parse(transport)
-	if err != nil || (u.Scheme != "https" && u.Scheme != "http" && u.Scheme != "ssh" && u.Scheme != "file") {
+	if err != nil || !repoaddr.SupportedTransport(u.Scheme) {
 		return "", "", fmt.Errorf(i18n.Text("engine.legacy.invalid_previous_installer"), raw)
 	}
 	// Persisted Git paths are slash-separated even when imported on another OS.

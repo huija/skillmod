@@ -16,6 +16,14 @@ for the current task.
 - For project/global setup, dependency operations, CI, inspection, updates,
   removal, or troubleshooting, read
   [references/use-cases.md](references/use-cases.md).
+- For manifest rules, accepted address and version forms, aliases, and what the
+  files deliberately leave out, read
+  [references/manifests.md](references/manifests.md).
+- For the shared cache, installation modes, configuration file, or where
+  declarations and installations live, read
+  [references/storage.md](references/storage.md).
+- For exit codes and the JSON report vocabulary that scripts and CI branch on,
+  read [references/automation.md](references/automation.md).
 - When the user explicitly wants to report a problem, or diagnosis strongly
   indicates a skillmod defect, read
   [references/issue-reporting.md](references/issue-reporting.md).
@@ -50,6 +58,12 @@ required before explaining concepts or drafting an issue.
 - Exit code 2 from `verify` means drift. Exit code 1 is an operational error.
 - Branch names are mutable and cannot be locked. Use a semantic-version tag, a
   full 40-character commit SHA, or let skillmod resolve an immutable version.
+- Keep repository addresses credential-free and free of an implied transport. A
+  password or token in the user information, a query string, or a fragment is
+  rejected instead of persisted, and `source` records `host/owner/repo` rather
+  than an `https://` spelling. The version belongs in the `version` field, not
+  as an `@version` suffix in `source`. Direct the user to a credential helper,
+  an SSH agent, or the environment for secrets.
 - Installation directories are generated state. Preserve `SKILL.mod` and
   `SKILL.lock` in version control; do not commit installed skill directories
   unless the project deliberately chooses to do so.

@@ -37,8 +37,9 @@ test:
 
 coverage:
 	@profile="$$(mktemp)"; trap 'rm -f "$$profile"' EXIT; \
-		$(GO) test -coverprofile="$$profile" ./...; \
-		$(GO) tool cover -func="$$profile" | awk -v minimum="$(COVERAGE_MIN)" '/^total:/ { value=$$3; sub(/%$$/, "", value); if (value+0 < minimum+0) { printf "coverage %.1f%% is below %.1f%%\n", value, minimum; exit 1 } printf "coverage %.1f%% meets %.1f%% minimum\n", value, minimum }'
+		$(GO) test -coverprofile="$$profile" ./... && \
+		coverage="$$($(GO) tool cover -func="$$profile")" && \
+		printf '%s\n' "$$coverage" | awk -v minimum="$(COVERAGE_MIN)" '/^total:/ { found=1; value=$$3; sub(/%$$/, "", value); if (value+0 < minimum+0) { printf "coverage %.1f%% is below %.1f%%\n", value, minimum; exit 1 } printf "coverage %.1f%% meets %.1f%% minimum\n", value, minimum } END { if (!found) { print "coverage total was not reported"; exit 1 } }'
 
 vet:
 	$(GO) vet ./...
