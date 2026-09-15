@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 
-// Package cli provides the entry layer for the nine subcommands: validate arguments, call the engine, and format output.
+// Package cli provides the entry layer for the subcommands: validate arguments, call the engine, and format output.
 // All business logic lives in internal/engine; this layer only handles I/O.
 package cli
 

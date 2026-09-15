@@ -25,9 +25,11 @@ skillmod 用 go mod 的同构方案解决：`SKILL.mod` 声明 + `SKILL.lock`（
 ## 五分钟
 
 ```console
-$ skillmod get github.com/openai/skills//skills/.curated/gh-fix-ci --install-mode=copy --yes
+$ skillmod get github.com/openai/skills//gh-fix-ci --install-mode=copy --yes
 已安装 gh-fix-ci v0.0.0-20260624023612-49f948faa925，SKILL.mod 与 SKILL.lock 已更新
 ```
+
+仓库只写一次，技能名只写一次：`//` 后面直接用技能名即可，不需要记住或输入仓库内部的目录结构。精确存在的子目录仍然优先；同名技能有多个候选时，skillmod 会列出候选路径让用户选择，而不是自己猜。声明里记录的是技能真实所在的路径，也就是下面 `source` 那一行。
 
 `SKILL.mod` 是人维护、需要提交的声明；`SKILL.lock` 由 skillmod 写入，记录声明解析出的结果：
 
@@ -114,6 +116,8 @@ npx skills add huija/skillmod --skill skillmod --global
 go install github.com/huija/skillmod@latest
 ```
 
+无论用哪种方式安装，之后都可以用 `skillmod upgrade` 原地升级：它会先按发布校验和验证下载内容，再替换可执行文件。
+
 从仓库源码本地开发时，`make install` 会把二进制装到 `go env GOBIN`；未设置 `GOBIN` 时用第一个 `GOPATH/bin`，并写入当前 Git revision。详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 前置条件
@@ -134,8 +138,11 @@ skillmod 通过系统 `git` 可执行文件获取源码，因此必须安装 Git
 | `remove <选择器>` | 删除声明和内容未改动的受管安装 |
 | `prune` | 清理手工编辑后残留的过期安装和锁记录 |
 | `share` | 把已安装技能链接到其他 agent 目录，如 `.claude`、`.codex` |
+| `upgrade` | 用已发布的版本替换当前可执行文件，替换前按发布校验和验证 |
 
-所有命令都支持 `--json`（机器可读输出）和 `--global`（作用于用户级技能而非当前项目），写操作支持 `--dry-run`。命令帮助、摘要、交互提示和错误信息优先采用 `SKILLMOD_LANG`，未设置时跟随系统 locale；JSON 的字段名和 action 标识不会翻译。
+先纳管机器，再纳管项目：`skillmod --global init` 先登记用户在 `~/.agents/skills/` 里已有的技能，`skillmod init` 再登记项目自身的技能。两份清单相互独立，因此只有带 `--global` 的命令才作用于机器级；两个作用域的完整流程见 [use-cases.md](skills/skillmod/references/use-cases.md)。
+
+所有命令都支持 `--json`（`-j`，机器可读输出）和 `--global`（`-g`，作用于用户级技能而非当前项目），写操作支持 `--dry-run`（`-n`）和 `--yes`（`-y`）。`get` 还支持 `--alias`（`-a`），`init` 支持 `--force`（`-f`），`sync` 支持 `--check`（`-c`）和 `--relink`（`-r`），`share` 支持 `--skill`（`-s`）、`--agent`（`-a`）和 `--dir`（`-d`），`upgrade` 支持 `--check`（`-c`）和 `--tag`（`-t`）。`--install-mode` 与 `--allow-downgrade` 刻意不设短写：显而易见的字母会产生歧义，且这两个参数很少手输。命令帮助、摘要、交互提示和错误信息优先采用 `SKILLMOD_LANG`，未设置时跟随系统 locale；JSON 的字段名和 action 标识不会翻译。
 
 ## 详细文档在哪
 

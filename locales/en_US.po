@@ -550,7 +550,7 @@ msgstr "previous installer recorded a tree hash without its repository path"
 
 #, go-format
 msgid "engine.legacy.previous_installer_source_type"
-msgstr "previous installer source type %q is not a supported Git source"
+msgstr "previous installer source type %q carries no Git provenance"
 
 msgid "engine.legacy.record_without_revision"
 msgstr "previous installer record has no immutable revision and the latest "

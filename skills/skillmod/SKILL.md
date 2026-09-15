@@ -1,6 +1,6 @@
 ---
 name: skillmod
-description: Install, configure, use, and troubleshoot skillmod, or prepare a well-formed issue for huija/skillmod. Use when a user wants to manage Agent Skills through SKILL.mod and SKILL.lock, bootstrap an existing project, synchronize or inspect installations, update or remove skills, install the skillmod binary, or report a skillmod problem. Do not use for developing the skillmod source code itself.
+description: Install, configure, use, and troubleshoot skillmod, or prepare a well-formed issue for huija/skillmod. Use when a user wants to manage Agent Skills through SKILL.mod and SKILL.lock, bootstrap an existing project or machine, synchronize or inspect installations, update or remove skills, install or upgrade the skillmod binary, or report a skillmod problem. Do not use for developing the skillmod source code itself.
 ---
 
 # skillmod
@@ -39,11 +39,15 @@ required before explaining concepts or drafting an issue.
    available. Do not repeat those checks during ordinary operations when the
    current session has already established them, and do not reinstall a working
    executable merely because installation was mentioned in an earlier step.
-3. Inspect existing `SKILL.mod`, `SKILL.lock`, configuration, and installed
+3. When bringing a machine or a project under management, adopt in order: the
+   user-wide skills with `skillmod --global init` first, then the project with
+   `skillmod init`. Keep the two scopes straight afterwards: a command affects
+   the machine only when it carries `--global`.
+4. Inspect existing `SKILL.mod`, `SKILL.lock`, configuration, and installed
    directories before proposing a mutation. Preserve unrelated user changes.
-4. Prefer `--dry-run` before `init --force`, `sync --relink`, `remove`, or
+5. Prefer `--dry-run` before `init --force`, `sync --relink`, `remove`, or
    `prune` when the result is not already obvious to the user.
-5. Run the smallest command that satisfies the request and verify its result.
+6. Run the smallest command that satisfies the request and verify its result.
    Use `skillmod list`, `skillmod why <name-or-alias>`, or `skillmod verify`
    rather than inferring state from directory names alone.
 

@@ -537,7 +537,7 @@ msgstr "旧安装器记录了 tree 哈希，但缺少仓库路径"
 
 #, go-format
 msgid "engine.legacy.previous_installer_source_type"
-msgstr "旧安装器来源类型 %q 不是支持的 Git 来源"
+msgstr "旧安装器来源类型 %q 不含 Git 溯源信息"
 
 msgid "engine.legacy.record_without_revision"
 msgstr "旧安装器记录没有不可变版本，且最新来源与已安"

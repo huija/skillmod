@@ -49,9 +49,16 @@ declaration pays for itself.
 ## Five minutes
 
 ```console
-$ skillmod get github.com/openai/skills//skills/.curated/gh-fix-ci --install-mode=copy --yes
+$ skillmod get github.com/openai/skills//gh-fix-ci --install-mode=copy --yes
 installed gh-fix-ci v0.0.0-20260624023612-49f948faa925; SKILL.mod and SKILL.lock were updated
 ```
+
+The repository is named once and the skill once: after `//` the skill name is
+enough, so the directory layout inside the repository does not have to be typed
+or remembered. An exact subdirectory still wins over a name, and a name that
+several skills answer is reported with the candidate paths instead of guessed.
+The declaration records where the skill actually lives, as the `source` line
+below shows.
 
 `SKILL.mod` is the declaration you review and commit. `SKILL.lock` is written by
 skillmod and records what the declaration resolved to:
@@ -150,6 +157,9 @@ With Go 1.26.1 or later:
 go install github.com/huija/skillmod@latest
 ```
 
+Either way, upgrade in place later with `skillmod upgrade`, which verifies the
+download against the release checksums before it replaces the executable.
+
 For local development from a repository checkout, `make install` puts the binary
 in `go env GOBIN`, or the first `GOPATH/bin` entry when `GOBIN` is unset, and
 embeds the current Git revision. See [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -175,12 +185,26 @@ remotes additionally require `ssh` on `PATH`.
 | `remove <selector>` | Delete a declaration and its clean managed installations |
 | `prune` | Drop stale installations and lock records left behind by hand edits |
 | `share` | Link installed skills into other agent directories such as `.claude` or `.codex` |
+| `upgrade` | Replace the running executable with a published release, verified against its checksums |
 
-Every command accepts `--json` for machine-readable output and `--global` to
-operate on user-wide skills instead of the current project; mutations accept
-`--dry-run`. Command help, summaries, prompts, and errors follow `SKILLMOD_LANG`
-when it is set and the system locale otherwise; JSON field names and action
-identifiers are never translated.
+A machine is adopted before a project, in that order: `skillmod --global init`
+declares the skills the user already has in `~/.agents/skills/`, then
+`skillmod init` declares the project's own. The two manifests are independent,
+so a command reaches the machine only when it carries `--global`;
+[use-cases.md](skills/skillmod/references/use-cases.md) walks through both
+scopes.
+
+Every command accepts `--json` (`-j`) for machine-readable output and `--global`
+(`-g`) to operate on user-wide skills instead of the current project; mutations
+accept `--dry-run` (`-n`) and `--yes` (`-y`). `get` also accepts `--alias`
+(`-a`), `init` accepts `--force` (`-f`), `sync` accepts `--check` (`-c`) and
+`--relink` (`-r`), `share` accepts `--skill` (`-s`), `--agent` (`-a`), and
+`--dir` (`-d`), and `upgrade` accepts `--check` (`-c`) and `--tag` (`-t`).
+`--install-mode` and `--allow-downgrade` deliberately have no shorthand: the
+obvious letters are ambiguous, and both are typed rarely. Command help,
+summaries, prompts, and errors follow `SKILLMOD_LANG` when it is set and the
+system locale otherwise; JSON field names and action identifiers are never
+translated.
 
 ## Where the details live
 

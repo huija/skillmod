@@ -6,8 +6,7 @@ Use the smallest section relevant to the request. Run `skillmod <command>
 ## Choose a scope
 
 Project scope is the default. It keeps `SKILL.mod` and `SKILL.lock` in the
-current directory and installs into project adapter directories such as
-`.agents/skills/`.
+current directory and installs into `.agents/skills/`.
 
 Use `--global` only for user-wide skills. Global declarations live below the
 skillmod store, while installations normally go into the user's agent skill
@@ -19,6 +18,54 @@ Before a project-scoped mutation, confirm that the working directory is the
 intended project root. Before a global mutation, state explicitly that it will
 affect the user's global agent environment.
 
+## Adopt in order: global first, then the project
+
+Bringing a machine under skillmod management is two steps, and the order
+matters: the machine-wide skills exist already, and the project builds on them.
+
+1. Adopt the user-wide skills, which is where a machine's shared skills live:
+
+```sh
+skillmod --global init --dry-run --yes
+skillmod --global init --yes
+skillmod --global list
+skillmod --global verify
+```
+
+This declares everything in `~/.agents/skills/` in
+`~/.agents/skillmod/global/SKILL.mod`, recovering provenance from the previous
+installer's recorded sources and from the shared snapshot cache. Review the
+dry-run report before writing. A skill the previous installer recorded from a
+web discovery endpoint has no Git repository behind it: the record names the web
+origin, the entry is reported as `unresolved`, and the skill is kept as a local
+declaration. Adding the repository that publishes it to `known_sources` lets a
+later `init` adopt it as a Git dependency, because the content is then verified
+against that repository. A record the previous installer already marked local is
+not a gap at all: it stays a plain local declaration, with no note and no
+`unresolved` count.
+
+2. Adopt the project, which is the step that makes the project reproducible on
+   other machines:
+
+```sh
+cd <project>
+skillmod init --dry-run --yes
+skillmod init --yes
+```
+
+3. Keep both scopes aligned from then on. The two manifests are independent, so
+   a command that should affect the user's machine needs `--global`:
+
+```sh
+skillmod sync && skillmod verify
+skillmod --global sync && skillmod --global verify
+```
+
+A skill can legitimately be declared in both scopes — the same repository at the
+same version then serves both from one shared snapshot on disk. Declare it in
+the project when the project depends on it, and globally when the user wants it
+available in every project.
+
 ## Bootstrap an existing project
 
 Use `init` when skill directories already exist but are not declared:
@@ -28,13 +75,12 @@ skillmod init --yes --dry-run
 skillmod init --yes
 ```
 
-Review the dry-run report before the write. `init` scans `.agents/skills/` and
-`.claude/skills/` in the selected scope without changing existing directories,
-links, or files: directory links are followed for content verification, while
-broken links, unverifiable contents, and invalid directory names are reported
-and skipped. Identical entries across adapters are merged, with every candidate
-path kept for provenance recovery. The same directory name holding different
-contents on two platforms must be reconciled or renamed first.
+Review the dry-run report before the write. `init` scans `.agents/skills/` in
+the selected scope without changing existing directories, links, or files:
+directory links are followed for content verification, while broken links,
+unverifiable contents, and invalid directory names are reported and skipped.
+Identical entries across targets are merged, with every candidate path kept for
+provenance recovery.
 
 Provenance is recovered from matching lock records or verified snapshots,
 including monorepo subdirectories and aliases. `init --global` also imports the
@@ -70,6 +116,16 @@ skillmod get github.com/acme/agent-skills//skills/review@v1.2.0
 skillmod get github.com/acme/agent-skills//review
 skillmod get github.com/acme/single-skill
 ```
+
+The repository is always named; `//` then selects the skill inside it. The
+second form writes the skill name in place of its path, so a collection is
+addressed with two short words instead of the directory layout. An exact
+subdirectory always wins over a name, and a unique name resolves to the skill's
+real path, so `source` records
+`github.com/acme/agent-skills//skills/review` rather than the shorthand that was
+typed. When several skills in the repository answer the same name, skillmod
+reports the candidate paths and refuses to guess. A repository that is itself a
+single skill needs no `//`, as in the third form.
 
 Omitting a version asks skillmod to resolve the latest immutable tag, with a
 pseudo-version fallback for an untagged repository. A branch name is rejected,
@@ -142,7 +198,7 @@ skillmod why review
 
 `why` reports the source, resolved version, commit, dirhash, installation
 directory, and each configured target's status. Prefer it over manually
-interpreting links inside `.agents/skills/` or `.claude/skills/`.
+interpreting links inside `.agents/skills/`.
 
 ## Verify in CI
 
