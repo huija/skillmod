@@ -208,6 +208,43 @@ msgstr "resolve the latest versions, update the lock, and install"
 msgid "cli.update.use"
 msgstr "update [names…]"
 
+#, go-format
+msgid "cli.upgrade.already_current"
+msgstr "skillmod %s is already up to date"
+
+#, go-format
+msgid "cli.upgrade.available"
+msgstr "skillmod %s is available; run 'skillmod upgrade' to install it"
+
+#, go-format
+msgid "cli.upgrade.dry_run"
+msgstr "dry-run: would install skillmod %s to %s"
+
+msgid "cli.upgrade.flag_check"
+msgstr "report whether a newer release exists without downloading it"
+
+msgid "cli.upgrade.flag_tag"
+msgstr "install this release tag instead of the latest release"
+
+#, go-format
+msgid "cli.upgrade.installed"
+msgstr "upgraded skillmod from %s to %s (%s)"
+
+msgid "cli.upgrade.long"
+msgstr "Replace the running skillmod executable with a published release.\n"
+"The download is verified against the release checksums.txt before it is in"
+"stalled, so an upgrade follows the same trust path as a manual installatio"
+"n.\nAn executable installed by a package manager should be upgraded throug"
+"h that package manager instead.\nUse --check to report availability withou"
+"t downloading, --tag to install a specific release, and --dry-run to downl"
+"oad and verify without replacing the executable."
+
+msgid "cli.upgrade.note_run_upgrade"
+msgstr "a newer release is available; run 'skillmod upgrade'"
+
+msgid "cli.upgrade.short"
+msgstr "Upgrade the skillmod executable to a published release"
+
 msgid "cli.verify.long"
 msgstr "Exit with status 2 when drift is detected. Uses the same implementa"
 "tion as sync --check."
@@ -1359,4 +1396,101 @@ msgstr "invalid choice; try again"
 
 msgid "ui.show_details"
 msgstr "show details"
+
+#, go-format
+msgid "upgrade.archive_format_unknown"
+msgstr "unsupported archive format %q"
+
+#, go-format
+msgid "upgrade.archive_missing_executable"
+msgstr "the %s archive does not contain a skillmod executable"
+
+#, go-format
+msgid "upgrade.archive_unreadable"
+msgstr "cannot read the %s archive: %v"
+
+#, go-format
+msgid "upgrade.checksum_mismatch"
+msgstr "checksum mismatch for %s: published %s, downloaded %s; the download"
+" was discarded"
+
+#, go-format
+msgid "upgrade.checksum_missing_entry"
+msgstr "checksums.txt has no entry for %s; refusing to install an unverifie"
+"d download"
+
+#, go-format
+msgid "upgrade.download_too_large"
+msgstr "the download from %s exceeds the %d byte limit"
+
+#, go-format
+msgid "upgrade.downloading_release"
+msgstr "downloading skillmod %s"
+
+msgid "upgrade.executable_path_unknown"
+msgstr "cannot determine which executable to replace"
+
+#, go-format
+msgid "upgrade.executable_path_unresolved"
+msgstr "cannot locate the running executable: %v"
+
+#, go-format
+msgid "upgrade.executable_too_large"
+msgstr "the executable is %d bytes, over the %d byte limit"
+
+#, go-format
+msgid "upgrade.no_published_release"
+msgstr "no published release was found in %s"
+
+#, go-format
+msgid "upgrade.platform_archive_missing"
+msgstr "release %s does not publish the archive %s; release assets: %s"
+
+#, go-format
+msgid "upgrade.release_asset_missing"
+msgstr "release %s does not publish %s"
+
+msgid "upgrade.release_asset_url_missing"
+msgstr "the release asset has no download URL"
+
+#, go-format
+msgid "upgrade.release_metadata_unreadable"
+msgstr "cannot read the release metadata: %v"
+
+#, go-format
+msgid "upgrade.release_not_found"
+msgstr "release %q was not found in %s"
+
+msgid "upgrade.release_tag_missing"
+msgstr "the release has no tag name"
+
+#, go-format
+msgid "upgrade.replace_failed"
+msgstr "cannot replace %s: %v"
+
+#, go-format
+msgid "upgrade.replace_rollback_failed"
+msgstr "cannot replace %s, and the previous executable could not be restore"
+"d: it is kept at %s (%v)"
+
+#, go-format
+msgid "upgrade.request_failed"
+msgstr "request to %s failed: %v"
+
+msgid "upgrade.response_rate_limited"
+msgstr "the API declined the request; an exhausted quota or a missing permi"
+"ssion is the usual cause"
+
+#, go-format
+msgid "upgrade.response_status"
+msgstr "request to %s returned HTTP %d"
+
+#, go-format
+msgid "upgrade.stage_failed"
+msgstr "cannot write next to %s: %v; if a package manager installed skillmo"
+"d, upgrade it with that package manager"
+
+#, go-format
+msgid "upgrade.verifying_release"
+msgstr "verifying %s"
 

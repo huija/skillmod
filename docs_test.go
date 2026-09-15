@@ -27,7 +27,8 @@ var (
 	documentedCommands = []string{
 		string(engine.CommandGet), string(engine.CommandInit), string(engine.CommandList),
 		string(engine.CommandPrune), string(engine.CommandRemove), string(engine.CommandShare), string(engine.CommandSync),
-		string(engine.CommandUpdate), string(engine.CommandVerify), string(engine.CommandWhy),
+		string(engine.CommandUpdate), string(engine.CommandUpgrade), string(engine.CommandVerify),
+		string(engine.CommandWhy),
 	}
 	documentedEntryActions = []string{
 		engine.ActionConflict, engine.ActionDrift, engine.ActionInstall, engine.ActionInstalled,

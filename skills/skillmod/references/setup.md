@@ -27,7 +27,8 @@ skillmod --version
 
 Interpret each command independently. A missing `skillmod` executable is
 expected during first-time setup. If both commands already work, report their
-paths and versions and do not reinstall unless the user requested an upgrade.
+paths and versions and do not reinstall unless the user requested an upgrade,
+which `skillmod upgrade` performs in place (see below).
 
 ## 2. Ensure Git is available
 
@@ -123,6 +124,29 @@ git --version
 If the current process cannot see a newly updated PATH, invoke the executable by
 its full path for verification and tell the user to open a new terminal. Report
 the installed executable path, version, and whether Git was found.
+
+## 7. Upgrade an installed executable
+
+An installed executable upgrades itself:
+
+```sh
+skillmod upgrade --check   # report whether a newer release exists
+skillmod upgrade           # install it
+skillmod --version
+```
+
+`upgrade` reads the release published for the current operating system and
+architecture, verifies the archive against that release's `checksums.txt`, and
+replaces the running executable. It needs network access to `api.github.com` and
+`github.com`, and it discards an archive whose checksum does not match instead
+of installing it. `--dry-run` downloads and verifies without replacing the
+executable, `--check` stops before downloading, and `--tag <tag>` installs a
+specific release.
+
+An executable placed by a package manager, or one in a directory the user cannot
+write, should be upgraded through that package manager or reinstalled from the
+release archive instead. `upgrade` names the path it could not replace rather
+than asking for elevation.
 
 ## Alternative: build with Go
 

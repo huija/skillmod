@@ -27,10 +27,33 @@ make check
 | `lint` | A pinned golangci-lint, version in `.golangci-version` |
 
 CI additionally runs `govulncheck` and a cross-platform test matrix
-(`test.yml`, `cross.yml`), so keep tests working on macOS and Windows: path
-separators, symlink privileges, and file modes differ. `make test` runs the
-suite alone, and `make build` writes a development binary with the current Git
-revision embedded.
+(`test.yml`, `cross.yml`), so keep tests working on macOS and
+Windows: path separators, symlink privileges, and file modes differ. `make test`
+runs the suite alone, and `make build` writes a development binary with the
+current Git revision embedded.
+
+## Release packaging
+
+The release workflow builds the archives and publishes them, and it depends on
+the same reusable gates CI runs, so a tag cannot bypass the test matrix. There is
+deliberately no packaging job in CI: the six archives are built once, at release
+time, which keeps every push cheap.
+
+Two contracts hold the archives together, and both are documented where the user
+sees them:
+
+- Names stay `skillmod_<version>_<os>_<arch>.<ext>`, with `<version>` omitting
+  the leading `v`. `setup.md` documents that shape, and `skillmod upgrade`
+  derives the asset name from the release tag, so a rename breaks the upgrade
+  path before anything else fails.
+- A `.zip` for Windows and a `.tar.gz` elsewhere, each containing the executable
+  at its root, because `upgrade` locates the binary by base name.
+
+Because the archives are not built until the release run, the check that catches
+a platform break before the tag is the ordinary one: land the change on `main`,
+wait for CI to go green, and only then push the tag. The release workflow
+re-runs every gate before publishing, so a failure there leaves a tag that has to
+be deleted or moved.
 
 ## User-facing text
 

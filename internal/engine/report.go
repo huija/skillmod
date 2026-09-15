@@ -16,16 +16,17 @@ type EntryStatus string
 type TargetStatus string
 
 const (
-	CommandGet    Command = "get"
-	CommandInit   Command = "init"
-	CommandList   Command = "list"
-	CommandPrune  Command = "prune"
-	CommandRemove Command = "remove"
-	CommandShare  Command = "share"
-	CommandSync   Command = "sync"
-	CommandUpdate Command = "update"
-	CommandVerify Command = "verify"
-	CommandWhy    Command = "why"
+	CommandGet     Command = "get"
+	CommandInit    Command = "init"
+	CommandList    Command = "list"
+	CommandPrune   Command = "prune"
+	CommandRemove  Command = "remove"
+	CommandShare   Command = "share"
+	CommandSync    Command = "sync"
+	CommandUpdate  Command = "update"
+	CommandUpgrade Command = "upgrade"
+	CommandVerify  Command = "verify"
+	CommandWhy     Command = "why"
 
 	ActionConflict     = "conflict"
 	ActionDrift        = "drift"
