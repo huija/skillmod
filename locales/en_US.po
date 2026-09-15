@@ -500,6 +500,10 @@ msgstr "invalid legacy Git tree hash: %q"
 msgid "engine.legacy.invalid_previous_installer"
 msgstr "invalid previous installer repository: %q"
 
+msgid "engine.legacy.local_source_no_provenance"
+msgstr "the previous installer recorded a local directory with no remote or"
+"igin"
+
 #, go-format
 msgid "engine.legacy.no_unique_repository_path"
 msgstr "cannot identify a unique repository path for imported skill %q"
@@ -522,6 +526,11 @@ msgstr "recorded source path contains skill %q, not installed skill %q"
 #, go-format
 msgid "engine.legacy.recorded_tree_match_repository"
 msgstr "recorded tree %s does not match repository tree at %s (%s)"
+
+#, go-format
+msgid "engine.legacy.web_discovery_source"
+msgstr "the previous installer recorded the web source %s, which is not a G"
+"it repository and cannot be imported as one"
 
 msgid "engine.list.drift"
 msgstr "drift"

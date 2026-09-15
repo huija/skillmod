@@ -197,10 +197,26 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO, options ...Mutatio
 		// only describes a local baseline, so it is appended after matching has
 		// decided the entry's final action.
 		var ambiguity string
+		ambiguous := false
 		if message, isAmbiguous := importer.ambiguous[dirName]; isAmbiguous {
-			recorded = true
-			ambiguity = message
-		} else if matched == nil && recorded && previous.SourceType != "local" {
+			recorded, ambiguous, ambiguity = true, true, message
+		}
+		// A record is unusable when it names no Git repository skillmod can
+		// resolve. A "local" record is not one of those: the previous installer
+		// already recorded that the skill has no remote origin, so it stays a
+		// plain local declaration with no gap to report. Any other unusable record
+		// is reported and the search continues, because a known source publishing
+		// the same content is a better answer than a local baseline; the entry
+		// stays unresolved when none does.
+		localOnly := recorded && previous.SourceType == legacySourceLocal
+		dropped := false
+		if recorded && !ambiguous && !localOnly {
+			if _, _, gap := previous.location(); gap != nil {
+				entry.Note = appendNote(entry.Note, gap.Error())
+				recorded, dropped = false, true
+			}
+		}
+		if matched == nil && recorded && !ambiguous && !localOnly {
 			io.setProgress(i18n.Format("engine.init.recovering_installed_skill", name))
 			rctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 			matched, matchedLock, err = importer.match(rctx, previous, name, alias, s.hash)
@@ -291,9 +307,16 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO, options ...Mutatio
 			m.Skills = append(m.Skills, modfile.ModSkill{Name: name, Alias: alias, Local: true})
 			upsertLock(lock, modfile.LockSkill{Name: name, Dirhash: s.hash, Dir: alias})
 			entry.Action = ActionLocal
-			if ambiguity != "" {
+			switch {
+			case ambiguity != "":
 				entry.Note = appendNote(entry.Note, ambiguity)
-			} else if !recorded && entry.Note == "" {
+			case dropped:
+				// The old installer recorded a source skillmod cannot use and no
+				// known source matched, so the entry stays unresolved even though
+				// it is kept as a local baseline.
+				entry.Action = ActionUnresolved
+				unresolved++
+			case !recorded && entry.Note == "":
 				entry.Note = i18n.Text("engine.init.no_source_record")
 			}
 		}

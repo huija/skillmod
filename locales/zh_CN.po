@@ -489,6 +489,9 @@ msgstr "旧 Git tree 哈希无效：%q"
 msgid "engine.legacy.invalid_previous_installer"
 msgstr "旧安装器仓库地址无效：%q"
 
+msgid "engine.legacy.local_source_no_provenance"
+msgstr "旧安装器记录的是没有远端来源的本地目录"
+
 #, go-format
 msgid "engine.legacy.no_unique_repository_path"
 msgstr "无法确定导入技能 %q 的唯一仓库路径"
@@ -511,6 +514,11 @@ msgstr "记录的源路径包含技能 %q，而不是已安装的技能 %q"
 #, go-format
 msgid "engine.legacy.recorded_tree_match_repository"
 msgstr "记录的树 %s 与版本 %s 处的仓库树不匹配（%s）"
+
+#, go-format
+msgid "engine.legacy.web_discovery_source"
+msgstr "旧安装器记录的网页来源 %s 不是 Git 仓库，无法按 "
+"Git 来源导入"
 
 msgid "engine.list.drift"
 msgstr "漂移"

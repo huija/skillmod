@@ -7,6 +7,7 @@ package engine
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -46,12 +47,28 @@ func TestLegacySkillLocation(t *testing.T) {
 func TestLegacySkillLocationRejectsUnsafeSources(t *testing.T) {
 	for _, in := range []legacySkill{
 		{SourceType: "npm", Source: "acme/skills"},
+		{SourceType: legacySourceLocal, Source: "./demo"},
+		{SourceType: legacySourceWellKnown, SourceURL: "https://open.feishu.cn/.well-known/skills/demo/SKILL.md"},
 		{SourceType: "github", SourceURL: "https://github.com/acme/skills", SkillPath: "../outside"},
 		{SourceType: "github", SourceURL: "https://github.com/acme/skills", SkillFolderHash: "not-a-sha"},
 	} {
 		if _, _, err := in.location(); err == nil {
 			t.Errorf("location(%+v) succeeded", in)
 		}
+	}
+}
+
+// Both non-Git source types fail the location lookup, so init tells them apart
+// by type: a local record has no gap to report, while a web discovery record
+// names an origin the user may be able to replace with a repository.
+func TestLegacySkillLocationSeparatesNonGitSourceTypes(t *testing.T) {
+	local := legacySkill{SourceType: legacySourceLocal, Source: "./demo"}
+	if _, _, err := local.location(); err == nil || !strings.Contains(err.Error(), "local directory") {
+		t.Errorf("location(local) = %v, want a no-remote-origin diagnostic", err)
+	}
+	web := legacySkill{SourceType: legacySourceWellKnown, SourceURL: "https://open.feishu.cn/.well-known/skills/demo/SKILL.md"}
+	if _, _, err := web.location(); err == nil || !strings.Contains(err.Error(), "web source") {
+		t.Errorf("location(well-known) = %v, want the recorded web origin named", err)
 	}
 }
 

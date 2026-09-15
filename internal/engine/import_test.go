@@ -584,3 +584,134 @@ func TestInitRecoversMonorepoSnapshotLink(t *testing.T) {
 		t.Errorf("offline Sync after import: %v", err)
 	}
 }
+
+// A skill the upstream installer recorded from a web discovery endpoint has no
+// Git provenance, so init cannot import the record. A configured known source
+// that publishes byte-identical content is the better answer, and the note
+// still tells the user which web source was dropped.
+func TestInitAdoptsWebSourcedSkillFromKnownSource(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.WriteSkill("", "hello")
+	r.CommitAll("init")
+	r.Tag("v1.0.0")
+	r.FinishNamed("hello")
+
+	producer := newEngine(t, t.TempDir(), t.TempDir())
+	if _, err := producer.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get(%q): %v", r.URL+"@v1.0.0", err)
+	}
+	root := t.TempDir()
+	if err := install.CopyDir(installedDir(producer.Root, "hello"), installedDir(root, "hello")); err != nil {
+		t.Fatalf("CopyDir installed hello: %v", err)
+	}
+	writeLegacyLock(t, root, "hello", map[string]any{
+		"source":          "open.feishu.cn",
+		"sourceType":      "well-known",
+		"sourceUrl":       "https://open.feishu.cn/.well-known/skills/hello/SKILL.md",
+		"skillFolderHash": "",
+	})
+
+	eng := newEngine(t, root, t.TempDir())
+	eng.Config.KnownSources = []string{r.URL}
+	rep, err := eng.Init(ctx, false, testIO())
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Action != "matched" {
+		t.Fatalf("Init report = %+v, want the known source to supply hello", rep.Entries)
+	}
+	if !strings.Contains(rep.Entries[0].Note, "web source") {
+		t.Errorf("Init note = %q, want the dropped web source named", rep.Entries[0].Note)
+	}
+	m, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatalf("LoadMod(%q): %v", root, err)
+	}
+	if len(m.Skills) != 1 || m.Skills[0].Local || m.Skills[0].Source != r.URL {
+		t.Fatalf("Init declarations = %+v, want remote hello from %s", m.Skills, r.URL)
+	}
+}
+
+// Without a known source to fall back on, a web-sourced skill stays an
+// unresolved local baseline instead of failing the whole import.
+func TestInitKeepsWebSourcedSkillLocalWithoutKnownSource(t *testing.T) {
+	root := t.TempDir()
+	skill := installedDir(root, "lark-whiteboard")
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "---\nname: lark-whiteboard\ndescription: published on the web\n---\n# installed\n"
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeLegacyLock(t, root, "lark-whiteboard", map[string]any{
+		"source":     "open.feishu.cn",
+		"sourceType": "well-known",
+		"sourceUrl":  "https://open.feishu.cn/.well-known/skills/lark-whiteboard/SKILL.md",
+	})
+
+	rep, err := newEngine(t, root, t.TempDir()).Init(ctx, false, testIO())
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Action != "unresolved" {
+		t.Fatalf("Init report = %+v, want one unresolved entry", rep.Entries)
+	}
+	if note := rep.Entries[0].Note; !strings.Contains(note, "web source") {
+		t.Errorf("Init note = %q, want the web source explained", note)
+	}
+	m, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatalf("LoadMod(%q): %v", root, err)
+	}
+	if len(m.Skills) != 1 || !m.Skills[0].Local || m.Skills[0].Name != "lark-whiteboard" {
+		t.Fatalf("Init declarations = %+v, want a local baseline", m.Skills)
+	}
+	lk := loadLockSkill(t, root, "lark-whiteboard")
+	if lk.Source != "" || lk.Dirhash == "" {
+		t.Fatalf("Init lock = %+v, want a local dirhash baseline", lk)
+	}
+}
+
+// A record the previous installer already classified as local names no remote
+// origin, so init keeps the entry as an ordinary local baseline: there is no
+// provenance to recover and no gap to report.
+func TestInitKeepsLegacyLocalRecordLocal(t *testing.T) {
+	root := t.TempDir()
+	skill := installedDir(root, "demo")
+	if err := os.MkdirAll(skill, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skill, "SKILL.md"), []byte("---\nname: demo\n---\n# installed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeLegacyLock(t, root, "demo", map[string]any{
+		"source":     "./demo",
+		"sourceType": "local",
+	})
+
+	rep, err := newEngine(t, root, t.TempDir()).Init(ctx, false, testIO())
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Action != "local" {
+		t.Fatalf("Init report = %+v, want one local entry", rep.Entries)
+	}
+	if note := rep.Entries[0].Note; note != "" {
+		t.Errorf("Init note = %q, want no provenance gap for a local record", note)
+	}
+	if notes := strings.Join(rep.Notes, "\n"); strings.Contains(notes, "unresolved") {
+		t.Errorf("Init notes = %v, want no unresolved-source notice", rep.Notes)
+	}
+	m, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatalf("LoadMod(%q): %v", root, err)
+	}
+	if len(m.Skills) != 1 || !m.Skills[0].Local || m.Skills[0].Name != "demo" {
+		t.Fatalf("Init declarations = %+v, want a local baseline", m.Skills)
+	}
+	lk := loadLockSkill(t, root, "demo")
+	if lk.Source != "" || lk.Dirhash == "" {
+		t.Fatalf("Init lock = %+v, want a local dirhash baseline", lk)
+	}
+}

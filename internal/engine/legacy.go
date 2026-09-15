@@ -85,9 +85,36 @@ func (e *Engine) legacySkills() (map[string]legacySkill, error) {
 	return lock.Skills, nil
 }
 
+// Source types the previous installer recorded that name no Git repository, and
+// which init therefore has to tell apart: an entry the installer already
+// classified as local has nothing to resolve, while a web discovery entry has
+// an origin but no Git provenance. Callers must check SourceType before asking
+// for a location.
+const (
+	legacySourceLocal     = "local"
+	legacySourceWellKnown = "well-known"
+)
+
+// location returns the Git repository and subdirectory a record points at. It
+// fails for every record that names no Git repository, including the two
+// non-Git source types above.
 func (sk legacySkill) location() (repo, subdir string, err error) {
 	switch sk.SourceType {
 	case "github", "git", "gitlab":
+	case legacySourceLocal:
+		// A local record is not a gap to report: the installer recorded a
+		// directory with no remote origin, so init keeps the entry as a local
+		// declaration and only reaches here if it forgot to check SourceType.
+		return "", "", errors.New(i18n.Text("engine.legacy.local_source_no_provenance"))
+	case legacySourceWellKnown:
+		// Skills published through the /.well-known/skills discovery convention
+		// are fetched over HTTP and carry no Git provenance: the record holds a
+		// web URL, an empty skillFolderHash, and no ref or path. There is
+		// nothing to resolve, so report the recorded origin; init keeps the
+		// skill as a local declaration and marks it unresolved unless a known
+		// source turns out to publish the same content.
+		return "", "", fmt.Errorf(i18n.Text("engine.legacy.web_discovery_source"),
+			repoaddr.Redact(webSourceURL(sk)))
 	default:
 		return "", "", fmt.Errorf(i18n.Text("engine.legacy.previous_installer_source_type"), sk.SourceType)
 	}
@@ -144,6 +171,15 @@ type legacyImporter struct {
 	records   map[string]legacySkill // only currently installed entries
 	ambiguous map[string]string      // map installation directories with conflicting legacy records to a diagnostic
 	memo      *operationMemo
+}
+
+// webSourceURL returns the web origin a non-Git record points at, preferring
+// the more specific artifact URL when the installer recorded one.
+func webSourceURL(sk legacySkill) string {
+	if sk.SourceURL != "" {
+		return sk.SourceURL
+	}
+	return sk.Source
 }
 
 func (im *legacyImporter) match(ctx context.Context, old legacySkill, name, alias, installedHash string) (*modfile.ModSkill, *modfile.LockSkill, error) {
