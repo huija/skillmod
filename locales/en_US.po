@@ -613,6 +613,10 @@ msgstr "from a local version snapshot; not verified online"
 msgid "engine.network_unavailable_local"
 msgstr "network unavailable and no local version snapshot exists: %w"
 
+#, go-format
+msgid "engine.prune.could_verify_kept_installed"
+msgstr "could not verify %s; kept installed files: %v"
+
 msgid "engine.prune.dry_run_files_deleted"
 msgstr "dry-run: no files were deleted"
 
@@ -657,9 +661,15 @@ msgstr "remote contents do not match the lock and may have been modified: %"
 msgid "engine.remove.could_verify_kept_installed"
 msgstr "could not verify %s; kept installed files: %v"
 
+msgid "engine.remove.dry_run_files_deleted"
+msgstr "dry-run: no files were deleted"
+
 #, go-format
 msgid "engine.remove.entry_skill_mod"
 msgstr "entry %q is not in SKILL.mod"
+
+msgid "engine.remove.following_directories_deleted"
+msgstr "the following directories will be deleted:"
 
 msgid "engine.remove.following_share_links_deleted"
 msgstr "the following share links will also be deleted:"
@@ -919,6 +929,10 @@ msgstr "%s: %s (%s)"
 msgid "engine.update.entry_remote_has_default"
 msgstr "entry %s: remote has no default branch"
 
+#, go-format
+msgid "engine.update.entry_skill_mod"
+msgstr "entry %q is not in SKILL.mod"
+
 msgid "engine.update.local_entry_skipped"
 msgstr "local entries have no remote version to update"
 
@@ -984,6 +998,10 @@ msgstr "%s (directory %s): %s %s"
 #, go-format
 msgid "engine.why.dirhash"
 msgstr "  dirhash: %s"
+
+#, go-format
+msgid "engine.why.entry_skill_mod"
+msgstr "entry %q is not in SKILL.mod"
 
 msgid "engine.why.local"
 msgstr "local"

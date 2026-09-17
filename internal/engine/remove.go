@@ -123,7 +123,7 @@ func (e *Engine) Remove(_ context.Context, names []string, io IO, options ...Mut
 	}
 
 	if len(deletable) > 0 {
-		if err := io.printf(i18n.Text("engine.prune.following_directories_deleted")); err != nil {
+		if err := io.printf(i18n.Text("engine.remove.following_directories_deleted")); err != nil {
 			return rep, err
 		}
 		for _, dir := range deletable {
@@ -138,7 +138,7 @@ func (e *Engine) Remove(_ context.Context, names []string, io IO, options ...Mut
 		return rep, err
 	}
 	if run.DryRun {
-		rep.Notes = append(rep.Notes, i18n.Text("engine.prune.dry_run_files_deleted"))
+		rep.Notes = append(rep.Notes, i18n.Text("engine.remove.dry_run_files_deleted"))
 		if partial {
 			return rep, &PartialError{Report: rep}
 		}

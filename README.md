@@ -151,7 +151,7 @@ Without Go, download the archive for your platform and `checksums.txt` from
 [GitHub Releases](https://github.com/huija/skillmod/releases), verify the
 archive, extract it, and put `skillmod` on your `PATH`.
 
-With Go 1.26.1 or later:
+With Go 1.26.6 or later:
 
 ```bash
 go install github.com/huija/skillmod@latest

@@ -1,6 +1,6 @@
 module github.com/huija/skillmod
 
-go 1.26.1
+go 1.26.6
 
 require (
 	github.com/charmbracelet/bubbles v0.21.1-0.20250623103423-23b8fd6302d7

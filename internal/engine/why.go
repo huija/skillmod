@@ -38,7 +38,7 @@ func (e *Engine) Why(_ context.Context, name string, io IO) (*Report, error) {
 		rep.Entries = append(rep.Entries, entry)
 	}
 	if len(rep.Entries) == 0 {
-		return nil, fmt.Errorf(i18n.Text("engine.remove.entry_skill_mod"), name)
+		return nil, fmt.Errorf(i18n.Text("engine.why.entry_skill_mod"), name)
 	}
 	for _, entry := range rep.Entries {
 		source := entry.Source

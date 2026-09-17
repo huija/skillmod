@@ -600,6 +600,10 @@ msgstr "来自本地版本快照，未联网校验"
 msgid "engine.network_unavailable_local"
 msgstr "网络不可达且无本地版本快照: %w"
 
+#, go-format
+msgid "engine.prune.could_verify_kept_installed"
+msgstr "无法验证 %s，已保留安装文件：%v"
+
 msgid "engine.prune.dry_run_files_deleted"
 msgstr "dry-run：未删除任何文件"
 
@@ -643,9 +647,15 @@ msgstr "远程内容与锁定不符，可能被改动: %s\nlock 记录: %s"
 msgid "engine.remove.could_verify_kept_installed"
 msgstr "无法验证 %s，已保留安装文件：%v"
 
+msgid "engine.remove.dry_run_files_deleted"
+msgstr "dry-run：未删除任何文件"
+
 #, go-format
 msgid "engine.remove.entry_skill_mod"
 msgstr "条目 %q 不在 SKILL.mod 中"
+
+msgid "engine.remove.following_directories_deleted"
+msgstr "将删除以下目录："
 
 msgid "engine.remove.following_share_links_deleted"
 msgstr "以下分享链接也将被删除："
@@ -902,6 +912,10 @@ msgstr "%s: %s（%s）"
 msgid "engine.update.entry_remote_has_default"
 msgstr "条目 %s: 远端无默认分支"
 
+#, go-format
+msgid "engine.update.entry_skill_mod"
+msgstr "条目 %q 不在 SKILL.mod 中"
+
 msgid "engine.update.local_entry_skipped"
 msgstr "本地条目没有可更新的远程版本"
 
@@ -967,6 +981,10 @@ msgstr "%s（目录 %s）：%s %s"
 #, go-format
 msgid "engine.why.dirhash"
 msgstr "  目录哈希：%s"
+
+#, go-format
+msgid "engine.why.entry_skill_mod"
+msgstr "条目 %q 不在 SKILL.mod 中"
 
 msgid "engine.why.local"
 msgstr "本地"

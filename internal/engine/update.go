@@ -75,7 +75,7 @@ func (e *Engine) Update(ctx context.Context, names []string, options UpdateOptio
 			}
 		}
 		if !found {
-			return nil, fmt.Errorf(i18n.Text("engine.remove.entry_skill_mod"), n)
+			return nil, fmt.Errorf(i18n.Text("engine.update.entry_skill_mod"), n)
 		}
 	}
 

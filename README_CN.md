@@ -110,7 +110,7 @@ npx skills add huija/skillmod --skill skillmod --global
 
 不使用 Go 时，从 [GitHub Releases](https://github.com/huija/skillmod/releases) 下载对应平台的压缩包和 `checksums.txt`，校验压缩包后解压，并将 `skillmod` 放入 `PATH`。
 
-使用 Go 1.26.1 或更高版本：
+使用 Go 1.26.6 或更高版本：
 
 ```bash
 go install github.com/huija/skillmod@latest

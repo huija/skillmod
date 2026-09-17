@@ -81,7 +81,7 @@ func (e *Engine) Prune(ctx context.Context, io IO, options ...MutationOptions) (
 			case ActionUnverifiable:
 				entryPartial = true
 				target.Action = ActionKeep
-				entry.Note = appendNote(entry.Note, i18n.Format("engine.remove.could_verify_kept_installed", dst, target.Note))
+				entry.Note = appendNote(entry.Note, i18n.Format("engine.prune.could_verify_kept_installed", dst, target.Note))
 			}
 			if target.Action == ActionRemove || target.Action == ActionMissing {
 				// A managed copy that is gone — a dangling installation link

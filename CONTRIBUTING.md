@@ -7,7 +7,7 @@ see [README.md](README.md) and the agent skill under
 
 ## Before you start
 
-- Go 1.26.1 or later, and `git` on `PATH`.
+- Go 1.26.6 or later, and `git` on `PATH`.
 - Run `make check` before opening a pull request; CI enforces the same gate.
 
 ## The gate
