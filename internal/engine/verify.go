@@ -79,7 +79,7 @@ func (e *Engine) Verify(ctx context.Context, io IO) (*Report, error) {
 // declares no agents is verified as staying only in the managed directory, so
 // a link left behind by a hand edit is not this check's business.
 func (e *Engine) verifyShareLinks(m *modfile.Mod, rep *Report) (bool, error) {
-	listed, err := e.shareableSkills(&modfile.Lock{})
+	listed, err := e.shareableSkills(m, &modfile.Lock{})
 	if err != nil {
 		return false, err
 	}

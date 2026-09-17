@@ -33,6 +33,10 @@ type Option struct {
 	Label       string
 	Description string
 	Detail      string
+	// Selected opens the choice on the state it already describes. A selection
+	// that starts from the current declaration lets confirming an unchanged
+	// list be a no-op, instead of asking for the same answers on every run.
+	Selected bool
 }
 
 // MultiSelector can select zero or more options by index.
@@ -120,7 +124,14 @@ func (i *interactive) ChooseMany(prompt string, options []Option) ([]int, error)
 		// Candidate descriptions stay collapsed so each choice occupies one line.
 		huhOptions[idx] = huh.NewOption(cleanLine(option.Label), idx)
 	}
+	// Seeding the bound value is what makes huh start with those options
+	// checked: the accessor marks every option the slice already names.
 	var selected []int
+	for idx, option := range options {
+		if option.Selected {
+			selected = append(selected, idx)
+		}
+	}
 	field := huh.NewMultiSelect[int]().
 		Title(cleanLine(prompt)).
 		Options(huhOptions...).

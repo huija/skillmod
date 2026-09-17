@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/huija/skillmod/internal/agents"
@@ -20,6 +21,7 @@ import (
 	"github.com/huija/skillmod/internal/install"
 	"github.com/huija/skillmod/internal/modfile"
 	"github.com/huija/skillmod/internal/source"
+	"github.com/huija/skillmod/internal/store"
 	"github.com/huija/skillmod/internal/ui"
 )
 
@@ -38,10 +40,11 @@ type ShareOptions struct {
 
 // shareSkill is one installed skill a share run can link.
 type shareSkill struct {
-	dirName    string // installation directory under .agents/skills; also the linked directory name
-	name       string // SKILL.md frontmatter name
-	version    string // lock baseline version; empty for a local declaration
-	contentDir string // desired content before sync installs it; empty uses the managed copy
+	dirName    string   // installation directory under .agents/skills; also the linked directory name
+	name       string   // SKILL.md frontmatter name
+	version    string   // lock baseline version; empty for a local declaration
+	contentDir string   // desired content before sync installs it; empty uses the managed copy
+	agents     []string // agents the entry already declares, which is what an interactive selection opens on
 }
 
 // shareTarget is one destination base directory.
@@ -74,7 +77,7 @@ type shareDeclaration struct {
 // links on a new machine. The declaration names agents only, never paths: an
 // agent name locates its directory through the one ".<name>/skills" rule, so
 // the record reproduces everywhere.
-func (e *Engine) Share(ctx context.Context, options ShareOptions, io IO, options_ ...MutationOptions) (*Report, error) {
+func (e *Engine) Share(ctx context.Context, options ShareOptions, io IO, options_ ...MutationOptions) (report *Report, err error) {
 	run := mutationOptions(options_)
 	// Everything answerable from the arguments alone is answered first: a
 	// rejected combination, an unknown conflict policy, or an unusable
@@ -108,7 +111,7 @@ func (e *Engine) Share(ctx context.Context, options ShareOptions, io IO, options
 	if err != nil {
 		return nil, err
 	}
-	listed, err := e.shareableSkills(lock)
+	listed, err := e.shareableSkills(m, lock)
 	if err != nil {
 		return nil, err
 	}
@@ -119,16 +122,15 @@ func (e *Engine) Share(ctx context.Context, options ShareOptions, io IO, options
 	if err != nil {
 		return nil, err
 	}
-	// The skill selection is resolved against what is installed, but a skill
-	// that the manifest does not declare has no entry to record agents on, so
-	// it is linked without becoming declarable. share records intent for
-	// managed entries only; an undeclared directory is sync's stale case, for
-	// prune to handle.
-	decl, err := e.selectShareTargets(options, io)
+	decl, err := e.selectShareTargets(options, skills, io)
 	if err != nil {
 		return nil, err
 	}
 	if err := io.printf(i18n.Format("engine.share.plan", len(skills), len(decl.targets))); err != nil {
+		return nil, err
+	}
+	changed, err := e.prepareShareState(m, lock, skills, decl.declared)
+	if err != nil {
 		return nil, err
 	}
 
@@ -138,7 +140,9 @@ func (e *Engine) Share(ctx context.Context, options ShareOptions, io IO, options
 	installs := make([][]string, len(skills))
 	var conflicts []conflict
 	for i, sk := range skills {
-		entry := EntryReport{Name: sk.name, Version: sk.version}
+		declaration := findModSkill(m, sk.dirName)
+		entry := EntryReport{Name: sk.name, Source: declaration.Source, Local: declaration.Local,
+			Version: declaration.Version, Directory: sk.dirName}
 		for _, target := range decl.targets {
 			dst := filepath.Join(target.path, sk.dirName)
 			action, note, err := e.classifyShareTarget(sk, dst)
@@ -175,6 +179,16 @@ func (e *Engine) Share(ctx context.Context, options ShareOptions, io IO, options
 	}
 
 	// Phase 2 applies the installs; conflicts are settled either way.
+	var restores []func() error
+	var commits []func()
+	committed := false
+	defer func() {
+		if !committed {
+			for i := len(restores) - 1; i >= 0; i-- {
+				err = errors.Join(err, restores[i]())
+			}
+		}
+	}()
 	skipped := 0
 	for i, sk := range skills {
 		for _, dst := range installs[i] {
@@ -182,9 +196,12 @@ func (e *Engine) Share(ctx context.Context, options ShareOptions, io IO, options
 				setShareTargetResult(&rep.Entries[i], dst, ActionInstall, i18n.Text("engine.share.planned_note"))
 				continue
 			}
-			if err := e.linkShare(sk, dst); err != nil {
+			restore, commit, err := e.stageShare(sk, dst)
+			if err != nil {
 				return nil, err
 			}
+			restores = append(restores, restore)
+			commits = append(commits, commit)
 			setShareTargetResult(&rep.Entries[i], dst, ActionInstall, "")
 			if err := io.printf(i18n.Format("engine.share.linked", sk.dirName, dst)); err != nil {
 				return nil, err
@@ -216,31 +233,68 @@ func (e *Engine) Share(ctx context.Context, options ShareOptions, io IO, options
 	if run.DryRun {
 		rep.Notes = append(rep.Notes, i18n.Text("engine.share.dry_run_note"))
 	}
-	// Declared agents enter the manifest after the links are in place, so a
-	// failed share leaves the declaration untouched (the same order get uses
-	// for installs and SaveState). The lock records the same names, so cleanup
-	// can follow the links once the declaration itself is gone.
-	if len(decl.declared) > 0 && !run.DryRun {
-		changed := false
-		for _, sk := range skills {
-			entry := findModSkill(m, sk.dirName)
-			if entry == nil {
-				continue // An undeclared directory is not declarable.
-			}
-			if appendSkillAgents(entry, decl.declared) {
-				changed = true
-			}
-			if recordLockAgents(lock, sk.dirName, entry.Agents) {
-				changed = true
-			}
-		}
-		if changed {
-			if err := e.saveState(m, lock); err != nil {
-				return nil, err
-			}
+	// Links remain staged until their declaration and cleanup history are
+	// saved. A write failure restores every previous destination.
+	if changed && !run.DryRun {
+		if err := e.saveState(m, lock); err != nil {
+			return nil, err
 		}
 	}
+	committed = true
+	for _, commit := range commits {
+		commit()
+	}
 	return rep, partialError(rep, conflicts, skip)
+}
+
+// prepareShareState adopts only the selected installation slots before any
+// links are written. Verified locks and snapshots retain remote provenance;
+// otherwise the existing contents become a local baseline, just as in init.
+func (e *Engine) prepareShareState(m *modfile.Mod, lock *modfile.Lock, skills []shareSkill, names []string) (bool, error) {
+	var locator *store.SnapshotLocator
+	if e.Store != nil {
+		locator = e.Store.NewSnapshotLocator()
+	}
+	changed := false
+	for _, sk := range skills {
+		entry := findModSkill(m, sk.dirName)
+		if entry == nil {
+			alias := ""
+			if sk.dirName != sk.name {
+				alias = sk.dirName
+			}
+			hash, err := dirhash.HashDir(e.skillDir(sk.dirName))
+			if err != nil {
+				return false, err
+			}
+			adopted, baseline, err := e.identifyInstalled(e.skillDir(sk.dirName), sk.name, alias, hash, lock, locator)
+			if err != nil {
+				return false, err
+			}
+			if adopted == nil {
+				adopted = &modfile.ModSkill{Name: sk.name, Alias: alias, Local: true}
+				baseline = &modfile.LockSkill{Name: sk.name, Dir: alias, Dirhash: hash}
+			}
+			adopted.Agents = append([]string(nil), sk.agents...)
+			m.Skills = append(m.Skills, *adopted)
+			upsertLock(lock, *baseline)
+			entry = &m.Skills[len(m.Skills)-1]
+			changed = true
+		}
+		if appendSkillAgents(entry, names) {
+			changed = true
+		}
+		if err := e.checkShareAgents(entry.Agents); err != nil {
+			return false, err
+		}
+		if recordLockAgents(lock, sk.dirName, entry.Agents) {
+			changed = true
+		}
+	}
+	if err := modfile.ValidateMod(m); err != nil {
+		return false, err
+	}
+	return changed, modfile.ValidateLock(lock)
 }
 
 // checkShareOptions rejects a request that cannot be carried out, reading
@@ -303,7 +357,7 @@ func findModSkill(m *modfile.Mod, dirName string) *modfile.ModSkill {
 func appendSkillAgents(entry *modfile.ModSkill, names []string) bool {
 	added := false
 	for _, name := range names {
-		if !modSkillHasAgent(entry, name) {
+		if !hasAgent(entry.Agents, name) {
 			entry.Agents = append(entry.Agents, name)
 			added = true
 		}
@@ -311,11 +365,13 @@ func appendSkillAgents(entry *modfile.ModSkill, names []string) bool {
 	return added
 }
 
-// modSkillHasAgent reports whether the entry already names the agent in any
-// spelling. It compares folded so "Claude" and "claude" are one agent.
-func modSkillHasAgent(entry *modfile.ModSkill, name string) bool {
+// hasAgent reports whether the list already names the agent in any spelling.
+// It compares folded so "Claude" and "claude" are one agent. The manifest's
+// list and the one a share run carries answer the same question, so they share
+// this check.
+func hasAgent(names []string, name string) bool {
 	fold := fsutil.FoldKey(name)
-	for _, existing := range entry.Agents {
+	for _, existing := range names {
 		if fsutil.FoldKey(existing) == fold {
 			return true
 		}
@@ -341,7 +397,7 @@ func (e *Engine) shareRemove(options ShareOptions, io IO, run MutationOptions) (
 	if err != nil {
 		return nil, err
 	}
-	listed, err := e.shareableSkills(lock)
+	listed, err := e.shareableSkills(m, lock)
 	if err != nil {
 		return nil, err
 	}
@@ -463,7 +519,7 @@ func modSkillHasAnyAgent(entry *modfile.ModSkill, targets []agents.Target) bool 
 		return false
 	}
 	for _, t := range targets {
-		if modSkillHasAgent(entry, t.Name) {
+		if hasAgent(entry.Agents, t.Name) {
 			return true
 		}
 	}
@@ -568,15 +624,19 @@ func (e *Engine) classifyShareTarget(sk shareSkill, dst string) (TargetStatus, s
 // where the platform forbids links), with the previous destination preserved
 // until the new one is in place.
 func (e *Engine) linkShare(sk shareSkill, dst string) error {
-	if err := rejectManagedOverlap(e.skillsDir(), filepath.Dir(dst)); err != nil {
-		return err
-	}
-	_, commit, err := install.Link(e.skillDir(sk.dirName), dst)
+	_, commit, err := e.stageShare(sk, dst)
 	if err != nil {
 		return err
 	}
 	commit()
 	return nil
+}
+
+func (e *Engine) stageShare(sk shareSkill, dst string) (func() error, func(), error) {
+	if err := rejectManagedOverlap(e.skillsDir(), filepath.Dir(dst)); err != nil {
+		return nil, nil, err
+	}
+	return install.Link(e.skillDir(sk.dirName), dst)
 }
 
 // shareIdentical reports whether the destination already holds the same
@@ -608,8 +668,10 @@ func setShareTargetResult(entry *EntryReport, path string, action TargetStatus, 
 // shareableSkills lists the skills a share run can link: first-level
 // directories under the scope's managed skills directory that contain a
 // SKILL.md. The directory name, not the frontmatter name, is what appears at
-// the destination.
-func (e *Engine) shareableSkills(lock *modfile.Lock) ([]shareSkill, error) {
+// the destination. Each skill carries its declared agents; an undeclared slot
+// instead carries existing mirror destinations so it can be adopted without
+// making the caller repeat the previous selection.
+func (e *Engine) shareableSkills(m *modfile.Mod, lock *modfile.Lock) ([]shareSkill, error) {
 	base := e.skillsDir()
 	dents, err := os.ReadDir(base)
 	if err != nil {
@@ -634,12 +696,49 @@ func (e *Engine) shareableSkills(lock *modfile.Lock) ([]shareSkill, error) {
 			name = d.Name()
 		}
 		sk := shareSkill{dirName: d.Name(), name: name}
+		if entry := findModSkill(m, d.Name()); entry != nil {
+			sk.agents = append([]string(nil), entry.Agents...)
+		} else {
+			for _, target := range e.suggestedAgents() {
+				dst := filepath.Join(target.Dir(e.Root), sk.dirName)
+				action, _, err := e.classifyShareTarget(sk, dst)
+				if err != nil {
+					return nil, err
+				}
+				if action == ActionKeep {
+					sk.agents = append(sk.agents, target.Name)
+				}
+			}
+		}
 		if lk := findLockByDir(lock, d.Name()); lk != nil {
 			sk.version = lk.Version
 		}
 		out = append(out, sk)
 	}
 	return out, nil
+}
+
+// declares reports whether the entry already names the agent in any spelling,
+// so the interactive selection can open on what the manifest says.
+func (sk shareSkill) declares(name string) bool {
+	return hasAgent(sk.agents, name)
+}
+
+// declaredByEvery reports whether all of the selected skills already name the
+// agent. A destination opens checked only then: an agent that only some of the
+// selection names would gain links on the skills that do not, which is an
+// addition the caller never asked for. With every skill naming it, confirming
+// the list unchanged is a no-op, and the checked boxes are the current state.
+func declaredByEvery(skills []shareSkill, name string) bool {
+	if len(skills) == 0 {
+		return false
+	}
+	for _, sk := range skills {
+		if !sk.declares(name) {
+			return false
+		}
+	}
+	return true
 }
 
 // selectShareSkills resolves the requested skills, falling back to the
@@ -654,9 +753,17 @@ func selectShareSkills(listed []shareSkill, options ShareOptions, io IO) ([]shar
 	if len(listed) == 1 || io.Yes {
 		return listed, nil
 	}
+	var targets []agents.Target
+	for _, name := range options.Agents {
+		target, err := agents.Resolve(name)
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, target)
+	}
 	optionsList := make([]ui.Option, len(listed))
 	for i, sk := range listed {
-		optionsList[i] = sk.option()
+		optionsList[i] = sk.option(targets...)
 	}
 	selected, err := chooseIndices(io,
 		i18n.Text("engine.share.select_skills"),
@@ -758,8 +865,10 @@ func matchShareSkills(listed []shareSkill, requested []string) ([]shareSkill, er
 // is an agent name, and the directory it links through is derived from that
 // name by the ".<name>/skills" rule. That derivation is the whole reason a
 // declaration can be recorded: sync recreates the link from the name alone, on
-// any machine, which a stored path could not do.
-func (e *Engine) selectShareTargets(options ShareOptions, io IO) (shareDeclaration, error) {
+// any machine, which a stored path could not do. The selection opens on the
+// agents the chosen skills already declare, so a rerun that only adds a skill
+// does not have to re-check what is already in place.
+func (e *Engine) selectShareTargets(options ShareOptions, skills []shareSkill, io IO) (shareDeclaration, error) {
 	var decl shareDeclaration
 	seen := map[string]bool{}
 	add := func(t agents.Target) {
@@ -788,10 +897,14 @@ func (e *Engine) selectShareTargets(options ShareOptions, io IO) (shareDeclarati
 		// invent destinations.
 		return shareDeclaration{}, fmt.Errorf("%s", i18n.Text("engine.share.no_targets"))
 	}
-	candidates := e.suggestedAgents()
+	candidates := e.suggestedAgents(skills...)
 	optionsList := make([]ui.Option, len(candidates))
 	for i, t := range candidates {
-		optionsList[i] = ui.Option{Label: t.Name, Description: t.Dir(e.Root)}
+		optionsList[i] = ui.Option{
+			Label:       t.Name,
+			Description: t.Dir(e.Root),
+			Selected:    declaredByEvery(skills, t.Name),
+		}
 	}
 	selected, err := chooseIndices(io,
 		i18n.Text("engine.share.select_targets"),
@@ -813,14 +926,26 @@ func (e *Engine) selectShareTargets(options ShareOptions, io IO) (shareDeclarati
 // minus the managed skills directory. That directory follows the same
 // ".<name>/skills" shape as an agent, so it would otherwise be offered and
 // then refused for overlapping what skillmod owns.
-func (e *Engine) suggestedAgents() []agents.Target {
+func (e *Engine) suggestedAgents(skills ...shareSkill) []agents.Target {
 	managed := e.skillsDir()
 	out := make([]agents.Target, 0, len(agents.Known()))
+	seen := make(map[string]bool)
 	for _, target := range agents.Suggested(e.Root) {
 		if rejectManagedOverlap(managed, target.Dir(e.Root)) == nil {
 			out = append(out, target)
+			seen[target.Name] = true
 		}
 	}
+	for _, sk := range skills {
+		for _, name := range sk.agents {
+			target, err := agents.Resolve(name)
+			if err == nil && !seen[target.Name] && rejectManagedOverlap(managed, target.Dir(e.Root)) == nil {
+				out = append(out, target)
+				seen[target.Name] = true
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
@@ -1091,10 +1216,21 @@ func resolveSharePath(path string) (string, error) {
 	return filepath.Join(resolved, filepath.Base(path)), nil
 }
 
-func (sk shareSkill) option() ui.Option {
+// option renders one skill for the interactive selection. With explicit
+// targets, it opens checked only when already shared to every target, so
+// accepting the defaults does not extend the links. Without targets, it
+// opens on whether the skill is shared anywhere.
+func (sk shareSkill) option(targets ...agents.Target) ui.Option {
 	description := sk.version
 	if description == "" {
 		description = i18n.Text("engine.share.local_description")
 	}
-	return ui.Option{Label: sk.dirName, Description: description}
+	selected := len(sk.agents) > 0
+	for _, target := range targets {
+		if !sk.declares(target.Name) {
+			selected = false
+			break
+		}
+	}
+	return ui.Option{Label: sk.dirName, Description: description, Selected: selected}
 }

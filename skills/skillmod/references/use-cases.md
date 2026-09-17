@@ -281,12 +281,30 @@ skillmod share --dry-run
 skillmod share --skill review --agent claude --agent codex
 ```
 
+A selected skill missing from `SKILL.mod` is adopted in the same run. A verified
+lock baseline or cache snapshot preserves its remote source and version;
+otherwise it is recorded as a local entry with its current content hash in
+`SKILL.lock`. Only selected skills are adopted, existing declared baselines are
+preserved, and `--dry-run` reports the adoption without writing state or links.
+Existing unrecorded mirror links are included in the adopted agent list.
+
+With `--agent`, the skill picker checks only skills already shared to every
+requested agent. For example, `share --agent workbuddy` does not check a skill
+shared only to codex; a new agent starts with nothing checked. With multiple
+agents, accepting the defaults keeps existing links without adding any.
+
 Omitting `--skill` and `--agent` lists the installed skills and the agent
-directories for interactive selection. An agent is named by one directory
-segment and read from `.<name>/skills` under the scope root, so the name is all
-a declaration needs: `--agent workbuddy` links into `.workbuddy/skills` and is
-recorded like any other. That is also why the manifest never stores a path — a
-name reproduces on another machine, a path would not.
+directories for interactive selection, and both lists open on the state that
+already holds: the skills already linked to an agent are checked, and so is
+every agent all of the chosen skills already name. Confirming an unchanged
+selection is therefore a no-op, and adding one agent to several skills is a
+matter of checking the skills and then the agent.
+
+An agent is named by one directory segment and read from `.<name>/skills` under
+the scope root, so the name is all a declaration needs: `--agent workbuddy`
+links into `.workbuddy/skills` and is recorded like any other. That is also why
+the manifest never stores a path — a name reproduces on another machine, a path
+would not.
 
 A destination that already holds identical content or a link to the managed copy
 is kept; one that holds different content is a conflict, settled with the same

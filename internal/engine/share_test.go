@@ -448,6 +448,52 @@ func TestShareInteractiveSelectionChoosesSkillsAndTargets(t *testing.T) {
 	}
 }
 
+// TestShareInteractiveSelectionOpensOnTheCurrentState pins what the checked
+// boxes mean: the selection opens on the declaration that already exists, so a
+// rerun does not ask for the same answers again. A destination is checked only
+// when every selected skill names it, because a partly shared selection would
+// otherwise gain links the caller never asked for. The second phase covers
+// that boundary: the same agent stops being checked once an unshared skill
+// joins the selection.
+func TestShareInteractiveSelectionOpensOnTheCurrentState(t *testing.T) {
+	root := t.TempDir()
+	writeLocalSkill(t, root, "shared", "")
+	writeLocalSkill(t, root, "unshared", "")
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, err := eng.Share(ctx, engine.ShareOptions{Skills: []string{"shared"}, Agents: []string{"claude"}}, testIO()); err != nil {
+		t.Fatalf("first Share: %v", err)
+	}
+
+	// Phase 1 selects only the skill that is already linked.
+	chooser := &shareChooser{selections: [][]int{{0}, {0}}}
+	if _, err := eng.Share(ctx, engine.ShareOptions{}, engine.IO{Out: io.Discard, Confirm: chooser}); err != nil {
+		t.Fatalf("second Share: %v", err)
+	}
+	skills := chooser.options[0]
+	if len(skills) != 2 || !skills[0].Selected || skills[1].Selected {
+		t.Fatalf("skill options = %+v, want only the linked skill checked", skills)
+	}
+	for _, target := range chooser.options[1] {
+		if want := target.Label == "claude"; target.Selected != want {
+			t.Errorf("target %s selected = %v, want %v", target.Label, target.Selected, want)
+		}
+	}
+
+	// Phase 2 adds the unshared skill, so claude is no longer the whole story.
+	chooser = &shareChooser{selections: [][]int{{0, 1}, {0}}}
+	if _, err := eng.Share(ctx, engine.ShareOptions{}, engine.IO{Out: io.Discard, Confirm: chooser}); err != nil {
+		t.Fatalf("third Share: %v", err)
+	}
+	for _, target := range chooser.options[1] {
+		if target.Selected {
+			t.Errorf("target %s selected for a partly shared selection, want nothing checked", target.Label)
+		}
+	}
+}
+
 func TestShareInteractiveSelectionRejectsOutOfRangeIndex(t *testing.T) {
 	// A selector answering with an index past the list must be refused. The
 	// destination path indexes the same list, so trusting the answer would panic
