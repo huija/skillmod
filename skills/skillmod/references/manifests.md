@@ -88,10 +88,11 @@ normalized, so `.Claude` and `claude` are the same destination and cannot appear
 together in one list.
 
 An entry without `agents`, or with an empty one, means the skill stays only
-in the managed directory. `share --remove` edits the lists of the entries the
-command names, so it must be told which skills to touch; an entry left with no
-agents loses the field entirely. The list is sorted on save, and one agent
-cannot appear in it under two spellings.
+in the managed directory. `remove --agent <name>` and
+`share --remove --agent <name>` edit the selected entries' lists: name the
+skills, use `--all` for all matching entries, or pick them interactively. An
+entry left with no agents loses the field entirely. The list is sorted on save,
+and one agent cannot appear in it under two spellings.
 
 ## Portability
 

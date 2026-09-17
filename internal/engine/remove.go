@@ -12,13 +12,40 @@ import (
 	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/modfile"
+	"github.com/huija/skillmod/internal/ui"
 )
 
+// RemoveOptions controls one remove run.
+type RemoveOptions struct {
+	All    bool // remove every declared entry without asking
+	DryRun bool
+	Agents []string // unlink these agents while keeping declarations and managed copies
+}
+
+func removeOptions(options []RemoveOptions) RemoveOptions {
+	if len(options) == 0 {
+		return RemoveOptions{}
+	}
+	return options[0]
+}
+
 // Remove deletes declarations and clean managed installations selected by
-// published name or installation alias. Locally modified installations are
+// published name or installation alias, by --all, or from the interactive
+// selection when the run names nothing. Locally modified installations are
 // kept and reported as partial completion.
-func (e *Engine) Remove(_ context.Context, names []string, io IO, options ...MutationOptions) (*Report, error) {
-	run := mutationOptions(options)
+func (e *Engine) Remove(ctx context.Context, names []string, io IO, options ...RemoveOptions) (*Report, error) {
+	run := removeOptions(options)
+	if run.All && len(names) > 0 {
+		return nil, fmt.Errorf("%s", i18n.Text("engine.remove.all_exclusive"))
+	}
+	if len(run.Agents) > 0 {
+		rep, err := e.Share(ctx, ShareOptions{Skills: names, All: run.All, Remove: run.Agents}, io,
+			MutationOptions{DryRun: run.DryRun})
+		if rep != nil {
+			rep.Action = CommandRemove
+		}
+		return rep, err
+	}
 	unlock, err := e.lockState()
 	if err != nil {
 		return nil, err
@@ -32,29 +59,9 @@ func (e *Engine) Remove(_ context.Context, names []string, io IO, options ...Mut
 	if err != nil {
 		return nil, err
 	}
-
-	want := make(map[string]bool, len(names))
-	for _, name := range names {
-		want[name] = true
-	}
-	selected := make(map[string]bool)
-	found := make(map[string]bool, len(names))
-	for _, skill := range m.Skills {
-		if !want[skill.Name] && !want[skill.DirName()] {
-			continue
-		}
-		selected[fsutil.FoldKey(skill.DirName())] = true
-		if want[skill.Name] {
-			found[skill.Name] = true
-		}
-		if want[skill.DirName()] {
-			found[skill.DirName()] = true
-		}
-	}
-	for _, name := range names {
-		if !found[name] {
-			return nil, fmt.Errorf(i18n.Text("engine.remove.entry_skill_mod"), name)
-		}
+	selected, err := selectRemovals(m, names, run.All, io)
+	if err != nil {
+		return nil, err
 	}
 
 	// Every remaining entry keeps its own agents list; a removed skill's list
@@ -170,4 +177,95 @@ func (e *Engine) Remove(_ context.Context, names []string, io IO, options ...Mut
 		return rep, errors.Join(writeErr, &PartialError{Report: rep})
 	}
 	return rep, writeErr
+}
+
+// selectRemovals resolves the entries a remove run acts on, keyed by folded
+// installation directory. Names and --all state the set explicitly; with
+// neither, an interactive caller picks from what the manifest declares, which
+// is how every other selection in skillmod works. Removing deletes an
+// installation outright, so the picker is only how the set is chosen — the
+// confirmation that lists the directories still comes afterwards.
+func selectRemovals(m *modfile.Mod, names []string, all bool, io IO) (map[string]bool, error) {
+	if all {
+		if len(m.Skills) == 0 {
+			return nil, fmt.Errorf("%s", i18n.Text("engine.remove.nothing_declared"))
+		}
+		selected := make(map[string]bool, len(m.Skills))
+		for _, skill := range m.Skills {
+			selected[fsutil.FoldKey(skill.DirName())] = true
+		}
+		return selected, nil
+	}
+	if len(names) > 0 {
+		return namedRemovals(m, names)
+	}
+	if len(m.Skills) == 0 {
+		return nil, fmt.Errorf("%s", i18n.Text("engine.remove.nothing_declared"))
+	}
+	// --yes answers the confirmation; it does not choose what to delete. A run
+	// without a channel to ask through is refused for the same reason, with
+	// the message that names the two ways to say it explicitly, rather than
+	// the generic empty-selection one.
+	if io.Yes || io.Confirm == nil {
+		return nil, fmt.Errorf("%s", i18n.Text("engine.remove.needs_selection"))
+	}
+	options := make([]ui.Option, len(m.Skills))
+	for i, skill := range m.Skills {
+		options[i] = removalOption(skill)
+	}
+	picked, err := chooseIndices(io,
+		i18n.Text("engine.remove.select_entries"),
+		options,
+		func(index int) string { return i18n.Format("engine.remove.confirm_one", m.Skills[index].DirName()) },
+		i18n.Text("engine.remove.no_entries_selected"))
+	if err != nil {
+		return nil, err
+	}
+	selected := make(map[string]bool, len(picked))
+	for _, index := range picked {
+		selected[fsutil.FoldKey(m.Skills[index].DirName())] = true
+	}
+	return selected, nil
+}
+
+// namedRemovals resolves the requested names against the declarations. A name
+// selects every entry that answers to it, whether it was published under that
+// name or installed under that alias, and a name that matches nothing is
+// reported rather than ignored.
+func namedRemovals(m *modfile.Mod, names []string) (map[string]bool, error) {
+	want := make(map[string]bool, len(names))
+	for _, name := range names {
+		want[name] = true
+	}
+	selected := make(map[string]bool)
+	found := make(map[string]bool, len(names))
+	for _, skill := range m.Skills {
+		if !want[skill.Name] && !want[skill.DirName()] {
+			continue
+		}
+		selected[fsutil.FoldKey(skill.DirName())] = true
+		if want[skill.Name] {
+			found[skill.Name] = true
+		}
+		if want[skill.DirName()] {
+			found[skill.DirName()] = true
+		}
+	}
+	for _, name := range names {
+		if !found[name] {
+			return nil, fmt.Errorf(i18n.Text("engine.remove.entry_skill_mod"), name)
+		}
+	}
+	return selected, nil
+}
+
+// removalOption renders one declaration for the interactive selection. The
+// directory name is what the entry is called on disk, and the version is what
+// tells two entries with the same name apart.
+func removalOption(skill modfile.ModSkill) ui.Option {
+	description := skill.Version
+	if description == "" {
+		description = i18n.Text("engine.remove.local_description")
+	}
+	return ui.Option{Label: skill.DirName(), Description: description}
 }

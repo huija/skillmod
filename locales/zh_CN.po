@@ -99,15 +99,34 @@ msgid "cli.prune.short"
 msgstr "清理过期条目的残留安装文件（前列清单，确认后"
 "才删除）"
 
+msgid "cli.remove.empty_agent"
+msgstr "--agent 需要非空的 agent 名；只有删除技能本身时才"
+"省略此参数"
+
+msgid "cli.remove.flag_agent"
+msgstr "只解除这些 agent 的分享，保留技能声明和受管副本"
+"（可重复或逗号分隔）"
+
+msgid "cli.remove.flag_all"
+msgstr "选择全部声明条目，带 --agent 时选择全部匹配的分"
+"享技能"
+
+msgid "cli.remove.flag_skill"
+msgstr "要移除的技能（可重复或逗号分隔）；位置参数效"
+"果相同"
+
 msgid "cli.remove.long"
-msgstr "可按发布名称或安装别名选择。本地修改过的安装"
-"会被保留，并报告为部分完成。"
+msgstr "可按发布名称或安装别名选择条目。--all 选择全部"
+"已声明条目，不带名称的交互运行会从其中勾选；本地"
+"修改过的安装会被保留，并报告为部分完成。带 --agent "
+"时只解除向这些 agent 的分享，保留声明和受管副本；不"
+"指定技能时只列出已向目标 agent 分享的技能。"
 
 msgid "cli.remove.short"
 msgstr "删除声明和内容未改动的受管安装"
 
 msgid "cli.remove.use"
-msgstr "remove <名称…>"
+msgstr "remove [names…]"
 
 msgid "cli.root.flag_dry_run"
 msgstr "只输出执行计划，不写任何文件"
@@ -145,8 +164,7 @@ msgstr "目标位置已存在时的处理策略：ask（默认）、overwri"
 "te 或 skip"
 
 msgid "cli.share.flag_remove"
-msgstr "要解除链接并从所选技能中移除的 agent（可重复或"
-"逗号分隔）"
+msgstr "解除 --agent 指定的分享，保留技能声明和受管副本"
 
 msgid "cli.share.flag_skill"
 msgstr "要分享的技能（可重复或逗号分隔）；省略时交互"
@@ -168,14 +186,21 @@ msgstr "所选技能若尚未声明，会在本次操作中纳管：经过"
 "件系统会退回字节保真复制。声明是 sync 在新机器上重"
 "建、verify 在本机校验的依据；条目未列出任何 agent 的技"
 "能只留在受管目录中。--agent 是在已记录的 agent 之上追"
-"加：要摘掉某个用 --remove。不传 --skill 或位置参数技能"
-"名时，命令会列出已安装技能供交互勾选，指定 --agent "
-"时仅默认勾选已向所有目标 agent 分享的技能；不传 --agen"
-"t 时，已向任意 agent 分享的技能默认勾选，并会列出已"
-"知 agent 目录，以及作用域根目录下已存在的那几个，并"
-"把所选技能都声明的 agent 预先勾上。目标位置已有不同"
-"内容时，share 会逐个冲突询问；--on-conflict=overwrite 或 =ski"
-"p 可统一处理，--yes 会安全地跳过冲突。"
+"加：要摘掉某个用 --remove --agent <名称>。不传 --skill 或位"
+"置参数技能名时，命令会列出已安装技能供交互勾选，"
+"指定 --agent 时仅默认勾选已向所有目标 agent 分享的技能"
+"；不传 --agent 时，已向任意 agent 分享的技能默认勾选，"
+"并会列出已知 agent 目录，以及作用域根目录下已存在的"
+"那几个，并把所选技能都声明的 agent 预先勾上。目标位"
+"置已有不同内容时，share 会逐个冲突询问；--on-conflict=ove"
+"rwrite 或 =skip 可统一处理，--yes 会安全地跳过冲突。也可"
+"以使用 remove --agent <名称> 解除分享。不指定技能时交互"
+"勾选已向这些 agent 分享的技能，--all 选择全部匹配技能"
+"。"
+
+msgid "cli.share.remove_needs_agents"
+msgstr "--remove 需要 --agent；使用 share [技能] --remove --agent <"
+"名称>，或 remove [技能] --agent <名称>"
 
 msgid "cli.share.short"
 msgstr "把已安装技能记录为链接到其他 agent 目录"
@@ -648,6 +673,13 @@ msgstr "远程内容与锁定不符，可能被改动: %s\nlock 记录: %s"
 "\n实算:     %s\n建议核对来源是否被篡改；确认无误后用 s"
 "killmod get 重新锁定"
 
+msgid "engine.remove.all_exclusive"
+msgstr "--all 不能与技能名称同时使用"
+
+#, go-format
+msgid "engine.remove.confirm_one"
+msgstr "删除 %s？"
+
 #, go-format
 msgid "engine.remove.could_verify_kept_installed"
 msgstr "无法验证 %s，已保留安装文件：%v"
@@ -665,12 +697,28 @@ msgstr "将删除以下目录："
 msgid "engine.remove.following_share_links_deleted"
 msgstr "以下分享链接也将被删除："
 
+msgid "engine.remove.local_description"
+msgstr "本地条目，无版本"
+
 msgid "engine.remove.locally_modified_kept"
 msgstr "存在本地修改，已保留安装文件："
+
+msgid "engine.remove.needs_selection"
+msgstr "未指定条目；请给出名称或传 --all，或在终端中运"
+"行 remove"
+
+msgid "engine.remove.no_entries_selected"
+msgstr "未选择任何条目"
+
+msgid "engine.remove.nothing_declared"
+msgstr "SKILL.mod 中没有声明条目"
 
 #, go-format
 msgid "engine.remove.removed_declarations_clean"
 msgstr "已删除 %d 个声明和 %d 个内容未改动的安装目录"
+
+msgid "engine.remove.select_entries"
+msgstr "选择要删除的条目"
 
 msgid "engine.remove.share_cleanup_failed"
 msgstr "清理部分分享链接失败"
@@ -685,13 +733,24 @@ msgstr "使用同仓引用缓存解析，未刷新远端"
 msgid "engine.rollback_also_failed"
 msgstr "回滚也失败: %w"
 
+msgid "engine.share.all_exclusive"
+msgstr "--all 不能与技能名称或 --skill 同时使用"
+
 #, go-format
 msgid "engine.share.confirm_one"
 msgstr "分享 %s？"
 
 #, go-format
+msgid "engine.share.confirm_remove_one"
+msgstr "解除 %s 的分享？"
+
+#, go-format
 msgid "engine.share.confirm_target"
 msgstr "分享到 %s（%s）？"
+
+#, go-format
+msgid "engine.share.destination_changed"
+msgstr "分享目标在删除前已变化，未提交任何变更：%s"
 
 msgid "engine.share.dry_run_note"
 msgstr "dry run：未写入任何文件"
@@ -736,6 +795,10 @@ msgid "engine.share.not_declared_unknown"
 msgstr "该 skill 在 SKILL.mod 中没有条目"
 
 #, go-format
+msgid "engine.share.nothing_shared"
+msgstr "没有技能分享给指定的 agent：%s"
+
+#, go-format
 msgid "engine.share.overlap_managed"
 msgstr "分享目标 %s 与受管技能目录 %s 重叠"
 
@@ -748,6 +811,9 @@ msgstr "计划复制"
 
 msgid "engine.share.remove_absent_agent"
 msgstr "本机不存在该 agent 目录；仅移除声明"
+
+msgid "engine.share.remove_conflict_policy"
+msgstr "解除 agent 链接时不能使用 --on-conflict"
 
 #, go-format
 msgid "engine.share.remove_done"
@@ -764,17 +830,16 @@ msgid "engine.share.remove_kept_foreign"
 msgstr "已保留：该目标不是指向受管副本的链接"
 
 msgid "engine.share.remove_needs_skills"
-msgstr "--remove 修改的是具体 skill 的 agents；请指定 --skill "
-"或 --all"
+msgstr "未指定要解除分享的技能；请传入名称、--skill 或 -"
+"-all，或交互运行"
 
 #, go-format
 msgid "engine.share.remove_plan"
 msgstr "准备从 %d 个 skill 的声明中移除 agent，需删除 %d 个"
 "链接"
 
-#, go-format
-msgid "engine.share.removed"
-msgstr "已删除 %s"
+msgid "engine.share.select_remove_skills"
+msgstr "选择要解除分享的技能"
 
 msgid "engine.share.select_skills"
 msgstr "选择要分享的技能"

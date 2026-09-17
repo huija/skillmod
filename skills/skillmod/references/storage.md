@@ -85,7 +85,7 @@ for `remove` or `prune` to clean up later. `sync` retains that history when it
 records newly declared destinations; `share --remove` drops only the links and
 records for the agents it explicitly unshares.
 
-`share --remove` (`-r`) is the declaration's exit: it unlinks the named agents
+`share --remove --agent <name>` (`-r`) is the declaration's exit: it unlinks the named agents
 from the skills the command names and drops them from those entries' agent
 lists, leaving destinations that hold foreign content alone and saving the
 declaration only after the links are down. Removing a skill, or pruning it as

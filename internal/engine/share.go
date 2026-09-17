@@ -93,9 +93,7 @@ func (e *Engine) Share(ctx context.Context, options ShareOptions, io IO, options
 	defer unlock()
 	// --remove is the declaration's exit: it takes agents out of the selected
 	// skills' lists, so it cannot be mixed with a request that links things
-	// back in (rejected above). It does require a skill selection, because the
-	// agent list it edits belongs to an entry rather than to the manifest as a
-	// whole.
+	// back in (rejected above). The selected entries keep their managed copies.
 	if len(options.Remove) > 0 {
 		return e.shareRemove(options, io, run)
 	}
@@ -304,10 +302,16 @@ func (e *Engine) prepareShareState(m *modfile.Mod, lock *modfile.Lock, skills []
 // destinations. --remove and --agent name the same kind of destination, so
 // both are checked here rather than in the branch that consumes them.
 func (e *Engine) checkShareOptions(options ShareOptions) error {
+	if options.All && len(options.Skills) > 0 {
+		return fmt.Errorf("%s", i18n.Text("engine.share.all_exclusive"))
+	}
 	// --remove edits the agent lists of existing entries; --agent links things
 	// back in. The two directions contradict each other.
 	if len(options.Remove) > 0 && len(options.Agents) > 0 {
 		return fmt.Errorf("%s", i18n.Text("engine.share.remove_exclusive"))
+	}
+	if len(options.Remove) > 0 && options.OnConflict != "" {
+		return fmt.Errorf("%s", i18n.Text("engine.share.remove_conflict_policy"))
 	}
 	if len(options.Remove) == 0 {
 		// --remove does not read the policy, so it is not asked to validate it.
@@ -382,8 +386,8 @@ func hasAgent(names []string, name string) bool {
 // shareRemove implements share --remove: for each selected skill it takes down
 // the links that mirror the managed copy under the named agents' directories
 // and drops those agent names from the skill's declaration entry, so the
-// manifest is the single source of the link set. The agent list belongs to an
-// entry rather than to the manifest, so a run must name the skills it edits.
+// manifest is the single source of the link set. A run names the skills, uses
+// --all, or picks from entries shared to the requested agents.
 // A destination holding foreign content is left alone, exactly like remove and
 // prune leave it. The declaration is saved only after the links are down, so a
 // failed run leaves it intact for a retry — the mirror image of Share saving
@@ -401,23 +405,28 @@ func (e *Engine) shareRemove(options ShareOptions, io IO, run MutationOptions) (
 	if err != nil {
 		return nil, err
 	}
-	// Removing agents edits entries, so the run must name the skills whose
-	// entries it edits; --all is the explicit way to say every one of them.
-	if len(options.Skills) == 0 && !options.All {
-		return nil, fmt.Errorf("%s", i18n.Text("engine.share.remove_needs_skills"))
+	// Missing managed copies can still leave dangling share links and agent
+	// declarations behind. Include those slots so unsharing can clean them.
+	for _, entry := range m.Skills {
+		found := false
+		for _, sk := range listed {
+			if sameDir(entry.DirName(), sk.dirName) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			listed = append(listed, shareSkill{dirName: entry.DirName(), name: entry.Name,
+				version: entry.Version, agents: entry.Agents})
+		}
 	}
-	if len(listed) == 0 {
-		return nil, fmt.Errorf(i18n.Text("engine.share.no_skills_installed"), e.skillsDir())
-	}
-	skills, err := selectShareSkills(listed, options, io)
-	if err != nil {
-		return nil, err
-	}
+	sort.Slice(listed, func(i, j int) bool { return listed[i].dirName < listed[j].dirName })
 	// A name that is not one portable directory segment fails as itself.
 	// Whether a usable name is declared is answered per skill below: the same
 	// name may be on one entry and absent from another, and only the latter is
 	// a no-op to report.
 	targets := make([]agents.Target, 0, len(options.Remove))
+	seen := make(map[string]bool)
 	for _, name := range options.Remove {
 		t, err := agents.Resolve(name)
 		if err != nil {
@@ -426,7 +435,32 @@ func (e *Engine) shareRemove(options ShareOptions, io IO, run MutationOptions) (
 		if err := rejectManagedOverlap(e.skillsDir(), t.Dir(e.Root)); err != nil {
 			return nil, err
 		}
-		targets = append(targets, t)
+		if !seen[t.Name] {
+			targets = append(targets, t)
+			seen[t.Name] = true
+		}
+	}
+	if len(options.Skills) == 0 {
+		var matching []shareSkill
+		for _, sk := range listed {
+			for _, target := range targets {
+				if sk.declares(target.Name) {
+					matching = append(matching, sk)
+					break
+				}
+			}
+		}
+		listed = matching
+	}
+	if len(listed) == 0 {
+		return nil, fmt.Errorf(i18n.Text("engine.share.nothing_shared"), agentNames(targets))
+	}
+	skills, err := selectUnshareSkills(listed, options, io)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := e.prepareShareState(m, lock, skills, nil); err != nil {
+		return nil, err
 	}
 	// Every selected skill must declare at least one of the named agents, or
 	// the run would silently do nothing; a per-skill diagnostic names the
@@ -446,11 +480,14 @@ func (e *Engine) shareRemove(options ShareOptions, io IO, run MutationOptions) (
 	// destinations and foreign content are reported and left alone.
 	rep := &Report{Action: CommandShare}
 	var removable []string
+	removableSkills := make(map[string]shareSkill)
 	for _, sk := range skills {
-		entry := EntryReport{Name: sk.name, Version: sk.version, Action: ActionRemove}
+		declaration := findModSkill(m, sk.dirName)
+		entry := EntryReport{Name: sk.name, Source: declaration.Source, Local: declaration.Local,
+			Version: declaration.Version, Directory: sk.dirName, Action: ActionRemove}
 		for _, t := range targets {
 			dst := filepath.Join(t.Dir(e.Root), sk.dirName)
-			if _, statErr := os.Stat(t.Dir(e.Root)); statErr != nil {
+			if _, statErr := os.Stat(t.Dir(e.Root)); errors.Is(statErr, fs.ErrNotExist) {
 				// The agent directory is absent on this machine, so there is
 				// nothing to unlink; the declaration entry still goes.
 				entry.TargetResults = append(entry.TargetResults, TargetReport{Path: dst, Action: ActionMissing, Note: i18n.Text("engine.share.remove_absent_agent")})
@@ -465,6 +502,7 @@ func (e *Engine) shareRemove(options ShareOptions, io IO, run MutationOptions) (
 				// A mirrored link goes with the declaration.
 				entry.TargetResults = append(entry.TargetResults, TargetReport{Path: dst, Action: ActionRemove, Note: note})
 				removable = append(removable, dst)
+				removableSkills[dst] = sk
 			case ActionInstall:
 				// Nothing linked here; the declaration entry still goes.
 				entry.TargetResults = append(entry.TargetResults, TargetReport{Path: dst, Action: ActionMissing})
@@ -482,19 +520,45 @@ func (e *Engine) shareRemove(options ShareOptions, io IO, run MutationOptions) (
 		rep.Notes = append(rep.Notes, i18n.Text("engine.share.remove_dry_run_note"))
 		return rep, nil
 	}
-	// applyShareRemovals tolerates an already-gone destination, so a link
-	// deleted between classification and removal does not fail the run.
-	if err := e.applyShareRemovals(removable); err != nil {
-		return nil, err
-	}
-	for _, entry := range rep.Entries {
-		for _, result := range entry.TargetResults {
-			if result.Action == ActionRemove {
-				if err := io.printf(i18n.Format("engine.share.removed", result.Path)); err != nil {
-					return nil, err
-				}
-			}
+	// A destination already gone needs no staging. Existing links remain in
+	// backups until their declaration update succeeds.
+	var existing []string
+	seenPaths := make(map[string]bool)
+	for _, path := range removable {
+		if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return nil, err
 		}
+		// Agent directories may alias one another. Resolve only the parent:
+		// resolving the entry itself would merge distinct links to the same
+		// managed source. Each actual destination is staged exactly once.
+		parent, err := resolveSharePath(filepath.Dir(path))
+		if err != nil {
+			return nil, err
+		}
+		key := fsutil.FoldKey(filepath.Join(parent, filepath.Base(path)))
+		if seenPaths[key] {
+			continue
+		}
+		seenPaths[key] = true
+		existing = append(existing, path)
+	}
+	finalize, err := stageRemovals(existing, func(path string) error {
+		if err := rejectManagedOverlap(e.skillsDir(), filepath.Dir(path)); err != nil {
+			return err
+		}
+		action, _, err := e.classifyShareTarget(removableSkills[path], path)
+		if err != nil {
+			return err
+		}
+		if action != ActionKeep {
+			return fmt.Errorf(i18n.Text("engine.share.destination_changed"), path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	// The links are down; now the declaration. An entry left with no agents
 	// loses the field entirely rather than keeping an empty list — "not
@@ -507,9 +571,43 @@ func (e *Engine) shareRemove(options ShareOptions, io IO, run MutationOptions) (
 		setLockAgents(lock, sk.dirName, removeAgentNames(recordedAgents(lock, sk.dirName), targets))
 	}
 	if err := e.saveState(m, lock); err != nil {
-		return nil, err
+		return nil, errors.Join(err, finalize(false))
+	}
+	if err := finalize(true); err != nil {
+		return rep, err
 	}
 	return rep, io.printf(i18n.Format("engine.share.remove_done", len(skills), len(targets), len(removable)))
+}
+
+// selectUnshareSkills never assumes a deletion set or opens it checked. Names
+// and --all state the set; otherwise only skills shared to the requested agents
+// are offered for an explicit interactive selection.
+func selectUnshareSkills(listed []shareSkill, options ShareOptions, io IO) ([]shareSkill, error) {
+	if options.All {
+		return listed, nil
+	}
+	if len(options.Skills) > 0 {
+		return matchShareSkills(listed, options.Skills)
+	}
+	if io.Confirm == nil {
+		return nil, fmt.Errorf("%s", i18n.Text("engine.share.remove_needs_skills"))
+	}
+	choices := make([]ui.Option, len(listed))
+	for i, sk := range listed {
+		choices[i] = sk.option()
+		choices[i].Selected = false
+	}
+	selected, err := chooseIndices(io, i18n.Text("engine.share.select_remove_skills"), choices,
+		func(index int) string { return i18n.Format("engine.share.confirm_remove_one", listed[index].dirName) },
+		i18n.Text("engine.share.no_skills_selected"))
+	if err != nil {
+		return nil, err
+	}
+	var skills []shareSkill
+	for _, index := range selected {
+		skills = append(skills, listed[index])
+	}
+	return skills, nil
 }
 
 // modSkillHasAnyAgent reports whether the entry names any of the targets. A
@@ -795,10 +893,12 @@ func chooseIndices(io IO, prompt string, options []ui.Option, confirmPrompt func
 		}
 		// A selector returning an out-of-range index cannot be trusted; treat it
 		// like an empty selection rather than indexing past the list.
+		seen := make(map[int]bool, len(selected))
 		for _, index := range selected {
-			if index < 0 || index >= len(options) {
+			if index < 0 || index >= len(options) || seen[index] {
 				return nil, fmt.Errorf("%s", emptyMessage)
 			}
+			seen[index] = true
 		}
 		if len(selected) == 0 {
 			return nil, fmt.Errorf("%s", emptyMessage)

@@ -99,15 +99,34 @@ msgid "cli.prune.short"
 msgstr "remove installed files left by stale entries (list and confirm befo"
 "re deleting)"
 
+msgid "cli.remove.empty_agent"
+msgstr "--agent requires a non-empty agent name; omit the flag only when de"
+"leting the skill itself"
+
+msgid "cli.remove.flag_agent"
+msgstr "unlink only these agents and keep skill declarations and managed co"
+"pies (repeatable or comma-separated)"
+
+msgid "cli.remove.flag_all"
+msgstr "select every declared entry, or all skills shared to --agent"
+
+msgid "cli.remove.flag_skill"
+msgstr "skills to remove (repeatable or comma-separated); positional argume"
+"nts work the same"
+
 msgid "cli.remove.long"
-msgstr "Select by published name or installation alias. Locally modified in"
-"stallations are kept and reported as partial completion."
+msgstr "Select entries by published name or installation alias. --all selec"
+"ts every declared entry, and an interactive run without names picks from t"
+"hem; locally modified installations are kept and reported as partial compl"
+"etion. With --agent, only that agent sharing is removed: declarations and "
+"managed copies stay, and unnamed selections list only skills shared to the"
+" requested agents."
 
 msgid "cli.remove.short"
 msgstr "remove declarations and clean managed installations"
 
 msgid "cli.remove.use"
-msgstr "remove <names…>"
+msgstr "remove [names…]"
 
 msgid "cli.root.flag_dry_run"
 msgstr "print the execution plan without writing files"
@@ -146,8 +165,8 @@ msgstr "what to do when a destination already exists: ask (default), overwr"
 "ite, or skip"
 
 msgid "cli.share.flag_remove"
-msgstr "agents to unlink and drop from the selected skills (repeatable or c"
-"omma-separated)"
+msgstr "unlink the agents named by --agent instead of sharing; keep skill d"
+"eclarations and managed copies"
 
 msgid "cli.share.flag_skill"
 msgstr "skills to share (repeatable or comma-separated); omit to choose int"
@@ -170,14 +189,20 @@ msgstr "Selected skills missing from SKILL.mod are adopted: verified lock r"
 "reserving copy. The manifest is what sync recreates on another machine and"
 " what verify checks here; a skill whose entry names no agents stays only i"
 "n the managed directory. --agent is additive to the agents already recorde"
-"d: --remove is how one comes off. Without --skill or positional skill name"
-"s the command lists the installed skills for an interactive choice, presel"
-"ecting only skills already shared to every requested --agent. Without --ag"
-"ent, skills shared anywhere open checked, and it offers the known agent di"
-"rectories plus the ones already present under the scope root, checking the"
-" agents every chosen skill already names. When a destination already holds"
-" different content, share asks per conflict; --on-conflict=overwrite or =s"
-"kip answers them all, and --yes skips conflicts safely."
+"d: --remove --agent <name> is how one comes off; remove --agent <name> doe"
+"s the same. Unnamed removal runs pick from skills shared to those agents, "
+"and --all selects all matching skills. Without --skill or positional skill"
+" names the command lists the installed skills for an interactive choice, p"
+"reselecting only skills already shared to every requested --agent. Without"
+" --agent, skills shared anywhere open checked, and it offers the known age"
+"nt directories plus the ones already present under the scope root, checkin"
+"g the agents every chosen skill already names. When a destination already "
+"holds different content, share asks per conflict; --on-conflict=overwrite "
+"or =skip answers them all, and --yes skips conflicts safely."
+
+msgid "cli.share.remove_needs_agents"
+msgstr "--remove requires --agent; use share [skills] --remove --agent <nam"
+"e>, or remove [skills] --agent <name>"
 
 msgid "cli.share.short"
 msgstr "Record installed skills as linked into other agent directories"
@@ -662,6 +687,13 @@ msgstr "remote contents do not match the lock and may have been modified: %"
 "s\nlock:     %s\ncomputed: %s\nVerify that the source has not been tampere"
 "d with; if it is valid, use skillmod get to lock it again"
 
+msgid "engine.remove.all_exclusive"
+msgstr "--all cannot be combined with skill names"
+
+#, go-format
+msgid "engine.remove.confirm_one"
+msgstr "remove %s?"
+
 #, go-format
 msgid "engine.remove.could_verify_kept_installed"
 msgstr "could not verify %s; kept installed files: %v"
@@ -679,12 +711,28 @@ msgstr "the following directories will be deleted:"
 msgid "engine.remove.following_share_links_deleted"
 msgstr "the following share links will also be deleted:"
 
+msgid "engine.remove.local_description"
+msgstr "local entry, no version"
+
 msgid "engine.remove.locally_modified_kept"
 msgstr "locally modified; kept installed files: "
+
+msgid "engine.remove.needs_selection"
+msgstr "no entries were requested; pass names or --all, or run remove in a "
+"terminal"
+
+msgid "engine.remove.no_entries_selected"
+msgstr "no entries were selected"
+
+msgid "engine.remove.nothing_declared"
+msgstr "SKILL.mod declares no entries"
 
 #, go-format
 msgid "engine.remove.removed_declarations_clean"
 msgstr "removed %d declarations and %d clean installation directories"
+
+msgid "engine.remove.select_entries"
+msgstr "select the entries to remove"
 
 msgid "engine.remove.share_cleanup_failed"
 msgstr "failed to remove some share links"
@@ -700,13 +748,24 @@ msgstr "resolved using the same-repository reference cache; remote was not "
 msgid "engine.rollback_also_failed"
 msgstr "rollback also failed: %w"
 
+msgid "engine.share.all_exclusive"
+msgstr "--all cannot be combined with skill names or --skill"
+
 #, go-format
 msgid "engine.share.confirm_one"
 msgstr "share %s?"
 
 #, go-format
+msgid "engine.share.confirm_remove_one"
+msgstr "stop sharing %s?"
+
+#, go-format
 msgid "engine.share.confirm_target"
 msgstr "share into %s (%s)?"
+
+#, go-format
+msgid "engine.share.destination_changed"
+msgstr "share destination changed before removal; nothing was committed: %s"
 
 msgid "engine.share.dry_run_note"
 msgstr "dry run: nothing was copied"
@@ -751,6 +810,10 @@ msgid "engine.share.not_declared_unknown"
 msgstr "the skill has no entry in SKILL.mod"
 
 #, go-format
+msgid "engine.share.nothing_shared"
+msgstr "no skills are shared to the requested agents: %s"
+
+#, go-format
 msgid "engine.share.overlap_managed"
 msgstr "share destination %s overlaps the managed skills directory %s"
 
@@ -764,6 +827,9 @@ msgstr "planned for copying"
 msgid "engine.share.remove_absent_agent"
 msgstr "agent directory is absent on this machine; only the declaration is "
 "removed"
+
+msgid "engine.share.remove_conflict_policy"
+msgstr "--on-conflict cannot be used while removing agent links"
 
 #, go-format
 msgid "engine.share.remove_done"
@@ -780,16 +846,16 @@ msgid "engine.share.remove_kept_foreign"
 msgstr "kept: the destination does not mirror the managed copy"
 
 msgid "engine.share.remove_needs_skills"
-msgstr "--remove edits the agents of specific skills; pass --skill or --all"
+msgstr "no skills were requested for unsharing; pass names, --skill or --al"
+"l, or run interactively"
 
 #, go-format
 msgid "engine.share.remove_plan"
 msgstr "Removing agents from %d skill declaration(s), %d link(s) to take do"
 "wn"
 
-#, go-format
-msgid "engine.share.removed"
-msgstr "removed %s"
+msgid "engine.share.select_remove_skills"
+msgstr "select the skills to stop sharing"
 
 msgid "engine.share.select_skills"
 msgstr "Select the skills to share"

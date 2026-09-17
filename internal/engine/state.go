@@ -52,6 +52,12 @@ func (e *Engine) lockState() (func(), error) {
 // applyRemovals moves paths to unique sibling backups. The caller commits the
 // removal only after its lock-file update succeeds, or rolls it back on error.
 func applyRemovals(paths []string) (finalize func(bool) error, err error) {
+	return stageRemovals(paths, nil)
+}
+
+// stageRemovals optionally checks each path immediately before moving it.
+// Share destinations need this guard because an agent parent may be a symlink.
+func stageRemovals(paths []string, check func(string) error) (finalize func(bool) error, err error) {
 	type removal struct {
 		path   string
 		backup string
@@ -67,6 +73,11 @@ func applyRemovals(paths []string) (finalize func(bool) error, err error) {
 		return errors.Join(rollbackErrs...)
 	}
 	for _, path := range paths {
+		if check != nil {
+			if err := check(path); err != nil {
+				return nil, errors.Join(err, rollback())
+			}
+		}
 		backup, err := os.MkdirTemp(filepath.Dir(path), ".skillmod-prune-*")
 		if err != nil {
 			return nil, errors.Join(err, rollback())

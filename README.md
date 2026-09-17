@@ -182,9 +182,9 @@ remotes additionally require `ssh` on `PATH`.
 | `why <selector>` | Explain one entry: source, resolved version, commit, dirhash, and per-target status |
 | `update [selector]` | Move entries to the newest immutable version; refuses a silent downgrade |
 | `verify` | Check installed content against the lock; the CI gate |
-| `remove <selector>` | Delete a declaration and its clean managed installations |
+| `remove [selector]` | Delete declarations and clean managed installations; with `--agent`, unlink only those agents and keep the skills |
 | `prune` | Drop stale installations and lock records left behind by hand edits |
-| `share` | Link installed skills into agent directories such as `.claude` or `.codex`. An agent is named by one directory segment and read from `.<name>/skills`, so any agent works and the name is all the manifest needs; each skill records the agents it is linked to on its own entry for `sync` to recreate. `share --remove` unlinks agents from the named skills and drops them from their entries |
+| `share` | Link installed skills into agent directories such as `.claude` or `.codex`. An agent is named by one directory segment and read from `.<name>/skills`, so any agent works and the name is all the manifest needs; each skill records the agents it is linked to on its own entry for `sync` to recreate. `share --remove --agent <name>` stops sharing, preserving the skill |
 | `upgrade` | Replace the running executable with a published release, verified against its checksums |
 
 A machine is adopted before a project, in that order: `skillmod --global init`
@@ -199,7 +199,7 @@ Every command accepts `--json` (`-j`) for machine-readable output and `--global`
 accept `--dry-run` (`-n`) and `--yes` (`-y`). `get` also accepts `--alias`
 (`-a`), `init` accepts `--force` (`-f`), `sync` accepts `--check` (`-c`) and
 `--relink` (`-r`), `share` accepts `--skill` (`-s`), `--agent` (`-a`), and
-`--remove` (`-r`), and `upgrade` accepts `--check` (`-c`) and `--tag` (`-t`).
+`--remove` (`-r`), `remove` accepts `--skill` (`-s`) and `--agent` (`-a`), and `upgrade` accepts `--check` (`-c`) and `--tag` (`-t`).
 `--install-mode` and `--allow-downgrade` deliberately have no shorthand: the
 obvious letters are ambiguous, and both are typed rarely. Command help,
 summaries, prompts, and errors follow `SKILLMOD_LANG` when it is set and the

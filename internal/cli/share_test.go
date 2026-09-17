@@ -195,7 +195,7 @@ func TestShareCommandRemoveNeedsASkillSelection(t *testing.T) {
 	cmd = NewRootCmd()
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
-	cmd.SetArgs([]string{"share", "--remove", "claude"})
+	cmd.SetArgs([]string{"share", "--remove", "--agent", "claude"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("share --remove without --skill or --all = nil, want a diagnostic")
@@ -208,9 +208,9 @@ func TestShareCommandRemoveNeedsASkillSelection(t *testing.T) {
 	cmd = NewRootCmd()
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
-	cmd.SetArgs([]string{"share", "hello", "--remove", "claude"})
+	cmd.SetArgs([]string{"share", "hello", "--remove", "--agent", "claude"})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("share hello --remove claude: %v", err)
+		t.Fatalf("share hello --remove --agent claude: %v", err)
 	}
 	if _, err := os.Lstat(filepath.Join(project, ".claude", "skills", "hello")); !os.IsNotExist(err) {
 		t.Errorf("--remove kept the link: %v", err)

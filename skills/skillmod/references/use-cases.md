@@ -253,6 +253,35 @@ skillmod remove review --dry-run
 skillmod remove review
 ```
 
+Names may be published names or installation aliases — passed as positional
+arguments or through `--skill` (`-s`), which is repeatable and comma-separated
+exactly like share's — and a run that names nothing opens a selection over what
+`SKILL.mod` declares:
+
+```sh
+skillmod remove --all
+skillmod remove
+```
+
+`--all` takes every declared entry without asking. A bare `remove` picks from
+the declarations interactively, so it needs a terminal; `--yes` is not a
+substitute for either, because it answers the deletion confirmation rather than
+choosing what to delete.
+
+Use `--agent` when only sharing should stop while the managed skill and its
+declaration stay:
+
+```sh
+skillmod remove review --agent claude --dry-run
+skillmod remove --agent claude
+skillmod remove --all --agent claude
+```
+
+Without skill names, the picker offers only skills shared to the named agents
+and starts with nothing checked. With `--all`, all matching skills are unshared;
+skills shared only to other agents are unaffected. Agent values may repeat or
+use comma-separated names. Names and `--all` cannot be combined.
+
 Clean managed installations are removed transactionally. Locally modified or
 unverifiable directories are preserved and reported as partial completion.
 
@@ -317,18 +346,19 @@ link that was replaced or drifted, `verify` reports a missing one under an agent
 directory that exists on this machine, and removing a skill takes its mirror
 links down with it.
 
-To stop sharing one skill with an agent, use `share --remove`, which unlinks
-the agents it names from the skills it is given and drops them from those
-skills' agent lists — the list belongs to an entry, so the skills must be
-named:
+To stop sharing, `share --remove --agent` does the same as `remove --agent`:
 
 ```sh
-skillmod share --skill review --remove codex --dry-run
-skillmod share --skill review --remove codex
+skillmod share --skill review --remove --agent codex --dry-run
+skillmod share --remove --agent codex
+skillmod share --all --remove --agent codex
 ```
 
 Destinations holding foreign content are left alone, and an entry left with no
 agents loses the field entirely.
+`--remove` is now a switch; the agent value belongs to `--agent`. Both forms
+preserve managed copies and declarations, including when their share links were
+already missing. A state write failure restores staged links.
 
 ## Installation modes
 

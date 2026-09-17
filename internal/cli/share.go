@@ -6,6 +6,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -19,13 +20,17 @@ func newShareCmd(options *rootOptions) *cobra.Command {
 	var skills []string
 	var all bool
 	var onConflict string
-	var remove []string
+	var remove bool
 	cmd := &cobra.Command{
 		Use:   i18n.Text("cli.share.use"),
 		Short: i18n.Text("cli.share.short"),
 		Long:  i18n.Text("cli.share.long"),
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			targets := splitList(agents)
+			if remove && len(targets) == 0 {
+				return fmt.Errorf("%s", i18n.Text("cli.share.remove_needs_agents"))
+			}
 			eng, err := options.newEngine()
 			if err != nil {
 				return err
@@ -38,13 +43,16 @@ func newShareCmd(options *rootOptions) *cobra.Command {
 			// takes the same skill selection; the engine rejects mixing it with
 			// the options that link things back in.
 			skills = append(splitList(skills), args...)
-			rep, err := eng.Share(cmd.Context(), engine.ShareOptions{
+			share := engine.ShareOptions{
 				Skills:     skills,
 				All:        all,
-				Agents:     splitList(agents),
-				Remove:     splitList(remove),
+				Agents:     targets,
 				OnConflict: onConflict,
-			}, options.newIO(cmd), options.mutationOptions())
+			}
+			if remove {
+				share.Remove, share.Agents = targets, nil
+			}
+			rep, err := eng.Share(cmd.Context(), share, options.newIO(cmd), options.mutationOptions())
 			return errors.Join(err, options.output(cmd, rep))
 		},
 	}
@@ -52,7 +60,7 @@ func newShareCmd(options *rootOptions) *cobra.Command {
 	cmd.Flags().StringArrayVarP(&agents, "agent", "a", nil, i18n.Text("cli.share.flag_agent"))
 	cmd.Flags().BoolVar(&all, "all", false, i18n.Text("cli.share.flag_all"))
 	cmd.Flags().StringVar(&onConflict, "on-conflict", "", i18n.Text("cli.share.flag_on_conflict"))
-	cmd.Flags().StringArrayVarP(&remove, "remove", "r", nil, i18n.Text("cli.share.flag_remove"))
+	cmd.Flags().BoolVarP(&remove, "remove", "r", false, i18n.Text("cli.share.flag_remove"))
 	return cmd
 }
 

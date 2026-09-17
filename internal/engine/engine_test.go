@@ -1842,6 +1842,86 @@ func TestRemoveDeletesDeclarationAndCleanInstallation(t *testing.T) {
 	}
 }
 
+// TestRemoveSelectsEntriesInteractively covers the picker: a run that names
+// nothing acts on what the caller picks rather than on everything, and what it
+// picks leaves through the path a named removal takes, links included.
+func TestRemoveSelectsEntriesInteractively(t *testing.T) {
+	root := t.TempDir()
+	writeLocalSkill(t, root, "alpha", "")
+	writeLocalSkill(t, root, "beta", "")
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, err := eng.Share(ctx, engine.ShareOptions{All: true, Agents: []string{"claude"}}, testIO()); err != nil {
+		t.Fatalf("Share: %v", err)
+	}
+
+	chooser := &shareChooser{selections: [][]int{{0}}}
+	rep, err := eng.Remove(ctx, nil, engine.IO{Out: io.Discard, Confirm: chooser})
+	if err != nil {
+		t.Fatalf("Remove(picked): %v", err)
+	}
+	if chooser.calls != 1 {
+		t.Fatalf("selector calls = %d, want one for the entries", chooser.calls)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Name != "alpha" {
+		t.Fatalf("report = %+v, want only the picked entry", rep.Entries)
+	}
+	for _, sk := range loadMod(t, root).Skills {
+		if sk.DirName() == "alpha" {
+			t.Errorf("picked entry is still declared: %+v", sk)
+		}
+	}
+	if got := agentsOf(loadMod(t, root), "beta"); len(got) != 1 || got[0] != "claude" {
+		t.Errorf("unpicked entry changed: %v", got)
+	}
+	if _, err := os.Lstat(filepath.Join(agentSkillsDir(root, "claude"), "alpha")); !os.IsNotExist(err) {
+		t.Errorf("picked skill kept its share link: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(agentSkillsDir(root, "claude"), "beta")); err != nil {
+		t.Errorf("unpicked skill lost its share link: %v", err)
+	}
+}
+
+// TestRemoveAllTakesEveryEntry pins --all as the explicit "every one of them":
+// it is the answer a run without names refuses to assume for itself.
+func TestRemoveAllTakesEveryEntry(t *testing.T) {
+	root := t.TempDir()
+	writeLocalSkill(t, root, "alpha", "")
+	writeLocalSkill(t, root, "beta", "")
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	rep, err := eng.Remove(ctx, nil, testIO(), engine.RemoveOptions{All: true})
+	if err != nil {
+		t.Fatalf("Remove(--all): %v", err)
+	}
+	if len(rep.Entries) != 2 {
+		t.Fatalf("report = %+v, want every declared entry", rep.Entries)
+	}
+	assertStateDirs(t, root)
+}
+
+// TestRemoveWithoutNamesNeedsASelection refuses to guess. Neither --yes nor a
+// run with no channel to ask through may turn "remove" into "remove
+// everything": the first answers the confirmation, the second cannot pick.
+func TestRemoveWithoutNamesNeedsASelection(t *testing.T) {
+	root := t.TempDir()
+	writeLocalSkill(t, root, "alpha", "")
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	for _, run := range []engine.IO{{Out: io.Discard}, {Out: io.Discard, Yes: true}} {
+		if _, err := eng.Remove(ctx, nil, run); err == nil {
+			t.Fatalf("Remove without names succeeded with yes=%v, want a diagnostic", run.Yes)
+		}
+	}
+	assertStateDirs(t, root, "alpha")
+}
+
 func TestRemoveKeepsModifiedInstallationAndReportsPartial(t *testing.T) {
 	r := newHelloRepo(t)
 	root := t.TempDir()

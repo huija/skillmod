@@ -130,8 +130,38 @@ func TestCatalogsCompleteAndFormatCompatible(t *testing.T) {
 	}
 }
 
-// englishCatalog reads the on-disk English catalog, the source of truth for the
-// wording.
+// identicalByDesign lists the entries whose Chinese is deliberately the same
+// string as the English: command syntax and the format skeletons a call site
+// fills in. Neither carries prose, so there is nothing to translate.
+var identicalByDesign = map[string]bool{
+	"cli.remove.use":           true, // remove [names…]
+	"engine.get.option_format": true, // %s — %s\n  %s
+	"engine.init.init":         true, // %s (%v)
+}
+
+// TestChineseCatalogIsActuallyTranslated catches a translation that was
+// overwritten with the English text. A copied value still resolves, so the
+// completeness check above passes and the mistake only shows up as an English
+// message under a Chinese locale, which is how `remove --help` shipped English
+// for a while. The allowlist is checked in both directions so it cannot rot
+// into a list of entries nobody remembers the reason for.
+func TestChineseCatalogIsActuallyTranslated(t *testing.T) {
+	english := englishCatalog(t)
+	chinese := catalogs["zh_CN"]
+	for key, englishText := range english {
+		translated := chinese[key]
+		if identicalByDesign[key] {
+			if translated != englishText {
+				t.Errorf("%q now has its own translation; drop it from identicalByDesign", key)
+			}
+			continue
+		}
+		if translated == englishText {
+			t.Errorf("zh_CN %q is the English text; translate it, or add it to identicalByDesign if it carries no prose", key)
+		}
+	}
+}
+
 func englishCatalog(t *testing.T) map[string]string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("..", "..", "locales", "en_US.po"))
@@ -156,7 +186,7 @@ func TestContractWordingIsPinned(t *testing.T) {
 		"engine.skill_mod_found_advice":         "SKILL.mod not found\nAdvice: run skillmod init or skillmod get first",
 		"engine.verify.skill_lock_found_advice": "SKILL.lock not found\nAdvice: run skillmod sync first to generate the lock file",
 		"cli.get.use":                           "get <repository>[//<subdirectory-or-skill-name>][@<version>]",
-		"cli.remove.use":                        "remove <names…>",
+		"cli.remove.use":                        "remove [names…]",
 		"cli.update.use":                        "update [names…]",
 		"cli.why.use":                           "why <name-or-alias>",
 		// Fragments a call site concatenates with a value. The edge whitespace is
