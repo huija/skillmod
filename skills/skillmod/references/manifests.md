@@ -64,6 +64,31 @@ anywhere below `skills/`. Ambiguous names require the full path. Omitting
 `//<subdirectory>` makes `get` discover the root `SKILL.md` and every `SKILL.md`
 below `skills/`.
 
+## The per-skill `agents` list
+
+`share` records the registered agents it linked a skill to on that skill's
+`[[skill]]` entry:
+
+```toml
+[[skill]]
+name = "review"
+agents = ["claude", "codex"]
+```
+
+The declaration is per skill and names registered agents only: one skill can
+go to claude while another goes to codex, and `sync` recreates the links each
+entry describes on a new machine while `verify` reports a missing or drifted
+one. An unknown agent name is rejected when the manifest is read rather than
+skipped. Paths are deliberately absent — a destination given with `--dir`
+stays a one-off on the command line — so the list reproduces on another
+machine unchanged.
+
+An entry without `agents`, or with an empty one, means the skill stays only
+in the managed directory. `share --remove` edits the lists of the entries the
+command names, so it must be told which skills to touch; an entry left with no
+agents loses the field entirely. The list is sorted on save, and one agent
+cannot appear in it under two spellings.
+
 ## Portability
 
 Installation mode, absolute cache paths, and scope are deliberately excluded

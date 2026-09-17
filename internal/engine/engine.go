@@ -223,11 +223,53 @@ func upsertLock(l *modfile.Lock, e modfile.LockSkill) {
 		// The installation directory is the stable slot. Replacing the source
 		// in SKILL.mod updates that slot rather than leaving an unprunable lock.
 		if sameDir(existing.InstallDir(), e.InstallDir()) {
+			// The recorded agents are the one field the caller does not always
+			// supply: install paths rebuild a lock record from version and hash
+			// facts alone, and dropping the agents on every sync would erase the
+			// only surviving record of links whose declaration is gone.
+			agents := e.Agents
+			if len(agents) == 0 {
+				agents = existing.Agents
+			}
 			*existing = e
+			existing.Agents = agents
 			return
 		}
 	}
 	l.Skills = append(l.Skills, e)
+}
+
+// setLockAgents replaces the remembered destinations after explicit unsharing.
+func setLockAgents(l *modfile.Lock, dirName string, agents []string) {
+	for i := range l.Skills {
+		if sameDir(l.Skills[i].InstallDir(), dirName) {
+			l.Skills[i].Agents = agents
+			return
+		}
+	}
+}
+
+// recordLockAgents accumulates destinations so cleanup still finds links whose
+// names were removed by hand from the declaration. Explicit unsharing removes
+// them only after taking their links down.
+func recordLockAgents(l *modfile.Lock, dirName string, names []string) bool {
+	lk := findLockByDir(l, dirName)
+	if lk == nil {
+		return false
+	}
+	seen := make(map[string]bool, len(lk.Agents)+len(names))
+	for _, name := range lk.Agents {
+		seen[fsutil.FoldKey(name)] = true
+	}
+	changed := false
+	for _, name := range names {
+		if !seen[fsutil.FoldKey(name)] {
+			lk.Agents = append(lk.Agents, name)
+			seen[fsutil.FoldKey(name)] = true
+			changed = true
+		}
+	}
+	return changed
 }
 
 // splitSource separates a mod entry's <repo>[//<subdir>] source field, which excludes the version.

@@ -148,34 +148,34 @@ msgid "cli.share.flag_on_conflict"
 msgstr "what to do when a destination already exists: ask (default), overwr"
 "ite, or skip"
 
+msgid "cli.share.flag_remove"
+msgstr "registered agents to unlink and drop from the selected skills (repe"
+"atable or comma-separated)"
+
 msgid "cli.share.flag_skill"
 msgstr "skills to share (repeatable or comma-separated); omit to choose int"
 "eractively"
 
 msgid "cli.share.long"
-msgstr "Link installed skills from the managed skills directory into other "
-"AI-agent directories, such as .claude or .codex. Each destination entry is"
-" a symlink to the managed copy - the same representation get uses with the"
-" auto install mode - so edits to the managed skill are visible through eve"
-"ry link at once, and a filesystem that forbids symlinks falls back to a by"
-"te-preserving copy. Destinations are unmanaged: skillmod records them nowh"
-"ere and verify never checks them, so re-running share restores links that "
-"were replaced or fell back to copies. Without --skill or positional skill "
-"names the command lists the installed skills for an interactive choice, an"
-"d without --agent or --dir it lists the registered agent directories. When"
-" a destination already holds different content, share asks per conflict; -"
-"-on-conflict=overwrite or =skip answers them all, and --yes skips conflict"
-"s safely.AI-agent directories, such as .claude or .codex. Destinations are"
-" unmanaged copies: skillmod records them nowhere and verify never checks t"
-"hem, so re-running share is how a copy gets refreshed. Without --skill or "
-"positional skill names the command lists the installed skills for an inter"
-"active choice, and without --agent or --dir it lists the registered agent "
-"directories. When a destination already holds different content, share ask"
-"s per conflict; --on-conflict=overwrite or =skip answers them all, and --y"
-"es skips conflicts safely."
+msgstr "Link an installed skill from the managed skills directory into othe"
+"r AI-agent directories, such as .claude or .codex, and record the agents o"
+"n the skill's [[skill]] entry in SKILL.mod. Each destination entry is a sy"
+"mlink to the managed copy - the same representation get uses with the auto"
+" install mode - so edits to the managed skill are visible through every li"
+"nk at once, and a filesystem that forbids symlinks falls back to a byte-pr"
+"eserving copy. The manifest is what sync recreates on another machine and "
+"what verify checks here; a skill whose entry names no agents stays only in"
+" the managed directory. --agent and --dir are additive to the agents alrea"
+"dy recorded: --remove is how one comes off. Without --skill or positional "
+"skill names the command lists the installed skills for an interactive choi"
+"ce, and without --agent or --dir it lists the registered agent directories"
+". When a destination already holds different content, share asks per confl"
+"ict; --on-conflict=overwrite or =skip answers them all, and --yes skips co"
+"nflicts safely. --dir destinations are one-off: an absolute path in a comm"
+"itted manifest would not reproduce, so they are never recorded."
 
 msgid "cli.share.short"
-msgstr "Copy installed skills into other agent directories"
+msgstr "Record installed skills as linked into other agent directories"
 
 msgid "cli.share.use"
 msgstr "share [skills...]"
@@ -619,12 +619,18 @@ msgstr "dry-run: no files were deleted"
 msgid "engine.prune.following_directories_deleted"
 msgstr "the following directories will be deleted:"
 
+msgid "engine.prune.following_share_links_deleted"
+msgstr "the following share links will also be deleted:"
+
 msgid "engine.prune.locally_modified_kept_files"
 msgstr "locally modified; kept files and removed only the lock record: "
 
 #, go-format
 msgid "engine.prune.pruned_stale_entries"
 msgstr "pruned %d stale entries"
+
+msgid "engine.prune.share_cleanup_failed"
+msgstr "failed to remove some share links"
 
 msgid "engine.prune.stale_entries"
 msgstr "no stale entries"
@@ -655,12 +661,18 @@ msgstr "could not verify %s; kept installed files: %v"
 msgid "engine.remove.entry_skill_mod"
 msgstr "entry %q is not in SKILL.mod"
 
+msgid "engine.remove.following_share_links_deleted"
+msgstr "the following share links will also be deleted:"
+
 msgid "engine.remove.locally_modified_kept"
 msgstr "locally modified; kept installed files: "
 
 #, go-format
 msgid "engine.remove.removed_declarations_clean"
 msgstr "removed %d declarations and %d clean installation directories"
+
+msgid "engine.remove.share_cleanup_failed"
+msgstr "failed to remove some share links"
 
 msgid "engine.report.completed_partially"
 msgstr "completed partially; one or more targets were preserved"
@@ -714,6 +726,16 @@ msgstr "no skills or destinations were requested; pass --skill or --all and"
 " --agent or --dir, or run share in a terminal"
 
 #, go-format
+msgid "engine.share.not_declared"
+msgstr "skill %q does not declare agent %q; declared: %s"
+
+msgid "engine.share.not_declared_none"
+msgstr "none"
+
+msgid "engine.share.not_declared_unknown"
+msgstr "the skill has no entry in SKILL.mod"
+
+#, go-format
 msgid "engine.share.overlap_managed"
 msgstr "share destination %s overlaps the managed skills directory %s"
 
@@ -723,6 +745,36 @@ msgstr "Sharing %d skill(s) to %d destination(s)"
 
 msgid "engine.share.planned_note"
 msgstr "planned for copying"
+
+msgid "engine.share.remove_absent_agent"
+msgstr "agent directory is absent on this machine; only the declaration is "
+"removed"
+
+#, go-format
+msgid "engine.share.remove_done"
+msgstr "from %d skill declaration(s): removed %d agent(s) and took down %d "
+"link(s)"
+
+msgid "engine.share.remove_dry_run_note"
+msgstr "dry run: nothing was removed"
+
+msgid "engine.share.remove_exclusive"
+msgstr "--remove cannot be combined with --agent or --dir"
+
+msgid "engine.share.remove_kept_foreign"
+msgstr "kept: the destination does not mirror the managed copy"
+
+msgid "engine.share.remove_needs_skills"
+msgstr "--remove edits the agents of specific skills; pass --skill or --all"
+
+#, go-format
+msgid "engine.share.remove_plan"
+msgstr "Removing agents from %d skill declaration(s), %d link(s) to take do"
+"wn"
+
+#, go-format
+msgid "engine.share.removed"
+msgstr "removed %s"
 
 msgid "engine.share.select_skills"
 msgstr "Select the skills to share"
@@ -839,6 +891,9 @@ msgid "engine.sync.removed_mod_files_kept"
 msgstr "removed from the mod; files were kept—run skillmod prune to clean"
 " them"
 
+msgid "engine.sync.share_relink_failed"
+msgstr "recreating some share links failed; run sync again to retry"
+
 #, go-format
 msgid "engine.sync.synchronized_entries"
 msgstr "synchronized %d entries; verification passed"
@@ -890,6 +945,12 @@ msgstr "no record in SKILL.lock; run skillmod sync"
 
 msgid "engine.verify.removed_mod_run_skillmod"
 msgstr "removed from the mod; run skillmod prune to clean it"
+
+msgid "engine.verify.share_link_drifted"
+msgstr "share destination does not link to the managed copy"
+
+msgid "engine.verify.share_link_missing"
+msgstr "share destination is missing"
 
 msgid "engine.verify.skill_lock_found_advice"
 msgstr "SKILL.lock not found\nAdvice: run skillmod sync first to generate t"
@@ -1013,8 +1074,17 @@ msgstr "SKILL.lock entries %q and %q differ only in letter case and map to "
 "the same installation directory"
 
 #, go-format
+msgid "modfile.lock_duplicate_agent"
+msgstr "SKILL.lock declares skill %q with agent %q listed more than once"
+
+#, go-format
 msgid "modfile.lock_duplicate_skill"
 msgstr "SKILL.lock declares skill %q more than once"
+
+#, go-format
+msgid "modfile.lock_invalid_agent"
+msgstr "SKILL.lock declares skill %q with agent %q whose name is invalid: %"
+"w"
 
 #, go-format
 msgid "modfile.lock_invalid_commit"
@@ -1061,12 +1131,20 @@ msgid "modfile.mod_duplicate_skill"
 msgstr "SKILL.mod declares skill %q more than once"
 
 #, go-format
+msgid "modfile.mod_duplicate_skill_agent"
+msgstr "SKILL.mod declares skill %q with agent %q listed more than once"
+
+#, go-format
 msgid "modfile.mod_invalid_alias"
 msgstr "SKILL.mod declares skill %q with an invalid alias: %w"
 
 #, go-format
 msgid "modfile.mod_invalid_name"
 msgstr "SKILL.mod declares skill %q with an invalid name: %w"
+
+#, go-format
+msgid "modfile.mod_invalid_skill_agent"
+msgstr "SKILL.mod declares skill %q with agent %q whose name is invalid: %w"
 
 #, go-format
 msgid "modfile.mod_invalid_source"

@@ -43,11 +43,12 @@ type Mod struct {
 
 // ModSkill is one declaration in SKILL.mod.
 type ModSkill struct {
-	Name    string `toml:"name"`              // name field from SKILL.md frontmatter
-	Source  string `toml:"source,omitempty"`  // <repo>[//<subdir>]; omitted for local entries
-	Version string `toml:"version,omitempty"` // exact tag, 40-character SHA, or pseudo-version
-	Alias   string `toml:"alias,omitempty"`
-	Local   bool   `toml:"local,omitempty"`
+	Name    string   `toml:"name"`              // name field from SKILL.md frontmatter
+	Source  string   `toml:"source,omitempty"`  // <repo>[//<subdir>]; omitted for local entries
+	Version string   `toml:"version,omitempty"` // exact tag, 40-character SHA, or pseudo-version
+	Alias   string   `toml:"alias,omitempty"`
+	Local   bool     `toml:"local,omitempty"`
+	Agents  []string `toml:"agents,omitempty"` // registered agent names linked into; empty means "not shared"
 }
 
 // DirName returns the installation directory name: alias ?? name.
@@ -74,6 +75,11 @@ type LockSkill struct {
 	// Dir overrides Name as the installation directory when an alias is used.
 	// Canonical lock files omit it when the installation directory equals Name.
 	Dir string `toml:"dir,omitempty"`
+	// Agents remembers destinations created for this installation slot, even
+	// when their names or the entry itself were removed by hand from SKILL.mod.
+	// sync accumulates them for remove/prune to clean up; explicit unsharing
+	// drops only the destinations whose links it has taken down.
+	Agents []string `toml:"agents,omitempty"`
 }
 
 // InstallDir returns the installation directory represented by the lock entry.
@@ -120,7 +126,11 @@ func ParseLock(data []byte) (*Lock, error) {
 // alias, exact entry uniqueness, and fold-uniqueness of all installation
 // directory names (letter-case differences collapse to one directory on
 // Windows and macOS). Different sources may publish the same skill name when
-// aliases give them distinct installation directories.
+// aliases give them distinct installation directories. Each entry's agent list
+// is validated as portable names too, and must not repeat one agent in two
+// spellings: the engine resolves each name through its registry, so a list the
+// registry cannot answer would otherwise fail far from the manifest that wrote
+// it.
 func ValidateMod(m *Mod) error {
 	if m.SchemaVersion != SchemaVersion {
 		return fmt.Errorf(i18n.Text("modfile.mod_unsupported_schemaversion"), m.SchemaVersion, SchemaVersion)
@@ -147,6 +157,9 @@ func ValidateMod(m *Mod) error {
 				return fmt.Errorf(i18n.Text("modfile.mod_invalid_source"), sk.Name, err)
 			}
 		}
+		if err := validateSkillAgents(sk); err != nil {
+			return err
+		}
 		entryKey := sk.Name + "\x00" + sk.Source + "\x00" + sk.Alias
 		if seenEntry[entryKey] {
 			return fmt.Errorf(i18n.Text("modfile.mod_duplicate_skill"), sk.Name)
@@ -156,6 +169,45 @@ func ValidateMod(m *Mod) error {
 			return fmt.Errorf(i18n.Text("modfile.mod_case_conflict"), prev, sk.DirName())
 		}
 		seenDir[fsutil.FoldKey(sk.DirName())] = sk.DirName()
+	}
+	return nil
+}
+
+// validateSkillAgents checks one entry's agent list for portable names and
+// fold-uniqueness. An absent or empty list is valid: it is how a declaration
+// says the skill stays in the managed directory without being linked anywhere.
+// The mod file cannot know which names the agent registry defines — that is
+// the engine's answer — so it validates the shape and leaves the resolution to
+// the engine, which reports an unknown name with the supported ones.
+func validateSkillAgents(sk *ModSkill) error {
+	seen := make(map[string]bool, len(sk.Agents))
+	for _, target := range sk.Agents {
+		if err := fsutil.ValidName(target); err != nil {
+			return fmt.Errorf(i18n.Text("modfile.mod_invalid_skill_agent"), sk.Name, target, err)
+		}
+		fold := fsutil.FoldKey(target)
+		if seen[fold] {
+			return fmt.Errorf(i18n.Text("modfile.mod_duplicate_skill_agent"), sk.Name, target)
+		}
+		seen[fold] = true
+	}
+	return nil
+}
+
+// validateLockAgents applies the same shape rules to the agents a lock entry
+// records. The lock mirrors what the declaration asked for, so a name that
+// would be rejected in SKILL.mod must not slip through here either.
+func validateLockAgents(sk *LockSkill) error {
+	seen := make(map[string]bool, len(sk.Agents))
+	for _, target := range sk.Agents {
+		if err := fsutil.ValidName(target); err != nil {
+			return fmt.Errorf(i18n.Text("modfile.lock_invalid_agent"), sk.Name, target, err)
+		}
+		fold := fsutil.FoldKey(target)
+		if seen[fold] {
+			return fmt.Errorf(i18n.Text("modfile.lock_duplicate_agent"), sk.Name, target)
+		}
+		seen[fold] = true
 	}
 	return nil
 }
@@ -196,6 +248,9 @@ func ValidateLock(l *Lock) error {
 				return fmt.Errorf(i18n.Text("modfile.lock_invalid_commit"), sk.Name)
 			}
 		}
+		if err := validateLockAgents(sk); err != nil {
+			return err
+		}
 		entryKey := sk.Name + "\x00" + sk.Source + "\x00" + sk.Dir
 		if seenEntry[entryKey] {
 			return fmt.Errorf(i18n.Text("modfile.lock_duplicate_skill"), sk.Name)
@@ -225,16 +280,34 @@ func validateSource(source string) error {
 
 // normalizeMod records every remote declaration in its canonical manifest form.
 // A source that does not parse is left untouched so ValidateMod reports it.
+// Each entry's agent list is sorted so identical declarations serialize
+// identically. Sorting happens on a copy of the list: normalizeMod is called
+// on caller-owned manifests too, and a serializer must not reorder the value
+// it was handed.
 func normalizeMod(m *Mod) {
 	for i := range m.Skills {
 		if !m.Skills[i].Local {
 			m.Skills[i].Source = address.ManifestSource(m.Skills[i].Source)
 		}
+		m.Skills[i].Agents = sortedStrings(m.Skills[i].Agents)
 	}
 }
 
+// sortedStrings returns a sorted copy of values, or nil when there are none,
+// so an entry with no agents serializes without the field.
+func sortedStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	cp := make([]string, len(values))
+	copy(cp, values)
+	sort.Strings(cp)
+	return cp
+}
+
 // MarshalMod serializes SKILL.mod deterministically by sorting entries by (name, source, alias),
-// preserving struct field order, using \n line endings, and ending with exactly one newline.
+// sorting each entry's agent list, preserving struct field order, using \n line endings, and
+// ending with exactly one newline.
 func MarshalMod(m *Mod) ([]byte, error) {
 	cp := *m
 	cp.Skills = sortedModSkills(m.Skills)
@@ -250,7 +323,8 @@ func MarshalLock(l *Lock) ([]byte, error) {
 }
 
 // normalizeLock removes representationally redundant fields while preserving
-// the installation directory and source represented by every entry.
+// the installation directory, source, and recorded agents represented by every
+// entry.
 func normalizeLock(l *Lock) {
 	for i := range l.Skills {
 		if l.Skills[i].Source != "" {
@@ -259,6 +333,7 @@ func normalizeLock(l *Lock) {
 		if l.Skills[i].Dir == l.Skills[i].Name {
 			l.Skills[i].Dir = ""
 		}
+		l.Skills[i].Agents = sortedStrings(l.Skills[i].Agents)
 	}
 }
 

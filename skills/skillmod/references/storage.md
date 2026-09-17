@@ -67,10 +67,28 @@ directory, such as `.claude/skills/<skill>`, and points it at the managed
 `.agents/skills/<skill>`. The managed directory stays the one real copy:
 editing the managed skill is visible through every link at once, and there is
 nothing to synchronize. Links use the same `auto` fallback as installs, so a
-filesystem without symlink support receives a byte-preserving copy instead,
-and re-running `share` restores links that were replaced. Destinations are
-unmanaged: they appear in no manifest or lock file, and `verify` never reads
-them.
+filesystem without symlink support receives a byte-preserving copy instead.
+
+The registered agents a skill was linked to are recorded on that skill's
+entry in `SKILL.mod`, so `sync` recreates a link that was replaced, deleted,
+or drifted since the run. `verify` reports a missing or drifted link under an
+agent directory that exists on this one; an agent directory absent from the
+machine is skipped, because the declaration expresses team intent, not a
+machine requirement. Destinations given with `--dir` are one-offs and stay
+unrecorded, because an arbitrary path would not reproduce on another machine.
+
+`SKILL.lock` also remembers registered destinations that were created. Removing
+an agent name by hand removes the intent to share, but leaves the existing link
+for `remove` or `prune` to clean up later. `sync` retains that history when it
+records newly declared destinations; `share --remove` drops only the links and
+records for the agents it explicitly unshares.
+
+`share --remove` (`-r`) is the declaration's exit: it unlinks the named agents
+from the skills the command names and drops them from those entries' agent
+lists, leaving destinations that hold foreign content alone and saving the
+declaration only after the links are down. Removing a skill, or pruning it as
+stale, takes the links that mirror its managed copy down with it, and an entry
+left with no agents loses the field entirely.
 
 Symlinks inside skill contents remain unsupported.
 

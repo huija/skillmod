@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/huija/skillmod/internal/engine"
+	"github.com/huija/skillmod/internal/modfile"
 )
 
 // writeInstalledSkill places one skill directly into the managed directory;
@@ -161,5 +162,67 @@ func TestShareCommandSplitsCommaSeparatedSkillFlagsOnly(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), `"hello,world"`) {
 		t.Fatalf("positional comma error = %v, want the whole word reported as one selector", err)
+	}
+}
+
+// TestShareCommandRemoveNeedsASkillSelection pins the flag contract: --remove
+// edits the agents of named entries, so it must be told which ones.
+func TestShareCommandRemoveNeedsASkillSelection(t *testing.T) {
+	project, _ := isolateCLI(t)
+	writeInstalledSkill(t, project, "hello")
+
+	// The agents list lives on a manifest entry, so hello must be declared
+	// before a share can record claude on it: an undeclared directory links
+	// without becoming declarable. init is the declaration's front door.
+	cmd := NewRootCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"init", "--yes"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	cmd = NewRootCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"share", "--all", "--agent", "claude"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("share: %v", err)
+	}
+
+	cmd = NewRootCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"share", "--remove", "claude"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("share --remove without --skill or --all = nil, want a diagnostic")
+	}
+	if _, statErr := os.Lstat(filepath.Join(project, ".claude", "skills", "hello")); statErr != nil {
+		t.Errorf("the rejected run took down a link: %v", statErr)
+	}
+
+	// Naming the skill lets the same invocation through.
+	cmd = NewRootCmd()
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	cmd.SetArgs([]string{"share", "hello", "--remove", "claude"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("share hello --remove claude: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(project, ".claude", "skills", "hello")); !os.IsNotExist(err) {
+		t.Errorf("--remove kept the link: %v", err)
+	}
+
+	// The same run also drops the agents field from hello's entry: the
+	// manifest says "not shared" by omitting the field, not by an empty list.
+	m, err := modfile.LoadMod(project)
+	if err != nil {
+		t.Fatalf("LoadMod: %v", err)
+	}
+	for _, entry := range m.Skills {
+		if entry.DirName() == "hello" && len(entry.Agents) != 0 {
+			t.Errorf("agents on hello after --remove = %v, want the field gone", entry.Agents)
+		}
 	}
 }

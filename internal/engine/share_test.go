@@ -2,8 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 
-// Share tests run against plain installed directories: sharing never touches
-// Git, the manifest, or the store, so no repository fixture is needed.
+// Share tests exercise installed directories and destination conflicts without
+// needing a repository fixture.
 package engine_test
 
 import (

@@ -184,7 +184,7 @@ remotes additionally require `ssh` on `PATH`.
 | `verify` | Check installed content against the lock; the CI gate |
 | `remove <selector>` | Delete a declaration and its clean managed installations |
 | `prune` | Drop stale installations and lock records left behind by hand edits |
-| `share` | Link installed skills into other agent directories such as `.claude` or `.codex` |
+| `share` | Link installed skills into agent directories such as `.claude` or `.codex`; each skill records the agents it is linked to on its own entry for `sync` to recreate. `share --remove` unlinks agents from the named skills and drops them from their entries |
 | `upgrade` | Replace the running executable with a published release, verified against its checksums |
 
 A machine is adopted before a project, in that order: `skillmod --global init`
@@ -198,8 +198,9 @@ Every command accepts `--json` (`-j`) for machine-readable output and `--global`
 (`-g`) to operate on user-wide skills instead of the current project; mutations
 accept `--dry-run` (`-n`) and `--yes` (`-y`). `get` also accepts `--alias`
 (`-a`), `init` accepts `--force` (`-f`), `sync` accepts `--check` (`-c`) and
-`--relink` (`-r`), `share` accepts `--skill` (`-s`), `--agent` (`-a`), and
-`--dir` (`-d`), and `upgrade` accepts `--check` (`-c`) and `--tag` (`-t`).
+`--relink` (`-r`), `share` accepts `--skill` (`-s`), `--agent` (`-a`),
+`--dir` (`-d`), and `--remove` (`-r`), and `upgrade` accepts `--check` (`-c`)
+and `--tag` (`-t`).
 `--install-mode` and `--allow-downgrade` deliberately have no shorthand: the
 obvious letters are ambiguous, and both are typed rarely. Command help,
 summaries, prompts, and errors follow `SKILLMOD_LANG` when it is set and the

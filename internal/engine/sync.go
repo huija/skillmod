@@ -48,7 +48,6 @@ func (e *Engine) Sync(ctx context.Context, options SyncOptions, io IO) (*Report,
 	rep := &Report{Action: CommandSync}
 	var plans []plannedInstall
 	var conflicts []conflict
-	plannedTargets := make([]int, len(entries))
 	// Entry conflicts are remembered so resolveConflicts' overwrite selections
 	// can extend the plan without reclassifying and rehashing every target.
 	conflictsByEntry := make([][]string, len(entries))
@@ -82,9 +81,8 @@ func (e *Engine) Sync(ctx context.Context, options SyncOptions, io IO) (*Report,
 		}
 		rep.Entries = append(rep.Entries, EntryReport{
 			Name: en.skill.Name, Source: en.skill.Source, Version: en.version,
-			Action: action, Note: en.note, TargetResults: targetResults,
+			Directory: en.skill.DirName(), Action: action, Note: en.note, TargetResults: targetResults,
 		})
-		plannedTargets[i] = len(targets)
 		if len(targets) > 0 {
 			plans = append(plans, plannedInstall{name: en.skill.DirName(), contentDir: en.contentDir, targets: targets})
 		}
@@ -106,18 +104,18 @@ func (e *Engine) Sync(ctx context.Context, options SyncOptions, io IO) (*Report,
 				continue
 			}
 			rep.Entries = append(rep.Entries, EntryReport{
-				Name: sk.Name, Action: ActionLocal, Note: i18n.Text("engine.sync.no_baseline")})
+				Name: sk.Name, Directory: sk.DirName(), Action: ActionLocal, Note: i18n.Text("engine.sync.no_baseline")})
 			continue
 		}
 		dst := e.skillDir(sk.DirName())
 		h, err := dirhash.HashDir(dst)
 		switch {
 		case err != nil:
-			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: ActionLocal, Note: i18n.Text("engine.sync.missing") + dst})
+			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Directory: sk.DirName(), Action: ActionLocal, Note: i18n.Text("engine.sync.missing") + dst})
 		case h != lk.Dirhash:
-			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: ActionLocalDrift, Note: i18n.Text("engine.sync.contents_match_baseline_local"), TargetResults: []TargetReport{{Path: dst, Action: ActionDrift}}})
+			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Directory: sk.DirName(), Action: ActionLocalDrift, Note: i18n.Text("engine.sync.contents_match_baseline_local"), TargetResults: []TargetReport{{Path: dst, Action: ActionDrift}}})
 		default:
-			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: ActionLocal, Note: i18n.Text("engine.sync.consistent")})
+			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Directory: sk.DirName(), Action: ActionLocal, Note: i18n.Text("engine.sync.consistent")})
 		}
 	}
 
@@ -129,7 +127,15 @@ func (e *Engine) Sync(ctx context.Context, options SyncOptions, io IO) (*Report,
 		})
 	}
 
-	// Add conflict targets selected for overwrite to the plan.
+	// Add conflict targets selected for overwrite to the plan, and classify
+	// the declared share destinations so their conflicts settle together.
+	sharePlans, shareConflicts, err := e.classifyShareLinks(m, rep, entries)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range shareConflicts {
+		conflicts = append(conflicts, c.asConflict())
+	}
 	skip, err := resolveConflicts(io, conflicts, ConflictAsk)
 	if err != nil {
 		return nil, err
@@ -148,20 +154,51 @@ func (e *Engine) Sync(ctx context.Context, options SyncOptions, io IO) (*Report,
 		}
 		if len(overwrite) > 0 {
 			plans = append(plans, plannedInstall{name: entries[i].skill.DirName(), contentDir: entries[i].contentDir, targets: overwrite})
-			plannedTargets[i] += len(overwrite)
-		}
-		switch {
-		case plannedTargets[i] > 0:
-			rep.Entries[i].Action = ActionInstall
-		case skipped > 0:
-			rep.Entries[i].Action = ActionConflict
-		default:
-			rep.Entries[i].Action = ActionKeep
 		}
 		if skipped > 0 {
 			note := i18n.Format("engine.sync.conflicting_targets_kept", skipped)
 			rep.Entries[i].Note = appendNote(rep.Entries[i].Note, note)
 		}
+	}
+	for _, c := range shareConflicts {
+		entry := findEntryByDirectory(rep, c.dirName)
+		if skip[c.dir] {
+			setShareTargetResult(entry, c.dir, ActionSkip, "")
+			continue
+		}
+		setShareTargetResult(entry, c.dir, ActionInstall, "")
+		sharePlans = append(sharePlans, plannedShareLink{skill: shareSkill{name: c.name, dirName: c.dirName}, dst: c.dir})
+	}
+	// The aggregate includes both managed installations and shared links. In
+	// particular, restoring only a missing share link is still an installation.
+	for i := range rep.Entries {
+		entry := &rep.Entries[i]
+		changed, skipped := false, false
+		for _, target := range entry.TargetResults {
+			changed = changed || target.Action == ActionInstall
+			skipped = skipped || target.Action == ActionSkip
+		}
+		switch {
+		case changed && (skipped || entry.Action == ActionLocalDrift):
+			entry.Action = ActionPartial
+		case changed:
+			entry.Action = ActionInstall
+		case skipped:
+			entry.Action = ActionConflict
+		}
+	}
+	// Keep past destinations for cleanup, and record all currently declared
+	// ones even when this machine did not have an installed copy before sync.
+	for _, skill := range m.Skills {
+		targets, err := e.shareTargetsFor(m, skill.DirName())
+		if err != nil {
+			return nil, err
+		}
+		names := make([]string, 0, len(targets))
+		for _, target := range targets {
+			names = append(names, target.label)
+		}
+		recordLockAgents(newLock, skill.DirName(), names)
 	}
 
 	if options.DryRun {
@@ -196,6 +233,14 @@ func (e *Engine) Sync(ctx context.Context, options SyncOptions, io IO) (*Report,
 	if err := finalize(true); err != nil {
 		return nil, err
 	}
+	if err := e.applyShareLinks(sharePlans, rep); err != nil {
+		// The managed installs and the manifest state are final; a share link
+		// is a convenience sync recreates, so the failure is reported the same
+		// way remove and prune report theirs — with the report intact rather
+		// than discarded, and a rerun picks the missing links up.
+		writeErr := io.printf(i18n.Text("engine.sync.share_relink_failed"))
+		return rep, errors.Join(writeErr, err)
+	}
 
 	changed := 0
 	for _, en := range rep.Entries {
@@ -224,9 +269,9 @@ func (e *Engine) reestablishLocalBaseline(newLock *modfile.Lock, sk modfile.ModS
 	dst := e.skillDir(sk.DirName())
 	h, err := dirhash.HashDir(dst)
 	if err != nil {
-		rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: ActionLocal, Note: i18n.Text("engine.sync.missing") + dst})
+		rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Directory: sk.DirName(), Action: ActionLocal, Note: i18n.Text("engine.sync.missing") + dst})
 		return
 	}
 	upsertLock(newLock, modfile.LockSkill{Name: sk.Name, Dir: sk.Alias, Dirhash: h})
-	rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: ActionLocal, Note: i18n.Text("engine.sync.baseline_re_established")})
+	rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Directory: sk.DirName(), Action: ActionLocal, Note: i18n.Text("engine.sync.baseline_re_established")})
 }

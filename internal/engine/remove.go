@@ -57,6 +57,8 @@ func (e *Engine) Remove(_ context.Context, names []string, io IO, options ...Mut
 		}
 	}
 
+	// Every remaining entry keeps its own agents list; a removed skill's list
+	// goes with the entry, and its links are taken down below.
 	newMod := &modfile.Mod{SchemaVersion: m.SchemaVersion}
 	for _, skill := range m.Skills {
 		if !selected[fsutil.FoldKey(skill.DirName())] {
@@ -72,6 +74,7 @@ func (e *Engine) Remove(_ context.Context, names []string, io IO, options ...Mut
 
 	rep := &Report{Action: CommandRemove}
 	var deletable []string
+	var shareDeletable []string
 	partial := false
 	for _, skill := range m.Skills {
 		if !selected[fsutil.FoldKey(skill.DirName())] {
@@ -85,6 +88,13 @@ func (e *Engine) Remove(_ context.Context, names []string, io IO, options ...Mut
 			target := inspectTarget(dst, locked)
 			switch target.Action {
 			case ActionMissing:
+				// The managed copy is gone already, but its declared share
+				// links may dangle on; they go with the declaration.
+				links, linkErr := e.shareLinksToClean(lock, skill.DirName(), skill.Name)
+				if linkErr != nil {
+					return nil, linkErr
+				}
+				shareDeletable = append(shareDeletable, links...)
 			case ActionUnverifiable:
 				partial = true
 				entryPartial = true
@@ -98,6 +108,11 @@ func (e *Engine) Remove(_ context.Context, names []string, io IO, options ...Mut
 			case ActionInstalled:
 				deletable = append(deletable, dst)
 				target.Action = ActionRemove
+				links, linkErr := e.shareLinksToClean(lock, skill.DirName(), skill.Name)
+				if linkErr != nil {
+					return nil, linkErr
+				}
+				shareDeletable = append(shareDeletable, links...)
 			}
 			entry.TargetResults = append(entry.TargetResults, target)
 		}
@@ -116,6 +131,11 @@ func (e *Engine) Remove(_ context.Context, names []string, io IO, options ...Mut
 				return rep, err
 			}
 		}
+	}
+	// The share links leave with the managed copies, so the confirmation (and
+	// the dry-run listing, which returns below) must say so before it happens.
+	if err := reportShareRemovals(io, shareDeletable, i18n.Text("engine.remove.following_share_links_deleted")); err != nil {
+		return rep, err
 	}
 	if run.DryRun {
 		rep.Notes = append(rep.Notes, i18n.Text("engine.prune.dry_run_files_deleted"))
@@ -136,6 +156,14 @@ func (e *Engine) Remove(_ context.Context, names []string, io IO, options ...Mut
 	}
 	if err := finalize(true); err != nil {
 		return nil, err
+	}
+	// Share links into agent directories point at the managed copies that were
+	// just removed; take the links down with them. Foreign content is already
+	// filtered out, and a failure here leaves only a broken link that prune can
+	// still find, so it is reported rather than aborting the whole removal.
+	if err := e.applyShareRemovals(shareDeletable); err != nil {
+		writeErr := io.printf(i18n.Text("engine.remove.share_cleanup_failed"))
+		return rep, errors.Join(writeErr, err)
 	}
 	writeErr := io.printf(i18n.Format("engine.remove.removed_declarations_clean", len(rep.Entries), len(deletable)))
 	if partial {

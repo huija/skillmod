@@ -20,6 +20,7 @@ func newShareCmd(options *rootOptions) *cobra.Command {
 	var skills []string
 	var all bool
 	var onConflict string
+	var remove []string
 	cmd := &cobra.Command{
 		Use:   i18n.Text("cli.share.use"),
 		Short: i18n.Text("cli.share.short"),
@@ -34,13 +35,16 @@ func newShareCmd(options *rootOptions) *cobra.Command {
 			// reads like `skillmod get ...` before it. Repeated --skill flags
 			// and comma-separated values mean the same thing, matching --agent
 			// and --dir; positional arguments are shell words and are never
-			// split on a comma.
+			// split on a comma. --remove edits the agent lists of specific
+			// entries, so it takes the same skill selection; the engine
+			// rejects mixing it with the options that link things back in.
 			skills = append(splitList(skills), args...)
 			rep, err := eng.Share(cmd.Context(), engine.ShareOptions{
 				Skills:     skills,
 				All:        all,
 				Agents:     splitList(agents),
 				Dirs:       splitList(dirs),
+				Remove:     splitList(remove),
 				OnConflict: onConflict,
 			}, options.newIO(cmd), options.mutationOptions())
 			return errors.Join(err, options.output(cmd, rep))
@@ -51,6 +55,7 @@ func newShareCmd(options *rootOptions) *cobra.Command {
 	cmd.Flags().StringArrayVarP(&dirs, "dir", "d", nil, i18n.Text("cli.share.flag_dir"))
 	cmd.Flags().BoolVar(&all, "all", false, i18n.Text("cli.share.flag_all"))
 	cmd.Flags().StringVar(&onConflict, "on-conflict", "", i18n.Text("cli.share.flag_on_conflict"))
+	cmd.Flags().StringArrayVarP(&remove, "remove", "r", nil, i18n.Text("cli.share.flag_remove"))
 	return cmd
 }
 

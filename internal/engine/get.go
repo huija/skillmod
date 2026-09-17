@@ -589,6 +589,7 @@ func upsertMod(m *modfile.Mod, e modfile.ModSkill) {
 	for i := range m.Skills {
 		existing := &m.Skills[i]
 		if sameModEntry(*existing, e) {
+			e.Agents = existing.Agents
 			*existing = e
 			return
 		}

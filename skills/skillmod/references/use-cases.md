@@ -268,6 +268,49 @@ Do not replace either command with manual cache deletion. `prune` never deletes
 link targets or shared snapshots, and there is no automatic cache eviction; see
 [storage.md](storage.md) before deleting a snapshot by hand.
 
+## Share installed skills with other agents
+
+skillmod manages one directory, `.agents/skills/`, so an agent that reads
+another convention needs a link there. `share` creates those links and records
+the agents it linked each skill to on that skill's entry in `SKILL.mod`, which
+is what makes the setup reproducible on another machine — and lets one skill go
+to claude while another goes to codex:
+
+```sh
+skillmod share --dry-run
+skillmod share --skill review --agent claude --agent codex
+```
+
+Omitting `--skill` and `--agent` lists the installed skills and the registered
+agents for interactive selection. `--dir` takes any path but stays a one-off:
+an arbitrary destination is not recorded, because it would not reproduce
+elsewhere. Registered agents are discovered with `skillmod share --help`, which
+names the directory each one reads.
+
+A destination that already holds identical content or a link to the managed copy
+is kept; one that holds different content is a conflict, settled with the same
+per-conflict policy `get`, `sync`, and `update` use (`--on-conflict=overwrite`
+or `=skip`). `.agents/skills/` is refused as a destination, because linking
+there would shadow the directory `verify` reads.
+
+After a declaration exists, the links maintain themselves: `sync` recreates a
+link that was replaced or drifted, `verify` reports a missing one under an agent
+directory that exists on this machine, and removing a skill takes its mirror
+links down with it.
+
+To stop sharing one skill with an agent, use `share --remove`, which unlinks
+the agents it names from the skills it is given and drops them from those
+skills' agent lists — the list belongs to an entry, so the skills must be
+named:
+
+```sh
+skillmod share --skill review --remove codex --dry-run
+skillmod share --skill review --remove codex
+```
+
+Destinations holding foreign content are left alone, and an entry left with no
+agents loses the field entirely.
+
 ## Installation modes
 
 `auto` prefers links to immutable shared snapshots and falls back to copies when

@@ -40,6 +40,7 @@ func (e *Engine) Prune(ctx context.Context, io IO, options ...MutationOptions) (
 	}
 
 	var deletable []string
+	var shareDeletable []string
 	newLock := &modfile.Lock{SchemaVersion: modfile.SchemaVersion}
 	staleDirs := map[string]bool{}
 	for _, lk := range stale {
@@ -82,6 +83,16 @@ func (e *Engine) Prune(ctx context.Context, io IO, options ...MutationOptions) (
 				target.Action = ActionKeep
 				entry.Note = appendNote(entry.Note, i18n.Format("engine.remove.could_verify_kept_installed", dst, target.Note))
 			}
+			if target.Action == ActionRemove || target.Action == ActionMissing {
+				// A managed copy that is gone — a dangling installation link
+				// about to be removed, or a vanished directory — leaves its
+				// share links dangling too, so they go with it.
+				links, linkErr := e.shareLinksToClean(lock, dirName, lk.Name)
+				if linkErr != nil {
+					return nil, linkErr
+				}
+				shareDeletable = append(shareDeletable, links...)
+			}
 			entry.TargetResults = append(entry.TargetResults, target)
 		}
 		entry.Action = ActionPrune
@@ -100,6 +111,11 @@ func (e *Engine) Prune(ctx context.Context, io IO, options ...MutationOptions) (
 				return rep, err
 			}
 		}
+	}
+	// The share links leave with the managed copies, so the confirmation (and
+	// the dry-run listing, which returns below) must say so before it happens.
+	if err := reportShareRemovals(io, shareDeletable, i18n.Text("engine.prune.following_share_links_deleted")); err != nil {
+		return rep, err
 	}
 	if run.DryRun {
 		// dry-run must never require confirmation: the flag promises to list
@@ -120,6 +136,13 @@ func (e *Engine) Prune(ctx context.Context, io IO, options ...MutationOptions) (
 	}
 	if err := finalize(true); err != nil {
 		return nil, err
+	}
+	// Share links into agent directories pointed at the pruned managed copies;
+	// take the links down with them. Foreign content is filtered out upstream,
+	// and a failure here leaves only a broken link that prune can still find.
+	if err := e.applyShareRemovals(shareDeletable); err != nil {
+		writeErr := io.printf(i18n.Text("engine.prune.share_cleanup_failed"))
+		return rep, errors.Join(writeErr, err)
 	}
 	return rep, io.printf(i18n.Text("engine.prune.pruned_stale_entries"), len(stale))
 }

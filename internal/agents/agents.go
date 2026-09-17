@@ -3,11 +3,13 @@
 // SPDX-License-Identifier: MIT
 
 // Package agents names the AI-agent directories skillmod can link installed
-// skills into. A share destination is an unmanaged convenience link to the
-// managed copy: skillmod records it nowhere, verify never looks at it, and
-// sync never repairs it. The registry only maps an agent name to the skills
-// directory that agent reads, so adding an agent is one entry here and
-// nothing else changes.
+// skills into. Each [[skill]] entry in SKILL.mod records the registered agents
+// that one skill is shared to in its agents list, sync recreates those links
+// on a new machine, verify reports a missing or drifted link under an agent
+// directory that exists here, and remove and prune take the links down with
+// the managed copies they point at. The registry only maps an agent name to
+// the skills directory that agent reads, so adding an agent is one entry here
+// and nothing else changes.
 package agents
 
 import (

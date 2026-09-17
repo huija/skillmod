@@ -228,6 +228,65 @@ func TestMarshalMod_DeterministicWithDuplicateNames(t *testing.T) {
 	}
 }
 
+func TestMod_SkillAgentsRoundTripAndValidation(t *testing.T) {
+	// Round-trip: parse → marshal → parse yields the same sorted agents.
+	const withAgents = "schemaversion = 1\n\n[[skill]]\nname = 'gh-fix-ci'\nlocal = true\nagents = ['codex', 'claude']\n"
+	m, err := ParseMod([]byte(withAgents))
+	if err != nil {
+		t.Fatalf("ParseMod(with agents): %v", err)
+	}
+	if len(m.Skills) != 1 || len(m.Skills[0].Agents) != 2 {
+		t.Fatalf("Skills = %+v, want one entry with two agents", m.Skills)
+	}
+	data, err := MarshalMod(m)
+	if err != nil {
+		t.Fatalf("MarshalMod(with agents): %v", err)
+	}
+	again, err := ParseMod(data)
+	if err != nil {
+		t.Fatalf("ParseMod(round-trip): %v\n%s", err, data)
+	}
+	if len(again.Skills) != 1 || len(again.Skills[0].Agents) != 2 {
+		t.Fatalf("round-trip Skills = %+v, want one entry with two agents", again.Skills)
+	}
+	// Agents are sorted, so the serialized declaration does not depend on the
+	// order they were recorded in.
+	if got := again.Skills[0].Agents; got[0] != "claude" || got[1] != "codex" {
+		t.Errorf("agents = %v, want sorted [claude codex]", got)
+	}
+	// MarshalMod must not mutate the caller's agent order.
+	unsorted := &Mod{SchemaVersion: SchemaVersion, Skills: []ModSkill{
+		{Name: "gh-fix-ci", Local: true, Agents: []string{"codex", "claude"}},
+	}}
+	if _, err := MarshalMod(unsorted); err != nil {
+		t.Fatal(err)
+	}
+	if unsorted.Skills[0].Agents[0] != "codex" {
+		t.Errorf("MarshalMod mutated the caller's agent order: %v", unsorted.Skills[0].Agents)
+	}
+
+	// Validation rejects a non-portable agent name and a repeated one in two
+	// spellings; an entry with no agents stays valid, because declaring none
+	// is how a skill says it is not shared.
+	invalid := map[string]*Mod{
+		"invalid agent name":  {SchemaVersion: SchemaVersion, Skills: []ModSkill{{Name: "gh-fix-ci", Local: true, Agents: []string{"a:b"}}}},
+		"duplicate agents":    {SchemaVersion: SchemaVersion, Skills: []ModSkill{{Name: "gh-fix-ci", Local: true, Agents: []string{"claude", "claude"}}}},
+		"case-only duplicate": {SchemaVersion: SchemaVersion, Skills: []ModSkill{{Name: "gh-fix-ci", Local: true, Agents: []string{"Claude", "claude"}}}},
+	}
+	for label, mod := range invalid {
+		if err := ValidateMod(mod); err == nil {
+			t.Errorf("ValidateMod(%s) = nil, want error", label)
+		}
+	}
+	if err := ValidateMod(&Mod{SchemaVersion: SchemaVersion}); err != nil {
+		t.Errorf("ValidateMod(no skills) = %v, want nil", err)
+	}
+	empty := &Mod{SchemaVersion: SchemaVersion, Skills: []ModSkill{{Name: "gh-fix-ci", Local: true}}}
+	if err := ValidateMod(empty); err != nil {
+		t.Errorf("ValidateMod(no agents on an entry) = %v, want nil", err)
+	}
+}
+
 func TestMod_RoundTrip(t *testing.T) {
 	m := &Mod{SchemaVersion: 1, Skills: []ModSkill{
 		{Name: "code-review", Source: "github.com/acme/agent-skills//code-review", Version: "code-review/v1.2.0"},

@@ -147,32 +147,33 @@ msgid "cli.share.flag_on_conflict"
 msgstr "目标位置已存在时的处理策略：ask（默认）、overwri"
 "te 或 skip"
 
+msgid "cli.share.flag_remove"
+msgstr "要解除链接并从所选技能中移除的已注册 agent（可"
+"重复或逗号分隔）"
+
 msgid "cli.share.flag_skill"
 msgstr "要分享的技能（可重复或逗号分隔）；省略时交互"
 "选择"
 
 msgid "cli.share.long"
 msgstr "把受管技能目录中已安装的技能链接到其他 AI agent "
-"的目录（如 .claude、.codex）。每个目标条目是指向受管副"
+"的目录（如 .claude、.codex），并把 agent 记到 SKILL.mod 中该"
+"技能对应的 [[skill]] 条目上。每个目标条目是指向受管副"
 "本的软链接——与 get 在 auto 安装模式下使用的形态一致"
 "——对受管技能的修改会同时透过所有链接生效，不支"
-"持软链接的文件系统会退回字节保真复制。目标位置是"
-"非受管的：skillmod 不记录它们，verify 也不检查它们，重"
-"新运行 share 即可恢复被替换或退化为副本的链接。不传 "
+"持软链接的文件系统会退回字节保真复制。声明是 sync "
+"在新机器上重建、verify 在本机校验的依据；条目未列出"
+"任何 agent 的技能只留在受管目录中。--agent 与 --dir 都是"
+"在已记录的 agent 之上追加：要摘掉某个用 --remove。不传 "
 "--skill 或位置参数技能名时，命令会列出已安装技能供交"
 "互勾选；不传 --agent 或 --dir 时会列出已注册的 agent 目录"
 "。目标位置已有不同内容时，share 会逐个冲突询问；--on-"
 "conflict=overwrite 或 =skip 可统一处理，--yes 会安全地跳过冲"
-"突。的目录（如 .claude、.codex）。目标位置是非受管的副"
-"本：skillmod 不记录它们，verify 也不检查它们，重新运行 "
-"share 即可刷新副本。不传 --skill 或位置参数技能名时，"
-"命令会列出已安装技能供交互勾选；不传 --agent 或 --dir "
-"时会列出已注册的 agent 目录。目标位置已有不同内容时"
-"，share 会逐个冲突询问；--on-conflict=overwrite 或 =skip 可统"
-"一处理，--yes 会安全地跳过冲突。"
+"突。--dir 目标是一次性的：提交到清单里的绝对路径无"
+"法在别的机器上复现，因此永不记录。"
 
 msgid "cli.share.short"
-msgstr "把已安装技能复制到其他 agent 目录"
+msgstr "把已安装技能记录为链接到其他 agent 目录"
 
 msgid "cli.share.use"
 msgstr "share [技能名...]"
@@ -605,12 +606,18 @@ msgstr "dry-run：未删除任何文件"
 msgid "engine.prune.following_directories_deleted"
 msgstr "将删除以下目录："
 
+msgid "engine.prune.following_share_links_deleted"
+msgstr "以下分享链接也将被删除："
+
 msgid "engine.prune.locally_modified_kept_files"
 msgstr "本地被修改过，保留文件、仅清 lock 记录: "
 
 #, go-format
 msgid "engine.prune.pruned_stale_entries"
 msgstr "已清理 %d 个过期条目"
+
+msgid "engine.prune.share_cleanup_failed"
+msgstr "清理部分分享链接失败"
 
 msgid "engine.prune.stale_entries"
 msgstr "无过期条目"
@@ -640,12 +647,18 @@ msgstr "无法验证 %s，已保留安装文件：%v"
 msgid "engine.remove.entry_skill_mod"
 msgstr "条目 %q 不在 SKILL.mod 中"
 
+msgid "engine.remove.following_share_links_deleted"
+msgstr "以下分享链接也将被删除："
+
 msgid "engine.remove.locally_modified_kept"
 msgstr "存在本地修改，已保留安装文件："
 
 #, go-format
 msgid "engine.remove.removed_declarations_clean"
 msgstr "已删除 %d 个声明和 %d 个内容未改动的安装目录"
+
+msgid "engine.remove.share_cleanup_failed"
+msgstr "清理部分分享链接失败"
 
 msgid "engine.report.completed_partially"
 msgstr "已部分完成；一个或多个目标被安全保留"
@@ -698,6 +711,16 @@ msgstr "未指定技能或目标；请传 --skill 或 --all 以及 --agent "
 "或 --dir，或在终端中运行 share"
 
 #, go-format
+msgid "engine.share.not_declared"
+msgstr "skill %q 未声明 agent %q；已声明：%s"
+
+msgid "engine.share.not_declared_none"
+msgstr "无"
+
+msgid "engine.share.not_declared_unknown"
+msgstr "该 skill 在 SKILL.mod 中没有条目"
+
+#, go-format
 msgid "engine.share.overlap_managed"
 msgstr "分享目标 %s 与受管技能目录 %s 重叠"
 
@@ -707,6 +730,36 @@ msgstr "准备分享 %d 个技能到 %d 个目标目录"
 
 msgid "engine.share.planned_note"
 msgstr "计划复制"
+
+msgid "engine.share.remove_absent_agent"
+msgstr "本机不存在该 agent 目录；仅移除声明"
+
+#, go-format
+msgid "engine.share.remove_done"
+msgstr "已从 %d 个 skill 的声明中移除 %d 个 agent，并删除 %d "
+"个链接"
+
+msgid "engine.share.remove_dry_run_note"
+msgstr "试运行：未删除任何内容"
+
+msgid "engine.share.remove_exclusive"
+msgstr "--remove 不能与 --agent 或 --dir 同时使用"
+
+msgid "engine.share.remove_kept_foreign"
+msgstr "已保留：该目标不是指向受管副本的链接"
+
+msgid "engine.share.remove_needs_skills"
+msgstr "--remove 修改的是具体 skill 的 agents；请指定 --skill "
+"或 --all"
+
+#, go-format
+msgid "engine.share.remove_plan"
+msgstr "准备从 %d 个 skill 的声明中移除 agent，需删除 %d 个"
+"链接"
+
+#, go-format
+msgid "engine.share.removed"
+msgstr "已删除 %s"
 
 msgid "engine.share.select_skills"
 msgstr "选择要分享的技能"
@@ -821,6 +874,9 @@ msgstr "lock 中无基线记录，跳过校验（重新 init 可建立基"
 msgid "engine.sync.removed_mod_files_kept"
 msgstr "已从 mod 移除，文件保留；运行 skillmod prune 清理"
 
+msgid "engine.sync.share_relink_failed"
+msgstr "重建部分分享链接失败；再次运行 sync 可重试"
+
 #, go-format
 msgid "engine.sync.synchronized_entries"
 msgstr "已同步 %d 项，校验通过"
@@ -872,6 +928,12 @@ msgstr "SKILL.lock 中无记录，建议执行 skillmod sync"
 
 msgid "engine.verify.removed_mod_run_skillmod"
 msgstr "已从 mod 移除，建议 skillmod prune 清理"
+
+msgid "engine.verify.share_link_drifted"
+msgstr "分享目标未指向受管副本"
+
+msgid "engine.verify.share_link_missing"
+msgstr "分享目标缺失"
 
 msgid "engine.verify.skill_lock_found_advice"
 msgstr "未找到 SKILL.lock\n建议先执行 skillmod sync 生成锁定文"
@@ -994,8 +1056,16 @@ msgstr "SKILL.lock 中 %q 与 %q 仅大小写不同，会映射到同一个"
 "安装目录"
 
 #, go-format
+msgid "modfile.lock_duplicate_agent"
+msgstr "SKILL.lock 中 skill %q 重复列出了 agent %q"
+
+#, go-format
 msgid "modfile.lock_duplicate_skill"
 msgstr "SKILL.lock 中重复声明了 skill %q"
+
+#, go-format
+msgid "modfile.lock_invalid_agent"
+msgstr "SKILL.lock 中 skill %q 的 agent %q 名称不合法: %w"
 
 #, go-format
 msgid "modfile.lock_invalid_commit"
@@ -1040,12 +1110,20 @@ msgid "modfile.mod_duplicate_skill"
 msgstr "SKILL.mod 中重复声明了 skill %q"
 
 #, go-format
+msgid "modfile.mod_duplicate_skill_agent"
+msgstr "SKILL.mod 中 skill %q 重复列出了 agent %q"
+
+#, go-format
 msgid "modfile.mod_invalid_alias"
 msgstr "SKILL.mod 中 skill %q 的别名不合法: %w"
 
 #, go-format
 msgid "modfile.mod_invalid_name"
 msgstr "SKILL.mod 中 skill %q 的名称不合法: %w"
+
+#, go-format
+msgid "modfile.mod_invalid_skill_agent"
+msgstr "SKILL.mod 中 skill %q 的 agent %q 名称不合法: %w"
 
 #, go-format
 msgid "modfile.mod_invalid_source"
