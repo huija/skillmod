@@ -48,32 +48,45 @@ func TestShareTracksManagedLinkReplacement(t *testing.T) {
 	assertManagedLink(t, managed, shared)
 }
 
-func TestShareRejectsSymlinkedDestinations(t *testing.T) {
+// TestShareRejectsAgentDirectoriesThatResolveIntoTheManagedTree covers the
+// one way an agent directory can hide an overlap: a symlink standing in for
+// the agent root. A name resolves to ".<name>/skills", so the check has to
+// look through the existing ancestors rather than compare the spelling.
+func TestShareRejectsAgentDirectoriesThatResolveIntoTheManagedTree(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		target string
-		suffix string
+		name    string
+		target  string
+		wantErr bool
 	}{
-		{name: "managed directory", target: ".agents/skills"},
-		{name: "managed ancestor", target: ".agents"},
-		{name: "missing descendant", target: ".agents/skills", suffix: "missing"},
+		{name: "agent directory resolves to the managed ancestor", target: ".agents", wantErr: true},
+		{name: "agent directory resolves to the managed directory", target: ".agents/skills", wantErr: true},
+		{name: "agent directory resolves inside a managed skill", target: ".agents/skills/hello", wantErr: true},
+		{name: "agent directory elsewhere is allowed", target: "", wantErr: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
 			writeLocalSkill(t, root, "hello", "keep\n")
-			alias := filepath.Join(root, "alias")
-			if err := os.Symlink(filepath.Join(root, filepath.FromSlash(tc.target)), alias); err != nil {
+			target := filepath.Join(root, "elsewhere")
+			if tc.target != "" {
+				target = filepath.Join(root, filepath.FromSlash(tc.target))
+			}
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(target, filepath.Join(root, ".claude")); err != nil {
 				t.Skipf("native directory symlinks unavailable: %v", err)
 			}
-			destination := filepath.Join(alias, tc.suffix)
 			_, err := newEngine(t, root, t.TempDir()).Share(ctx, engine.ShareOptions{
-				All: true, Dirs: []string{destination},
+				All: true, Agents: []string{"claude"},
 			}, testIO())
-			if err == nil {
-				t.Errorf("Share(dir=%q) succeeded, want overlap rejected", destination)
+			if tc.wantErr && err == nil {
+				t.Error("Share succeeded, want the overlap rejected")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("Share: %v; a symlinked agent directory outside the managed tree is usable", err)
 			}
 			if got := readFile(t, filepath.Join(installedDir(root, "hello"), "run.sh")); got != "keep\n" {
-				t.Errorf("managed content after rejected Share = %q, want keep", got)
+				t.Errorf("managed content after Share = %q, want keep", got)
 			}
 		})
 	}

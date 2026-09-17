@@ -31,9 +31,8 @@ import (
 type ShareOptions struct {
 	Skills     []string // selectors: installation directory names or frontmatter names
 	All        bool     // share every installed skill without asking
-	Agents     []string // registered agent names to link into
-	Dirs       []string // extra destination directories; relative ones resolve against the scope root
-	Remove     []string // registered agent names to unlink and un-declare
+	Agents     []string // agent names to link into; any single-segment name resolves under .<name>/skills
+	Remove     []string // agent names to unlink and un-declare
 	OnConflict string   // ask (default), overwrite, or skip; see the Conflict constants
 }
 
@@ -47,14 +46,15 @@ type shareSkill struct {
 
 // shareTarget is one destination base directory.
 type shareTarget struct {
-	label string // agent name for registered targets, the given directory otherwise
+	label string // agent name
 	path  string // absolute destination directory
 }
 
-// shareDeclaration is one skill's resolved share destinations: the registered
-// agents recorded in its [[skill]] agents list, plus the one-off --dir
-// destinations that stay unrecorded. Separating the two keeps the declaration
-// written back to the manifest free of machine-specific paths.
+// shareDeclaration is one skill's resolved share destinations: the agent names
+// the run links into, each with the directory its name resolves to. Recording
+// the name is what keeps the declaration portable, so every destination is an
+// agent name — a path would not reproduce on another machine — and the
+// directories here are derived from those names for this run only.
 type shareDeclaration struct {
 	targets  []shareTarget // every destination to link in this run, in link order
 	declared []string      // agent names to record on the skill's entry
@@ -67,15 +67,22 @@ type shareDeclaration struct {
 // forbids symlinks falls back to a byte-preserving copy exactly like get.
 //
 // The declaration is per skill: each [[skill]] entry's agents list names the
-// registered agents that skill is linked into, and a skill without the field
-// stays only in the managed skills directory. This command is get's mirror
-// image — get adds an entry to SKILL.mod, share adds agent names to the
-// selected entries — so it records what it linked in the manifest, and sync
-// recreates those links on a new machine. The declaration names agents only:
-// an arbitrary directory would not reproduce on another machine, so --dir
-// destinations stay unrecorded one-offs.
+// agents that skill is linked into, and a skill without the field stays only
+// in the managed skills directory. This command is get's mirror image — get
+// adds an entry to SKILL.mod, share adds agent names to the selected entries
+// — so it records what it linked in the manifest, and sync recreates those
+// links on a new machine. The declaration names agents only, never paths: an
+// agent name locates its directory through the one ".<name>/skills" rule, so
+// the record reproduces everywhere.
 func (e *Engine) Share(ctx context.Context, options ShareOptions, io IO, options_ ...MutationOptions) (*Report, error) {
 	run := mutationOptions(options_)
+	// Everything answerable from the arguments alone is answered first: a
+	// rejected combination, an unknown conflict policy, or an unusable
+	// destination is an argument error, and an interactive selection made
+	// before one is reported would have been made for nothing.
+	if err := e.checkShareOptions(options); err != nil {
+		return nil, err
+	}
 	unlock, err := e.lockState()
 	if err != nil {
 		return nil, err
@@ -83,16 +90,11 @@ func (e *Engine) Share(ctx context.Context, options ShareOptions, io IO, options
 	defer unlock()
 	// --remove is the declaration's exit: it takes agents out of the selected
 	// skills' lists, so it cannot be mixed with a request that links things
-	// back in. It does require a skill selection, because the agent list it
-	// edits belongs to an entry rather than to the manifest as a whole.
+	// back in (rejected above). It does require a skill selection, because the
+	// agent list it edits belongs to an entry rather than to the manifest as a
+	// whole.
 	if len(options.Remove) > 0 {
-		if len(options.Agents) > 0 || len(options.Dirs) > 0 {
-			return nil, fmt.Errorf("%s", i18n.Text("engine.share.remove_exclusive"))
-		}
 		return e.shareRemove(options, io, run)
-	}
-	if err := ValidateConflictPolicy(options.OnConflict); err != nil {
-		return nil, err
 	}
 	policy := options.OnConflict
 	if policy == "" {
@@ -241,6 +243,47 @@ func (e *Engine) Share(ctx context.Context, options ShareOptions, io IO, options
 	return rep, partialError(rep, conflicts, skip)
 }
 
+// checkShareOptions rejects a request that cannot be carried out, reading
+// nothing but the arguments. It runs before the state is opened and before any
+// prompt, so a misspelled agent name or an unusable destination is reported as
+// itself instead of surfacing after the caller has already picked skills and
+// destinations. --remove and --agent name the same kind of destination, so
+// both are checked here rather than in the branch that consumes them.
+func (e *Engine) checkShareOptions(options ShareOptions) error {
+	// --remove edits the agent lists of existing entries; --agent links things
+	// back in. The two directions contradict each other.
+	if len(options.Remove) > 0 && len(options.Agents) > 0 {
+		return fmt.Errorf("%s", i18n.Text("engine.share.remove_exclusive"))
+	}
+	if len(options.Remove) == 0 {
+		// --remove does not read the policy, so it is not asked to validate it.
+		if err := ValidateConflictPolicy(options.OnConflict); err != nil {
+			return err
+		}
+	}
+	if err := e.checkShareAgents(options.Agents); err != nil {
+		return err
+	}
+	return e.checkShareAgents(options.Remove)
+}
+
+// checkShareAgents rejects every named agent that cannot be used: a name that
+// is not one portable directory segment, or one whose directory equals,
+// contains, or is contained in the managed skills directory the scope
+// verifies.
+func (e *Engine) checkShareAgents(names []string) error {
+	for _, name := range names {
+		t, err := agents.Resolve(name)
+		if err != nil {
+			return err
+		}
+		if err := rejectManagedOverlap(e.skillsDir(), t.Dir(e.Root)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // findModSkill returns the declaration entry whose installation directory
 // matches, or nil when the manifest does not declare that directory.
 func findModSkill(m *modfile.Mod, dirName string) *modfile.ModSkill {
@@ -314,12 +357,13 @@ func (e *Engine) shareRemove(options ShareOptions, io IO, run MutationOptions) (
 	if err != nil {
 		return nil, err
 	}
-	// An unknown agent fails with the supported names. Whether a known agent
-	// is declared is answered per skill below: the same name may be on one
-	// entry and absent from another, and only the latter is a no-op to report.
+	// A name that is not one portable directory segment fails as itself.
+	// Whether a usable name is declared is answered per skill below: the same
+	// name may be on one entry and absent from another, and only the latter is
+	// a no-op to report.
 	targets := make([]agents.Target, 0, len(options.Remove))
 	for _, name := range options.Remove {
-		t, err := agents.Lookup(name)
+		t, err := agents.Resolve(name)
 		if err != nil {
 			return nil, err
 		}
@@ -708,50 +752,33 @@ func matchShareSkills(listed []shareSkill, requested []string) ([]shareSkill, er
 	return selected, nil
 }
 
-// selectShareTargets resolves the destination base directories, rejecting
-// anything that overlaps the managed skills directory. It also returns the
-// registered agent names to record on each selected skill's entry: --agent and
-// the interactive selection name agents, while --dir destinations are one-offs
-// that are not recorded because a path in a committed manifest would not
-// reproduce on another machine.
+// selectShareTargets resolves the destinations a run links into, and the agent
+// names to record on each selected skill's entry. --agent names them, and the
+// interactive selection offers the suggested agents; either way a destination
+// is an agent name, and the directory it links through is derived from that
+// name by the ".<name>/skills" rule. That derivation is the whole reason a
+// declaration can be recorded: sync recreates the link from the name alone, on
+// any machine, which a stored path could not do.
 func (e *Engine) selectShareTargets(options ShareOptions, io IO) (shareDeclaration, error) {
 	var decl shareDeclaration
 	seen := map[string]bool{}
-	add := func(label, path string) error {
-		path, err := filepath.Abs(path)
-		if err != nil {
-			return err
-		}
-		if err := rejectManagedOverlap(e.skillsDir(), path); err != nil {
-			return err
-		}
+	add := func(t agents.Target) {
+		path := t.Dir(e.Root)
 		if seen[fsutil.FoldKey(path)] {
-			return nil
+			return
 		}
 		seen[fsutil.FoldKey(path)] = true
-		decl.targets = append(decl.targets, shareTarget{label: label, path: path})
-		return nil
+		decl.targets = append(decl.targets, shareTarget{label: t.Name, path: path})
+		decl.declared = append(decl.declared, t.Name)
 	}
 	for _, name := range options.Agents {
-		t, err := agents.Lookup(name)
+		// Resolved and checked before this point; resolving again keeps the
+		// declaration and the destination derived from the same source.
+		t, err := agents.Resolve(name)
 		if err != nil {
 			return shareDeclaration{}, err
 		}
-		if err := add(t.Name, t.Dir(e.Root)); err != nil {
-			return shareDeclaration{}, err
-		}
-		decl.declared = append(decl.declared, t.Name)
-	}
-	for _, dir := range options.Dirs {
-		path := dir
-		if !filepath.IsAbs(path) {
-			// Relative --dir values live under the scope root, next to the
-			// registered agent directories rather than next to the shell.
-			path = filepath.Join(e.Root, path)
-		}
-		if err := add(dir, path); err != nil {
-			return shareDeclaration{}, err
-		}
+		add(t)
 	}
 	if len(decl.targets) > 0 {
 		return decl, nil
@@ -761,35 +788,46 @@ func (e *Engine) selectShareTargets(options ShareOptions, io IO) (shareDeclarati
 		// invent destinations.
 		return shareDeclaration{}, fmt.Errorf("%s", i18n.Text("engine.share.no_targets"))
 	}
-	registered := agents.All()
-	optionsList := make([]ui.Option, len(registered))
-	for i, t := range registered {
+	candidates := e.suggestedAgents()
+	optionsList := make([]ui.Option, len(candidates))
+	for i, t := range candidates {
 		optionsList[i] = ui.Option{Label: t.Name, Description: t.Dir(e.Root)}
 	}
 	selected, err := chooseIndices(io,
 		i18n.Text("engine.share.select_targets"),
 		optionsList,
 		func(index int) string {
-			return i18n.Format("engine.share.confirm_target", registered[index].Name, registered[index].Dir(e.Root))
+			return i18n.Format("engine.share.confirm_target", candidates[index].Name, candidates[index].Dir(e.Root))
 		},
 		i18n.Text("engine.share.no_targets"))
 	if err != nil {
 		return shareDeclaration{}, err
 	}
 	for _, index := range selected {
-		t := registered[index]
-		if err := add(t.Name, t.Dir(e.Root)); err != nil {
-			return shareDeclaration{}, err
-		}
-		decl.declared = append(decl.declared, t.Name)
+		add(candidates[index])
 	}
 	return decl, nil
+}
+
+// suggestedAgents lists the destinations an interactive selection offers,
+// minus the managed skills directory. That directory follows the same
+// ".<name>/skills" shape as an agent, so it would otherwise be offered and
+// then refused for overlapping what skillmod owns.
+func (e *Engine) suggestedAgents() []agents.Target {
+	managed := e.skillsDir()
+	out := make([]agents.Target, 0, len(agents.Known()))
+	for _, target := range agents.Suggested(e.Root) {
+		if rejectManagedOverlap(managed, target.Dir(e.Root)) == nil {
+			out = append(out, target)
+		}
+	}
+	return out
 }
 
 // shareTargetsFor resolves one skill's declaration into destination
 // directories. A skill that declares no agents links nowhere, which is the
 // normal state for a skill that stays only in the managed directory. An
-// unknown agent name in the manifest is reported with the supported names
+// invalid agent name in the manifest is reported with the rule it breaks
 // rather than skipped, so a hand-edited manifest fails loudly.
 func (e *Engine) shareTargetsFor(m *modfile.Mod, dirName string) ([]shareTarget, error) {
 	entry := findModSkill(m, dirName)
@@ -798,7 +836,7 @@ func (e *Engine) shareTargetsFor(m *modfile.Mod, dirName string) ([]shareTarget,
 	}
 	out := make([]shareTarget, 0, len(entry.Agents))
 	for _, name := range entry.Agents {
-		t, err := agents.Lookup(name)
+		t, err := agents.Resolve(name)
 		if err != nil {
 			return nil, err
 		}
@@ -829,7 +867,7 @@ func (e *Engine) shareLinksToClean(l *modfile.Lock, dirName, name string) ([]str
 	managed := e.skillDir(dirName)
 	var out []string
 	for _, agentName := range recorded {
-		t, err := agents.Lookup(agentName)
+		t, err := agents.Resolve(agentName)
 		if err != nil {
 			return nil, err
 		}

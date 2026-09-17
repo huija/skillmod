@@ -137,12 +137,12 @@ skillmod 通过系统 `git` 可执行文件获取源码，因此必须安装 Git
 | `verify` | 校验已安装内容与锁文件是否一致，即 CI 关卡 |
 | `remove <选择器>` | 删除声明和内容未改动的受管安装 |
 | `prune` | 清理手工编辑后残留的过期安装和锁记录 |
-| `share` | 把已安装技能链接到 agent 目录（如 `.claude`、`.codex`），每个 skill 在自己的条目上记录链接到的 agent 名，由 `sync` 重建。`share --remove` 从指定的 skill 解除 agent 链接并将其从条目上移除 |
+| `share` | 把已安装技能链接到 agent 目录（如 `.claude`、`.codex`）。agent 用一个目录段命名，从 `.<名字>/skills` 读取技能，因此任意 agent 都可用，清单只需记名字；每个 skill 在自己的条目上记录链接到的 agent 名，由 `sync` 重建。`share --remove` 从指定的 skill 解除 agent 链接并将其从条目上移除 |
 | `upgrade` | 用已发布的版本替换当前可执行文件，替换前按发布校验和验证 |
 
 先纳管机器，再纳管项目：`skillmod --global init` 先登记用户在 `~/.agents/skills/` 里已有的技能，`skillmod init` 再登记项目自身的技能。两份清单相互独立，因此只有带 `--global` 的命令才作用于机器级；两个作用域的完整流程见 [use-cases.md](skills/skillmod/references/use-cases.md)。
 
-所有命令都支持 `--json`（`-j`，机器可读输出）和 `--global`（`-g`，作用于用户级技能而非当前项目），写操作支持 `--dry-run`（`-n`）和 `--yes`（`-y`）。`get` 还支持 `--alias`（`-a`），`init` 支持 `--force`（`-f`），`sync` 支持 `--check`（`-c`）和 `--relink`（`-r`），`share` 支持 `--skill`（`-s`）、`--agent`（`-a`）、`--dir`（`-d`）和 `--remove`（`-r`），`upgrade` 支持 `--check`（`-c`）和 `--tag`（`-t`）。`--install-mode` 与 `--allow-downgrade` 刻意不设短写：显而易见的字母会产生歧义，且这两个参数很少手输。命令帮助、摘要、交互提示和错误信息优先采用 `SKILLMOD_LANG`，未设置时跟随系统 locale；JSON 的字段名和 action 标识不会翻译。
+所有命令都支持 `--json`（`-j`，机器可读输出）和 `--global`（`-g`，作用于用户级技能而非当前项目），写操作支持 `--dry-run`（`-n`）和 `--yes`（`-y`）。`get` 还支持 `--alias`（`-a`），`init` 支持 `--force`（`-f`），`sync` 支持 `--check`（`-c`）和 `--relink`（`-r`），`share` 支持 `--skill`（`-s`）、`--agent`（`-a`）和 `--remove`（`-r`），`upgrade` 支持 `--check`（`-c`）和 `--tag`（`-t`）。`--install-mode` 与 `--allow-downgrade` 刻意不设短写：显而易见的字母会产生歧义，且这两个参数很少手输。命令帮助、摘要、交互提示和错误信息优先采用 `SKILLMOD_LANG`，未设置时跟随系统 locale；JSON 的字段名和 action 标识不会翻译。
 
 ## 详细文档在哪
 

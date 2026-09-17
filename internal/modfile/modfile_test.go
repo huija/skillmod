@@ -272,6 +272,8 @@ func TestMod_SkillAgentsRoundTripAndValidation(t *testing.T) {
 		"invalid agent name":  {SchemaVersion: SchemaVersion, Skills: []ModSkill{{Name: "gh-fix-ci", Local: true, Agents: []string{"a:b"}}}},
 		"duplicate agents":    {SchemaVersion: SchemaVersion, Skills: []ModSkill{{Name: "gh-fix-ci", Local: true, Agents: []string{"claude", "claude"}}}},
 		"case-only duplicate": {SchemaVersion: SchemaVersion, Skills: []ModSkill{{Name: "gh-fix-ci", Local: true, Agents: []string{"Claude", "claude"}}}},
+		"dot-only duplicate":  {SchemaVersion: SchemaVersion, Skills: []ModSkill{{Name: "gh-fix-ci", Local: true, Agents: []string{".claude", "claude"}}}},
+		"unresolvable name":   {SchemaVersion: SchemaVersion, Skills: []ModSkill{{Name: "gh-fix-ci", Local: true, Agents: []string{"agent space"}}}},
 	}
 	for label, mod := range invalid {
 		if err := ValidateMod(mod); err == nil {
@@ -284,6 +286,37 @@ func TestMod_SkillAgentsRoundTripAndValidation(t *testing.T) {
 	empty := &Mod{SchemaVersion: SchemaVersion, Skills: []ModSkill{{Name: "gh-fix-ci", Local: true}}}
 	if err := ValidateMod(empty); err != nil {
 		t.Errorf("ValidateMod(no agents on an entry) = %v, want nil", err)
+	}
+}
+
+func TestAgentNamesHaveOneManifestAndLockIdentity(t *testing.T) {
+	m, err := ParseMod([]byte("schemaversion = 1\n[[skill]]\nname = 'hello'\nlocal = true\nagents = ['.Claude']\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Skills[0].Agents; len(got) != 1 || got[0] != "claude" {
+		t.Errorf("ParseMod(agents=['.Claude']) agents = %v, want [claude]", got)
+	}
+	l := &Lock{SchemaVersion: SchemaVersion, Skills: []LockSkill{{Name: "hello", Dirhash: "h1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", Agents: []string{".Claude"}}}}
+	data, err := MarshalLock(l)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := ParseLock(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := again.Skills[0].Agents; len(got) != 1 || got[0] != "claude" {
+		t.Errorf("ParseLock(MarshalLock(agents=['.Claude'])) agents = %v, want [claude]", got)
+	}
+	if got := l.Skills[0].Agents[0]; got != ".Claude" {
+		t.Errorf("MarshalLock changed caller agent = %q, want .Claude", got)
+	}
+	for _, names := range [][]string{{"agent space"}, {".claude", "claude"}} {
+		l.Skills[0].Agents = names
+		if err := ValidateLock(l); err == nil {
+			t.Errorf("ValidateLock(agents=%v) = nil, want error", names)
+		}
 	}
 }
 

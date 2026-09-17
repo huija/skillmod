@@ -66,8 +66,8 @@ below `skills/`.
 
 ## The per-skill `agents` list
 
-`share` records the registered agents it linked a skill to on that skill's
-`[[skill]]` entry:
+`share` records the agents it linked a skill to on that skill's `[[skill]]`
+entry:
 
 ```toml
 [[skill]]
@@ -75,13 +75,17 @@ name = "review"
 agents = ["claude", "codex"]
 ```
 
-The declaration is per skill and names registered agents only: one skill can
-go to claude while another goes to codex, and `sync` recreates the links each
-entry describes on a new machine while `verify` reports a missing or drifted
-one. An unknown agent name is rejected when the manifest is read rather than
-skipped. Paths are deliberately absent — a destination given with `--dir`
-stays a one-off on the command line — so the list reproduces on another
-machine unchanged.
+The declaration is per skill: one skill can go to claude while another goes to
+codex, and `sync` recreates the links each entry describes on a new machine
+while `verify` reports a missing or drifted one. An agent is named by one
+directory segment and read from `.<name>/skills` under the scope root, so the
+list is open — `workbuddy` is as valid as `claude` — and only the name is
+recorded, never the directory: a stored path would not reproduce elsewhere,
+while a name is enough to rebuild the link. A name that is not one portable
+directory segment is rejected when the manifest is read rather than skipped.
+Names use letters, digits, `.`, `_`, and `-`; a leading dot and letter case are
+normalized, so `.Claude` and `claude` are the same destination and cannot appear
+together in one list.
 
 An entry without `agents`, or with an empty one, means the skill stays only
 in the managed directory. `share --remove` edits the lists of the entries the

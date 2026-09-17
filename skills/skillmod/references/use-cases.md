@@ -281,11 +281,12 @@ skillmod share --dry-run
 skillmod share --skill review --agent claude --agent codex
 ```
 
-Omitting `--skill` and `--agent` lists the installed skills and the registered
-agents for interactive selection. `--dir` takes any path but stays a one-off:
-an arbitrary destination is not recorded, because it would not reproduce
-elsewhere. Registered agents are discovered with `skillmod share --help`, which
-names the directory each one reads.
+Omitting `--skill` and `--agent` lists the installed skills and the agent
+directories for interactive selection. An agent is named by one directory
+segment and read from `.<name>/skills` under the scope root, so the name is all
+a declaration needs: `--agent workbuddy` links into `.workbuddy/skills` and is
+recorded like any other. That is also why the manifest never stores a path — a
+name reproduces on another machine, a path would not.
 
 A destination that already holds identical content or a link to the managed copy
 is kept; one that holds different content is a conflict, settled with the same

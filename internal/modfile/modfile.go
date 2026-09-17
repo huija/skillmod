@@ -18,6 +18,7 @@ import (
 	"sort"
 
 	"github.com/huija/skillmod/internal/address"
+	"github.com/huija/skillmod/internal/agents"
 	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/fsutil"
 	"github.com/huija/skillmod/internal/i18n"
@@ -34,8 +35,8 @@ const (
 	SchemaVersion = 1
 )
 
-// Mod represents the human-maintained SKILL.mod file. Platform selection is a machine or user preference
-// stored in the agents setting of ~/.config/skillmod/config.toml rather than in the mod file.
+// Mod represents the human-maintained SKILL.mod file for one scope. Each
+// skill declares its own agent destinations independently of other entries.
 type Mod struct {
 	SchemaVersion int        `toml:"schemaversion"`
 	Skills        []ModSkill `toml:"skill,omitempty"`
@@ -48,7 +49,7 @@ type ModSkill struct {
 	Version string   `toml:"version,omitempty"` // exact tag, 40-character SHA, or pseudo-version
 	Alias   string   `toml:"alias,omitempty"`
 	Local   bool     `toml:"local,omitempty"`
-	Agents  []string `toml:"agents,omitempty"` // registered agent names linked into; empty means "not shared"
+	Agents  []string `toml:"agents,omitempty"` // agent names linked into; empty means "not shared"
 }
 
 // DirName returns the installation directory name: alias ?? name.
@@ -128,9 +129,8 @@ func ParseLock(data []byte) (*Lock, error) {
 // Windows and macOS). Different sources may publish the same skill name when
 // aliases give them distinct installation directories. Each entry's agent list
 // is validated as portable names too, and must not repeat one agent in two
-// spellings: the engine resolves each name through its registry, so a list the
-// registry cannot answer would otherwise fail far from the manifest that wrote
-// it.
+// spellings, including a leading dot: every name must resolve through the same
+// rule the engine uses before it can be recorded.
 func ValidateMod(m *Mod) error {
 	if m.SchemaVersion != SchemaVersion {
 		return fmt.Errorf(i18n.Text("modfile.mod_unsupported_schemaversion"), m.SchemaVersion, SchemaVersion)
@@ -176,16 +176,15 @@ func ValidateMod(m *Mod) error {
 // validateSkillAgents checks one entry's agent list for portable names and
 // fold-uniqueness. An absent or empty list is valid: it is how a declaration
 // says the skill stays in the managed directory without being linked anywhere.
-// The mod file cannot know which names the agent registry defines — that is
-// the engine's answer — so it validates the shape and leaves the resolution to
-// the engine, which reports an unknown name with the supported ones.
+// Resolution also supplies the canonical identity used to detect duplicates.
 func validateSkillAgents(sk *ModSkill) error {
 	seen := make(map[string]bool, len(sk.Agents))
 	for _, target := range sk.Agents {
-		if err := fsutil.ValidName(target); err != nil {
+		resolved, err := agents.Resolve(target)
+		if err != nil {
 			return fmt.Errorf(i18n.Text("modfile.mod_invalid_skill_agent"), sk.Name, target, err)
 		}
-		fold := fsutil.FoldKey(target)
+		fold := fsutil.FoldKey(resolved.Name)
 		if seen[fold] {
 			return fmt.Errorf(i18n.Text("modfile.mod_duplicate_skill_agent"), sk.Name, target)
 		}
@@ -200,10 +199,11 @@ func validateSkillAgents(sk *ModSkill) error {
 func validateLockAgents(sk *LockSkill) error {
 	seen := make(map[string]bool, len(sk.Agents))
 	for _, target := range sk.Agents {
-		if err := fsutil.ValidName(target); err != nil {
+		resolved, err := agents.Resolve(target)
+		if err != nil {
 			return fmt.Errorf(i18n.Text("modfile.lock_invalid_agent"), sk.Name, target, err)
 		}
-		fold := fsutil.FoldKey(target)
+		fold := fsutil.FoldKey(resolved.Name)
 		if seen[fold] {
 			return fmt.Errorf(i18n.Text("modfile.lock_duplicate_agent"), sk.Name, target)
 		}
@@ -289,18 +289,23 @@ func normalizeMod(m *Mod) {
 		if !m.Skills[i].Local {
 			m.Skills[i].Source = address.ManifestSource(m.Skills[i].Source)
 		}
-		m.Skills[i].Agents = sortedStrings(m.Skills[i].Agents)
+		m.Skills[i].Agents = sortedAgents(m.Skills[i].Agents)
 	}
 }
 
-// sortedStrings returns a sorted copy of values, or nil when there are none,
-// so an entry with no agents serializes without the field.
-func sortedStrings(values []string) []string {
+// sortedAgents returns a canonical, sorted copy without hiding invalid names
+// or duplicates, which validation must still report.
+func sortedAgents(values []string) []string {
 	if len(values) == 0 {
 		return nil
 	}
 	cp := make([]string, len(values))
-	copy(cp, values)
+	for i, value := range values {
+		cp[i] = value
+		if target, err := agents.Resolve(value); err == nil {
+			cp[i] = target.Name
+		}
+	}
 	sort.Strings(cp)
 	return cp
 }
@@ -333,7 +338,7 @@ func normalizeLock(l *Lock) {
 		if l.Skills[i].Dir == l.Skills[i].Name {
 			l.Skills[i].Dir = ""
 		}
-		l.Skills[i].Agents = sortedStrings(l.Skills[i].Agents)
+		l.Skills[i].Agents = sortedAgents(l.Skills[i].Agents)
 	}
 }
 

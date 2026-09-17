@@ -69,15 +69,17 @@ editing the managed skill is visible through every link at once, and there is
 nothing to synchronize. Links use the same `auto` fallback as installs, so a
 filesystem without symlink support receives a byte-preserving copy instead.
 
-The registered agents a skill was linked to are recorded on that skill's
-entry in `SKILL.mod`, so `sync` recreates a link that was replaced, deleted,
-or drifted since the run. `verify` reports a missing or drifted link under an
-agent directory that exists on this one; an agent directory absent from the
-machine is skipped, because the declaration expresses team intent, not a
-machine requirement. Destinations given with `--dir` are one-offs and stay
-unrecorded, because an arbitrary path would not reproduce on another machine.
+The agents a skill was linked to are recorded on that skill's entry in
+`SKILL.mod`, so `sync` recreates a link that was replaced, deleted, or drifted
+since the run. `verify` reports a missing or drifted link under an agent
+directory that exists on this one; an agent directory absent from the machine
+is skipped, because the declaration expresses team intent, not a machine
+requirement. Only the name is recorded, never the directory it resolves to:
+every agent reads `.<name>/skills` under the scope root, which is what lets one
+name reproduce the link on another machine and lets a name outside the known
+list work exactly like `claude` or `codex`.
 
-`SKILL.lock` also remembers registered destinations that were created. Removing
+`SKILL.lock` also remembers destinations that were created. Removing
 an agent name by hand removes the intent to share, but leaves the existing link
 for `remove` or `prune` to clean up later. `sync` retains that history when it
 records newly declared destinations; `share --remove` drops only the links and

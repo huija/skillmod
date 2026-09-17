@@ -123,22 +123,25 @@ func TestShareIsAdditiveAndRemoveSubtracts(t *testing.T) {
 	}
 }
 
-func TestShareDirectoryDestinationIsNotRecorded(t *testing.T) {
+// TestShareRecordsACustomAgentName pins the rule that makes a custom agent
+// usable: a name outside the known list resolves through the same
+// ".<name>/skills" convention, so it is recorded like any other and sync can
+// rebuild the link from the name alone.
+func TestShareRecordsACustomAgentName(t *testing.T) {
 	root := t.TempDir()
 	writeLocalSkill(t, root, "hello", "")
 	eng := newEngine(t, root, t.TempDir())
 	if _, err := eng.Init(ctx, false, testIO()); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
-	custom := filepath.Join(root, "custom-skills")
-	if _, err := eng.Share(ctx, engine.ShareOptions{All: true, Dirs: []string{custom}}, testIO()); err != nil {
-		t.Fatalf("Share(--dir): %v", err)
+	if _, err := eng.Share(ctx, engine.ShareOptions{All: true, Agents: []string{".workbuddy"}}, testIO()); err != nil {
+		t.Fatalf("Share(--agent .workbuddy): %v", err)
 	}
-	if got := agentsOf(loadMod(t, root), "hello"); len(got) != 0 {
-		t.Fatalf("Share(--dir) recorded agents: %v", got)
+	if got := agentsOf(loadMod(t, root), "hello"); len(got) != 1 || got[0] != "workbuddy" {
+		t.Fatalf("agents after --agent .workbuddy = %v, want [workbuddy]", got)
 	}
-	if _, err := os.Lstat(filepath.Join(custom, "hello")); err != nil {
-		t.Fatalf("Share(--dir) did not link into the custom directory: %v", err)
+	if _, err := os.Lstat(filepath.Join(root, ".workbuddy", "skills", "hello")); err != nil {
+		t.Fatalf("custom agent was not linked: %v", err)
 	}
 }
 
@@ -382,23 +385,28 @@ func TestLockAgentsSurviveAVersionChange(t *testing.T) {
 	}
 }
 
-func TestShareRejectsUnknownAgentInDeclaration(t *testing.T) {
+// TestShareRejectsAgentThatOverlapsTheManagedTreeInDeclaration keeps a
+// hand-edited manifest from reaching the directory skillmod verifies. Any
+// single-segment name resolves, so the check that still has to hold is the
+// overlap: "agents" is .agents/skills, which no run may write into.
+func TestShareRejectsAgentThatOverlapsTheManagedTreeInDeclaration(t *testing.T) {
 	root := t.TempDir()
 	writeLocalSkill(t, root, "hello", "")
 	eng := newEngine(t, root, t.TempDir())
 	if _, err := eng.Init(ctx, false, testIO()); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
-	// A hand-edited manifest naming an unregistered agent must fail loudly on
-	// sync rather than silently skipping the declaration.
 	m := loadMod(t, root)
-	m.Skills[0].Agents = []string{"not-an-agent"}
+	m.Skills[0].Agents = []string{"agents"}
 	if err := modfile.SaveMod(root, m); err != nil {
 		t.Fatalf("SaveMod: %v", err)
 	}
 	_, err := eng.Sync(ctx, engine.SyncOptions{}, testIO())
-	if err == nil || !strings.Contains(err.Error(), "claude") {
-		t.Fatalf("Sync(unknown declared agent) = %v, want the registered names", err)
+	if err == nil || !strings.Contains(err.Error(), "overlap") {
+		t.Fatalf("Sync(overlapping declared agent) = %v, want an overlap diagnostic", err)
+	}
+	if got := agentsOf(loadMod(t, root), "hello"); len(got) != 1 || got[0] != "agents" {
+		t.Fatalf("rejected sync changed the declaration: %v", got)
 	}
 }
 
@@ -551,13 +559,18 @@ func TestShareRemoveDryRunLeavesEverything(t *testing.T) {
 	}
 }
 
-func TestShareRemoveRejectsUndeclaredAgent(t *testing.T) {
+// TestShareRemoveRejectsAnUnusableAgentName pins the argument check on the
+// exit path too: a name that is not one directory segment is refused before
+// anything is taken down, so the failed run leaves links and declaration
+// alone. --remove taps a name the entry does not carry only when no other
+// named agent is declared, which the per-skill check below covers.
+func TestShareRemoveRejectsAnUnusableAgentName(t *testing.T) {
 	root := t.TempDir()
 	eng := setupTwoAgents(t, root)
 
-	_, err := eng.Share(ctx, engine.ShareOptions{All: true, Remove: []string{"claude", "unknown-agent"}}, testIO())
+	_, err := eng.Share(ctx, engine.ShareOptions{All: true, Remove: []string{"claude", "codex/skills"}}, testIO())
 	if err == nil {
-		t.Fatal("Share(--remove unknown-agent) = nil error, want a failure")
+		t.Fatal("Share(--remove codex/skills) = nil error, want a failure")
 	}
 	// Nothing was taken down: the failed run leaves links and declaration alone.
 	if _, statErr := os.Lstat(filepath.Join(agentSkillsDir(root, "claude"), "hello")); statErr != nil {
@@ -601,13 +614,9 @@ func TestShareRemoveRejectsMixedOptions(t *testing.T) {
 	root := t.TempDir()
 	eng := setupTwoAgents(t, root)
 
-	_, err := eng.Share(ctx, engine.ShareOptions{All: true, Remove: []string{"codex"}, Agents: []string{"codex"}}, testIO())
+	_, err := eng.Share(ctx, engine.ShareOptions{All: true, Remove: []string{"codex"}, Agents: []string{"claude"}}, testIO())
 	if err == nil {
 		t.Fatal("Share(--remove --agent) = nil error, want a failure")
-	}
-	_, err = eng.Share(ctx, engine.ShareOptions{All: true, Remove: []string{"codex"}, Dirs: []string{filepath.Join(root, "elsewhere")}}, testIO())
-	if err == nil {
-		t.Fatal("Share(--remove --dir) = nil error, want a failure")
 	}
 }
 

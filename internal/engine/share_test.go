@@ -66,7 +66,7 @@ func assertManagedLink(t *testing.T, src, dst string) {
 }
 
 func agentSkillsDir(root, agent string) string {
-	target, _ := agents.Lookup(agent)
+	target, _ := agents.Resolve(agent)
 	return target.Dir(root)
 }
 
@@ -303,14 +303,64 @@ func TestShareExplicitSelectorsMatchNamesAndDirectories(t *testing.T) {
 	}
 }
 
-func TestShareUnknownAgentNamesTheRegistry(t *testing.T) {
+// TestShareRejectsAnUnusableDestinationBeforePrompting pins the order of a
+// share run: a destination that cannot be used is an argument error, so it is
+// reported as itself rather than after an interactive selection the caller can
+// no longer put to use. The selector is scripted to answer, so a run that
+// prompts at all is a failure rather than a different error.
+func TestShareRejectsAnUnusableDestinationBeforePrompting(t *testing.T) {
+	tests := []struct {
+		name      string
+		options   engine.ShareOptions
+		wantInErr string
+	}{
+		{
+			name:      "agent name carrying a path separator",
+			options:   engine.ShareOptions{Agents: []string{".claude/skills"}},
+			wantInErr: ".claude/skills",
+		},
+		{
+			name:      "agent name overlapping the managed directory",
+			options:   engine.ShareOptions{Agents: []string{"agents"}},
+			wantInErr: "overlaps",
+		},
+		{
+			name:      "unknown conflict policy",
+			options:   engine.ShareOptions{Agents: []string{"claude"}, OnConflict: "maybe"},
+			wantInErr: "maybe",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeLocalSkill(t, root, "hello", "")
+			writeLocalSkill(t, root, "world", "")
+			chooser := &shareChooser{selections: [][]int{{0}, {0}}}
+			_, err := newEngine(t, root, t.TempDir()).Share(ctx, tt.options,
+				engine.IO{Out: io.Discard, Confirm: chooser})
+			if err == nil || !strings.Contains(err.Error(), tt.wantInErr) {
+				t.Fatalf("Share error = %v, want it to report %q", err, tt.wantInErr)
+			}
+			if chooser.calls != 0 {
+				t.Fatalf("selector was called %d times before the argument error, want no prompt", chooser.calls)
+			}
+		})
+	}
+}
+
+// TestShareRejectsAnAgentNameThatIsNotOneSegment keeps the manifest portable:
+// a name is what gets recorded, so a name carrying a path separator would
+// describe a directory only on one machine.
+func TestShareRejectsAnAgentNameThatIsNotOneSegment(t *testing.T) {
 	root := t.TempDir()
 	writeLocalSkill(t, root, "hello", "")
-	_, err := newEngine(t, root, t.TempDir()).Share(ctx, engine.ShareOptions{
-		All: true, Agents: []string{"nope"},
-	}, testIO())
-	if err == nil || !strings.Contains(err.Error(), "claude") {
-		t.Fatalf("unknown agent error = %v, want the registered names", err)
+	eng := newEngine(t, root, t.TempDir())
+	for _, name := range []string{".claude/skills", "a/b", "nope skills"} {
+		if _, err := eng.Share(ctx, engine.ShareOptions{
+			All: true, Agents: []string{name},
+		}, testIO()); err == nil || !strings.Contains(err.Error(), "skills") {
+			t.Fatalf("Share(--agent %q) error = %v, want the directory rule stated", name, err)
+		}
 	}
 }
 
@@ -318,11 +368,12 @@ func TestShareRejectsDestinationsOverlappingTheManagedDirectory(t *testing.T) {
 	root := t.TempDir()
 	writeLocalSkill(t, root, "hello", "")
 	eng := newEngine(t, root, t.TempDir())
-	for _, dir := range []string{".agents", ".agents/skills", ".agents/skills/hello"} {
+	// "agents" resolves to .agents/skills, the directory skillmod verifies.
+	for _, name := range []string{"agents", ".agents"} {
 		if _, err := eng.Share(ctx, engine.ShareOptions{
-			All: true, Dirs: []string{dir},
+			All: true, Agents: []string{name},
 		}, testIO()); err == nil || !strings.Contains(err.Error(), "overlaps") {
-			t.Fatalf("Share(--dir %s) error = %v, want a managed-overlap diagnostic", dir, err)
+			t.Fatalf("Share(--agent %s) error = %v, want a managed-overlap diagnostic", name, err)
 		}
 	}
 }

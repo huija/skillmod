@@ -113,16 +113,18 @@ func TestShareCommandDryRunWritesNothing(t *testing.T) {
 	}
 }
 
-func TestShareCommandRejectsUnknownAgentAndConflictPolicy(t *testing.T) {
+func TestShareCommandRejectsAnUnusableAgentAndConflictPolicy(t *testing.T) {
 	project, _ := isolateCLI(t)
 	writeInstalledSkill(t, project, "hello")
 
+	// Any single-segment agent name is accepted, so the rejection left is a
+	// name that is not a directory segment at all.
 	cmd := NewRootCmd()
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
-	cmd.SetArgs([]string{"share", "--all", "--agent", "nope"})
-	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "claude") {
-		t.Fatalf("unknown agent error = %v, want the registered names", err)
+	cmd.SetArgs([]string{"share", "--all", "--agent", ".claude/skills"})
+	if err := cmd.Execute(); err == nil || !strings.Contains(err.Error(), "skills") {
+		t.Fatalf("unusable agent name error = %v, want the directory rule stated", err)
 	}
 
 	cmd = NewRootCmd()
@@ -135,7 +137,7 @@ func TestShareCommandRejectsUnknownAgentAndConflictPolicy(t *testing.T) {
 }
 
 // The --skill flag documents comma-separated values, so it must split them
-// exactly like --agent and --dir do. A positional argument is one shell word:
+// exactly like --agent does. A positional argument is one shell word:
 // a name containing a comma stays whole rather than being read as two.
 func TestShareCommandSplitsCommaSeparatedSkillFlagsOnly(t *testing.T) {
 	project, _ := isolateCLI(t)
