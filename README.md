@@ -9,6 +9,50 @@ A skill dependency manager for agent projects, in the spirit of Go modules:
 AGENTS.md tells an agent *how to behave*; `SKILL.mod` declares *which
 capabilities it needs*.
 
+## What it does
+
+```mermaid
+flowchart LR
+    mod["SKILL.mod<br/>declare"] --> lock["SKILL.lock<br/>pin content"]
+    lock --> sync["skillmod sync<br/>reconcile"]
+    sync --> inst["installed skills<br/>.agents/skills"]
+    inst --> share["skillmod share<br/>.claude .codex ..."]
+    inst -.-> verify["skillmod verify<br/>CI gate"]
+```
+
+- **Declare** the skills a project needs in a reviewable `SKILL.mod`.
+- **Sync** every machine into byte-identical agreement with the declaration —
+  idempotent, and never overwriting local edits.
+- **Verify** that installed content still matches the lock; a drift fails the
+  build.
+- **Share** installed skills with any agent through links in `.<name>/skills`.
+- **Update** to the newest immutable version of a skill — no registry required;
+  publishing a skill is tagging a repository you already own.
+
+## When you need it
+
+One skill on one machine needs none of this; the declaration pays for itself
+as soon as any of the following holds:
+
+- **More than one machine** works with the project — a teammate's checkout, a
+  CI job, your second laptop — and all of them should install the same skills,
+  byte for byte.
+- **More than one consumer** trusts the declaration — CI must prove the
+  installed skills are exactly what was declared, so an edited or tampered
+  skill fails the build.
+- **More than one agent** runs on one machine — `.claude`, `.codex`,
+  workbuddy, ... share one installed set, each with its own links.
+
+| When you want to | Use |
+| --- | --- |
+| Bring an existing project or machine under management | `init` |
+| Add a skill from any Git repository | `get` |
+| Make every machine identical to the declaration | `sync` |
+| Fail the build when an installed skill drifted | `verify` |
+| Point other agents at installed skills | `share` |
+| Explain where a skill came from and what state it is in | `why` |
+| Move to the newest version, or back out cleanly | `update` / `remove` |
+
 ## Why this exists
 
 Skills — packaged instructions and scripts — shape what an agent does, but
@@ -16,35 +60,29 @@ managing them is stuck in a pre-dependency-manager era. Manual copies leave no
 record of what was installed. Git submodules make every consumer clone a whole
 repository and run Git to obtain a folder of Markdown. Platform marketplaces
 install into machine-local state, so a teammate's agent, a CI job, and your
-laptop drift apart. The symptoms are the same either way: agents behave
-differently on different machines, "which version was in use" has no answer, and
-an edited or tampered skill goes unnoticed.
+laptop drift apart. The symptoms are always the same: agents behave
+differently on different machines, "which version was in use" has no answer,
+and an edited or tampered skill goes unnoticed.
 
 skillmod applies the Go module model: declarations in `SKILL.mod`, content
 addressed by dirhash in `SKILL.lock`, idempotent reconciliation through
-`skillmod sync`. There is no registry to run — publishing a skill means creating
-a tag in a repository you already own. One skill on one machine needs none of
-this; the moment a second machine, a teammate, or a CI job shares the set, the
-declaration pays for itself.
+`skillmod sync`. There is no registry to run — publishing a skill means
+creating a tag in a repository you already own.
 
 ## What you get
 
-- **Every machine gets the same skills, byte for byte.** `sync` compares content
-  rather than versions and is idempotent, so running it twice changes nothing.
-- **"Which version was in use" has an answer.** The lock records the requested
-  version, the resolved commit, and the content hash — for a release tag, a raw
-  commit, or a pseudo-version from a repository that has no tags.
-- **Edits and tampering are caught.** `verify` compares installed content with
-  the lock and exits non-zero on drift, which is what makes it usable as a CI
-  gate.
-- **Local work is never silently overwritten.** A modified installation is kept
-  and reported with exit code 3 until a person decides what to do with it.
-- **Skills are fetched once and then reused.** One immutable snapshot per
-  repository version is shared by every project on the machine and linked rather
-  than copied, so a second project installs from disk, and an immutable version
-  still installs offline.
-- **Nothing else is required.** No registry, no server, no telemetry; Git is the
-  only external dependency.
+- **Every machine gets the same skills, byte for byte.**
+- **"Which version was in use" has an answer** — the lock records the requested
+  version, the resolved commit, and the content hash.
+- **Edits and tampering are caught** — `verify` exits non-zero on drift, which
+  is what makes it usable as a CI gate.
+- **Local work is never silently overwritten** — a modified installation is
+  kept and reported with exit code 3 until a person decides what to do with it.
+- **Skills are fetched once and then reused** — one immutable snapshot per
+  repository version is shared by every project on the machine and linked
+  rather than copied, so a second project installs from disk.
+- **Nothing else is required** — no registry, no server, no telemetry; Git is
+  the only external dependency.
 
 ## Five minutes
 
@@ -178,19 +216,20 @@ remotes additionally require `ssh` on `PATH`.
 | `init` | Adopt skills that already exist on disk into `SKILL.mod` and `SKILL.lock` |
 | `get <address>` | Add a skill and install it |
 | `sync` | Reconcile installations with the lock; idempotent, and never overwrites local edits |
+| `share` | Link installed skills into agent directories such as `.claude` or `.codex`; see [Share with agents](#share-with-agents) |
 | `list` | Show every declaration, its version, and its installation status |
 | `why <selector>` | Explain one entry: source, resolved version, commit, dirhash, and per-target status |
 | `update [selector]` | Move entries to the newest immutable version; refuses a silent downgrade |
 | `verify` | Check installed content against the lock; the CI gate |
 | `remove [selector]` | Delete declarations and clean managed installations; with `--agent`, unlink only those agents and keep the skills |
 | `prune` | Drop stale installations and lock records left behind by hand edits |
-| `share` | Link installed skills into agent directories such as `.claude` or `.codex`. An agent is named by one directory segment and read from `.<name>/skills`, so any agent works and the name is all the manifest needs; each skill records the agents it is linked to on its own entry for `sync` to recreate. `share --remove --agent <name>` stops sharing, preserving the skill |
 | `upgrade` | Replace the running executable with a published release, verified against its checksums |
 
-A machine is adopted before a project, in that order: `skillmod --global init`
-declares the skills the user already has in `~/.agents/skills/`, then
-`skillmod init` declares the project's own. The two manifests are independent,
-so a command reaches the machine only when it carries `--global`;
+`skillmod --global init` declares the skills the user already has in
+`~/.agents/skills/`; `skillmod init` declares the project's own. The two
+adoptions are independent steps in either order, and the two manifests stay
+independent, so a command reaches the machine only when it carries
+`--global`;
 [use-cases.md](skills/skillmod/references/use-cases.md) walks through both
 scopes.
 
@@ -213,6 +252,21 @@ ambiguous or already taken, and the long forms read better.
 Command help, summaries, prompts, and errors follow `SKILLMOD_LANG` when it is
 set and the system locale otherwise; JSON field names and action identifiers are
 never translated.
+
+## Share with agents
+
+An agent is named by one directory segment and reads its skills from
+`.<name>/skills`, so any agent works — well-known ones like `.claude` and
+`.codex` and any other single-segment name alike. Each skill records the agents
+it is linked to on its own entry in `SKILL.mod`, and `sync` recreates the
+links on every machine:
+
+```console
+$ skillmod share --all --agent claude --agent workbuddy --yes
+```
+
+`share --remove --agent <name>` stops sharing and keeps the skills;
+`remove --agent <name>` unlinks one agent without touching the others.
 
 ## Where the details live
 

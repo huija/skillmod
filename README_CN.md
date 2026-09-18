@@ -7,20 +7,55 @@
 
 与 AGENTS.md 的关系：AGENTS.md 告诉 agent *怎么行为*，`SKILL.mod` 声明 agent *需要什么能力*。
 
+## 它做什么
+
+```mermaid
+flowchart LR
+    mod["SKILL.mod<br/>声明"] --> lock["SKILL.lock<br/>锁定内容"]
+    lock --> sync["skillmod sync<br/>对齐安装"]
+    sync --> inst["已安装技能<br/>.agents/skills"]
+    inst --> share["skillmod share<br/>.claude .codex ..."]
+    inst -.-> verify["skillmod verify<br/>CI 关卡"]
+```
+
+- **声明（Declare）**：在可评审的 `SKILL.mod` 里列出项目需要的技能。
+- **对齐（Sync）**：让每台机器与声明逐字节一致——幂等执行，且绝不覆盖本地修改。
+- **校验（Verify）**：检查已安装内容是否仍与锁文件一致；有漂移就让构建失败。
+- **分发（Share）**：通过 `.<名字>/skills` 里的链接，把已安装技能交给任意 agent。
+- **更新（Update）**：升级到技能最新的不可变版本——无需 registry；发布一个技能就是给自己的仓库打个 tag。
+
+## 什么时候需要它
+
+单机单技能并不需要它；以下任一情况成立，这份声明就开始回本：
+
+- **不止一台机器**会用到这个项目——同事的检出、CI 任务、你的第二台笔记本——它们都应装出逐字节相同的技能。
+- **不止一个消费方**依赖这份声明——CI 必须证明已安装技能与声明的完全一致，被改过或篡改的技能会让构建失败。
+- **不止一个 agent**运行在同一台机器上——`.claude`、`.codex`、workbuddy……共用一套安装，各自持有自己的链接。
+
+| 你想做的事 | 用 |
+| --- | --- |
+| 把现有项目或机器纳入管理 | `init` |
+| 从任意 Git 仓库添加一个技能 | `get` |
+| 让每台机器与声明完全一致 | `sync` |
+| 技能有漂移时让构建失败 | `verify` |
+| 把已安装技能交给其他 agent | `share` |
+| 说明一个技能从哪来、现在什么状态 | `why` |
+| 升级到最新版本，或干净地退出 | `update` / `remove` |
+
 ## 为什么需要它
 
 skill（指令 + 脚本的打包单元）决定 agent 的行为，但它的管理停留在前依赖管理时代。手工拷贝留不下"装了什么"的记录；git submodule 让每个使用方都要克隆整仓、用 git 才能拿到一个 Markdown 目录；各平台市场把技能装进机器本地状态，于是同事的 agent、CI 和你自己的笔记本会悄悄分叉。症状是相同的：同团队不同机器行为不一致、"当时用的是哪个版本"回答不了、内容被改过或篡改也无法察觉。
 
-skillmod 用 go mod 的同构方案解决：`SKILL.mod` 声明 + `SKILL.lock`（dirhash 内容寻址）锁定 + `skillmod sync` 幂等对齐。没有需要运维的 registry——发布一个 skill 就是在自己的仓库里打个 tag。单机单技能并不需要它；当第二台机器、同事或 CI 要共用同一套技能时，这份声明就开始回本。
+skillmod 用 go mod 的同构方案解决：`SKILL.mod` 声明 + `SKILL.lock`（dirhash 内容寻址）锁定 + `skillmod sync` 幂等对齐。没有需要运维的 registry——发布一个 skill 就是在自己的仓库里打个 tag。
 
 ## 你能得到什么
 
-- **每台机器拿到逐字节相同的技能。** `sync` 比对的是内容而非版本号，且幂等，重复执行不会有变化。
-- **"当时用的是哪个版本"有答案。** 锁文件记录请求的版本、解析出的 commit 和内容哈希，tag、裸 commit、无 tag 仓库的伪版本都适用。
-- **改动与篡改会被发现。** `verify` 把已安装内容与锁文件比对，漂移时以非零码退出，因此可以直接当作 CI 关卡。
-- **本地修改不会被静默覆盖。** 被改过的安装会保留下来并以退出码 3 报告，把决定权交回给人。
-- **技能只取一次，之后复用。** 同一仓库版本的不可变快照在整机共享，安装用链接而不是拷贝，所以第二个项目直接从磁盘安装，不可变版本离线也能装。
-- **不需要额外基础设施。** 无 registry、无服务端、无遥测，外部依赖只有 Git。
+- **每台机器拿到逐字节相同的技能。**
+- **"当时用的是哪个版本"有答案**——锁文件记录请求的版本、解析出的 commit 和内容哈希。
+- **改动与篡改会被发现**——`verify` 在漂移时以非零码退出，因此可以直接当作 CI 关卡。
+- **本地修改不会被静默覆盖**——被改过的安装会保留下来并以退出码 3 报告，把决定权交回给人。
+- **技能只取一次，之后复用**——同一仓库版本的不可变快照在整机共享，安装用链接而不是拷贝，第二个项目直接从磁盘安装。
+- **不需要额外基础设施**——无 registry、无服务端、无遥测，外部依赖只有 Git。
 
 ## 五分钟
 
@@ -131,22 +166,32 @@ skillmod 通过系统 `git` 可执行文件获取源码，因此必须安装 Git
 | `init` | 把磁盘上已有的技能登记进 `SKILL.mod` 和 `SKILL.lock` |
 | `get <地址>` | 添加并安装一个技能 |
 | `sync` | 按锁文件对齐安装，幂等，且不会覆盖本地修改 |
+| `share` | 把已安装技能链接到 agent 目录（如 `.claude`、`.codex`）；见[分享给 agent](#分享给-agent) |
 | `list` | 列出全部声明、版本和安装状态 |
 | `why <选择器>` | 说明单个条目：来源、解析版本、commit、dirhash 和各目标状态 |
 | `update [选择器]` | 把条目更新到最新的不可变版本；拒绝静默降级 |
 | `verify` | 校验已安装内容与锁文件是否一致，即 CI 关卡 |
 | `remove [选择器]` | 删除声明和内容未改动的受管安装；带 `--agent` 时仅解除这些 agent 的分享，保留技能 |
 | `prune` | 清理手工编辑后残留的过期安装和锁记录 |
-| `share` | 把已安装技能链接到 agent 目录（如 `.claude`、`.codex`）。agent 用一个目录段命名，从 `.<名字>/skills` 读取技能，因此任意 agent 都可用，清单只需记名字；每个 skill 在自己的条目上记录链接到的 agent 名，由 `sync` 重建。`share --remove --agent <名称>` 解除分享并保留技能 |
 | `upgrade` | 用已发布的版本替换当前可执行文件，替换前按发布校验和验证 |
 
-先纳管机器，再纳管项目：`skillmod --global init` 先登记用户在 `~/.agents/skills/` 里已有的技能，`skillmod init` 再登记项目自身的技能。两份清单相互独立，因此只有带 `--global` 的命令才作用于机器级；两个作用域的完整流程见 [use-cases.md](skills/skillmod/references/use-cases.md)。
+`skillmod --global init` 登记用户在 `~/.agents/skills/` 里已有的技能；`skillmod init` 登记项目自身的技能。两次纳管相互独立、先后随意；两份清单也相互独立，因此只有带 `--global` 的命令才作用于机器级；两个作用域的完整流程见 [use-cases.md](skills/skillmod/references/use-cases.md)。
 
 所有命令都支持 `--json`（`-j`，机器可读输出）和 `--global`（`-g`，作用于用户级技能而非当前项目），写操作支持 `--dry-run`（`-n`）和 `--yes`（`-y`）。`get` 还支持 `--alias`（`-a`），`init` 支持 `--force`（`-f`），`sync` 支持 `--check`（`-c`）和 `--relink`（`-r`），`share` 支持 `--skill`（`-s`）、`--agent`（`-a`）和 `--remove`（`-r`），`remove` 支持 `--skill`（`-s`）和 `--agent`（`-a`），`upgrade` 支持 `--check`（`-c`）和 `--tag`（`-t`）。
 
 `get`、`remove` 和 `share` 支持 `--all`，用于直接指认整批目标而不进入询问：分别是仓库发布的全部技能、全部已声明条目、全部已安装技能。`--yes` 是这条分工的另一半——它只回答选择之后的确认，从不用来决定选择什么。`--all`、`--install-mode`、`--allow-downgrade` 与 `--on-conflict` 刻意不设短写：显而易见的字母会产生歧义或已被占用，且长写更易读。
 
 命令帮助、摘要、交互提示和错误信息优先采用 `SKILLMOD_LANG`，未设置时跟随系统 locale；JSON 的字段名和 action 标识不会翻译。
+
+## 分享给 agent
+
+agent 用一个目录段命名，并从 `.<名字>/skills` 读取技能，因此任意 agent 都可用——`.claude`、`.codex` 这样的知名名字和其他任意单段名字一视同仁。每个技能在自己的 `SKILL.mod` 条目上记录链接到的 agent 名，由 `sync` 在每台机器上重建链接：
+
+```console
+$ skillmod share --all --agent claude --agent workbuddy --yes
+```
+
+`share --remove --agent <名称>` 解除分享并保留技能；`remove --agent <名称>` 只解除一个 agent 的链接，不影响其他 agent。
 
 ## 详细文档在哪
 

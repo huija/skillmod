@@ -18,12 +18,13 @@ Before a project-scoped mutation, confirm that the working directory is the
 intended project root. Before a global mutation, state explicitly that it will
 affect the user's global agent environment.
 
-## Adopt in order: global first, then the project
+## Adopt existing skills
 
-Bringing a machine under skillmod management is two steps, and the order
-matters: the machine-wide skills exist already, and the project builds on them.
+Adopting the user-wide skills and adopting a project are two independent
+steps: each scope has its own manifest, either can be adopted alone, and the
+order does not matter.
 
-1. Adopt the user-wide skills, which is where a machine's shared skills live:
+**Adopt the user-wide skills**, which is where a machine's shared skills live:
 
 ```sh
 skillmod --global init --dry-run --yes
@@ -44,8 +45,8 @@ against that repository. A record the previous installer already marked local is
 not a gap at all: it stays a plain local declaration, with no note and no
 `unresolved` count.
 
-2. Adopt the project, which is the step that makes the project reproducible on
-   other machines:
+**Adopt the project**, which is what makes the project reproducible on other
+machines:
 
 ```sh
 cd <project>
@@ -53,8 +54,8 @@ skillmod init --dry-run --yes
 skillmod init --yes
 ```
 
-3. Keep both scopes aligned from then on. The two manifests are independent, so
-   a command that should affect the user's machine needs `--global`:
+From then on, keep both scopes aligned. The two manifests are independent, so
+a command that should affect the user's machine needs `--global`:
 
 ```sh
 skillmod sync && skillmod verify

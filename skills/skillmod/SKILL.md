@@ -5,6 +5,12 @@ description: Install, configure, use, and troubleshoot skillmod, or prepare a we
 
 # skillmod
 
+skillmod is a Git-based dependency manager for Agent Skills: `SKILL.mod`
+declares what a project needs, `SKILL.lock` pins the exact content, and
+`skillmod sync` makes every machine identical. Reach for it when the user
+wants to share one skill set across machines, teammates, or CI, or to point
+agent directories such as `.claude` or `.codex` at installed skills.
+
 Help users install and operate skillmod safely. Match the user's language and
 experience level. Explain the outcome first, then show only the commands needed
 for the current task.
@@ -39,10 +45,11 @@ required before explaining concepts or drafting an issue.
    available. Do not repeat those checks during ordinary operations when the
    current session has already established them, and do not reinstall a working
    executable merely because installation was mentioned in an earlier step.
-3. When bringing a machine or a project under management, adopt in order: the
-   user-wide skills with `skillmod --global init` first, then the project with
-   `skillmod init`. Keep the two scopes straight afterwards: a command affects
-   the machine only when it carries `--global`.
+3. Project and global scopes are independent: each has its own manifest, and
+   either can be adopted alone — `skillmod init` for the project,
+   `skillmod --global init` for the user-wide skills — in either order. Keep
+   the scopes straight afterwards: a command affects the machine only when
+   it carries `--global`.
 4. Inspect existing `SKILL.mod`, `SKILL.lock`, configuration, and installed
    directories before proposing a mutation. Preserve unrelated user changes.
 5. Prefer `--dry-run` before `init --force`, `sync --relink`, `remove`, or
