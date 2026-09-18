@@ -190,7 +190,7 @@ func TestGetDryRunPrintsPlanWithoutWritingState(t *testing.T) {
 	eng := newEngine(t, root, t.TempDir())
 	var out bytes.Buffer
 
-	rep, err := eng.Get(ctx, r.URL+"@v1.0.0", "", engine.IO{Out: &out, Yes: true}, engine.MutationOptions{DryRun: true})
+	rep, err := eng.Get(ctx, r.URL+"@v1.0.0", "", engine.IO{Out: &out, Yes: true}, engine.GetOptions{DryRun: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,12 +384,35 @@ func TestGet_RequiresExplicitSelectionForMultipleSkills(t *testing.T) {
 	eng := newEngine(t, t.TempDir(), t.TempDir())
 	_, err := eng.Get(ctx, r.URL+"@v1.0.0", "", engine.IO{Out: io.Discard})
 	if err == nil || !strings.Contains(err.Error(), "select one or more") ||
+		!strings.Contains(err.Error(), "--all") ||
 		!strings.Contains(err.Error(), "//nested-skill") || strings.Contains(err.Error(), "//skills/nested") {
 		t.Fatalf("Get multiple candidates error = %v", err)
 	}
 }
 
-func TestGet_YesInstallsAllDiscoveredNestedSkills(t *testing.T) {
+// --yes answers the confirmation, it does not choose which skills to install.
+// A multi-skill repository needs --all for that, so the same run that used to
+// quietly install everything now asks for the set to be stated.
+func TestGet_YesDoesNotChooseWhichSkillsToInstall(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.WriteSkill("", "root-skill")
+	r.WriteSkill("skills/nested", "nested-skill")
+	r.CommitAll("add root and nested skills")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	_, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO())
+	if err == nil || !strings.Contains(err.Error(), "--all") {
+		t.Fatalf("Get multiple candidates with --yes error = %v, want the message naming --all", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "SKILL.mod")); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("SKILL.mod after a refused selection = %v, want it not to exist", statErr)
+	}
+}
+
+func TestGet_AllInstallsAllDiscoveredNestedSkills(t *testing.T) {
 	r := testutil.NewRepo(t)
 	r.Write("README.md", "skill collection\n")
 	r.WriteSkill("skills/.curated/ci", "ci")
@@ -400,8 +423,8 @@ func TestGet_YesInstallsAllDiscoveredNestedSkills(t *testing.T) {
 
 	root := t.TempDir()
 	eng := newEngine(t, root, t.TempDir())
-	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
-		t.Fatalf("Get nested collection with --yes: %v", err)
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO(), engine.GetOptions{All: true}); err != nil {
+		t.Fatalf("Get nested collection with --all: %v", err)
 	}
 	mod, err := modfile.LoadMod(root)
 	if err != nil {
@@ -971,7 +994,7 @@ func TestGet_CaseOnlyNameConflictWithinOneRepo(t *testing.T) {
 
 	root := t.TempDir()
 	eng := newEngine(t, root, t.TempDir())
-	_, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO())
+	_, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO(), engine.GetOptions{All: true})
 	var conflict *engine.NameConflictError
 	if !errors.As(err, &conflict) || conflict.OtherName == "" {
 		t.Fatalf("batch Get error = %v (%T), want case-only NameConflictError", err, err)

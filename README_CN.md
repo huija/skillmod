@@ -142,7 +142,11 @@ skillmod 通过系统 `git` 可执行文件获取源码，因此必须安装 Git
 
 先纳管机器，再纳管项目：`skillmod --global init` 先登记用户在 `~/.agents/skills/` 里已有的技能，`skillmod init` 再登记项目自身的技能。两份清单相互独立，因此只有带 `--global` 的命令才作用于机器级；两个作用域的完整流程见 [use-cases.md](skills/skillmod/references/use-cases.md)。
 
-所有命令都支持 `--json`（`-j`，机器可读输出）和 `--global`（`-g`，作用于用户级技能而非当前项目），写操作支持 `--dry-run`（`-n`）和 `--yes`（`-y`）。`get` 还支持 `--alias`（`-a`），`init` 支持 `--force`（`-f`），`sync` 支持 `--check`（`-c`）和 `--relink`（`-r`），`share` 支持 `--skill`（`-s`）、`--agent`（`-a`）和 `--remove`（`-r`），`remove` 支持 `--skill`（`-s`）和 `--agent`（`-a`），`upgrade` 支持 `--check`（`-c`）和 `--tag`（`-t`）。`--install-mode` 与 `--allow-downgrade` 刻意不设短写：显而易见的字母会产生歧义，且这两个参数很少手输。命令帮助、摘要、交互提示和错误信息优先采用 `SKILLMOD_LANG`，未设置时跟随系统 locale；JSON 的字段名和 action 标识不会翻译。
+所有命令都支持 `--json`（`-j`，机器可读输出）和 `--global`（`-g`，作用于用户级技能而非当前项目），写操作支持 `--dry-run`（`-n`）和 `--yes`（`-y`）。`get` 还支持 `--alias`（`-a`），`init` 支持 `--force`（`-f`），`sync` 支持 `--check`（`-c`）和 `--relink`（`-r`），`share` 支持 `--skill`（`-s`）、`--agent`（`-a`）和 `--remove`（`-r`），`remove` 支持 `--skill`（`-s`）和 `--agent`（`-a`），`upgrade` 支持 `--check`（`-c`）和 `--tag`（`-t`）。
+
+`get`、`remove` 和 `share` 支持 `--all`，用于直接指认整批目标而不进入询问：分别是仓库发布的全部技能、全部已声明条目、全部已安装技能。`--yes` 是这条分工的另一半——它只回答选择之后的确认，从不用来决定选择什么。`--all`、`--install-mode`、`--allow-downgrade` 与 `--on-conflict` 刻意不设短写：显而易见的字母会产生歧义或已被占用，且长写更易读。
+
+命令帮助、摘要、交互提示和错误信息优先采用 `SKILLMOD_LANG`，未设置时跟随系统 locale；JSON 的字段名和 action 标识不会翻译。
 
 ## 详细文档在哪
 

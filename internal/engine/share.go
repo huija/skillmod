@@ -848,7 +848,7 @@ func selectShareSkills(listed []shareSkill, options ShareOptions, io IO) ([]shar
 	case len(options.Skills) > 0:
 		return matchShareSkills(listed, options.Skills)
 	}
-	if len(listed) == 1 || io.Yes {
+	if len(listed) == 1 {
 		return listed, nil
 	}
 	var targets []agents.Target
@@ -992,9 +992,8 @@ func (e *Engine) selectShareTargets(options ShareOptions, skills []shareSkill, i
 	if len(decl.targets) > 0 {
 		return decl, nil
 	}
-	if io.Yes {
-		// --yes answers "share to the destinations I named"; it does not
-		// invent destinations.
+	if io.Confirm == nil {
+		// A run without a channel to choose through cannot invent targets.
 		return shareDeclaration{}, fmt.Errorf("%s", i18n.Text("engine.share.no_targets"))
 	}
 	candidates := e.suggestedAgents(skills...)

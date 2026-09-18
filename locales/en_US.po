@@ -57,6 +57,9 @@ msgstr "agent name %q is not one directory segment; skillmod links to .<nam"
 msgid "cli.get.flag_alias"
 msgstr "installation directory alias (resolves name conflicts)"
 
+msgid "cli.get.flag_all"
+msgstr "install every skill the repository publishes without asking"
+
 msgid "cli.get.long"
 msgstr "Versions must be semver tags or 40-character commit SHAs; branch na"
 "mes are rejected because they are mutable.\nWhen omitted, the version is r"
@@ -69,7 +72,7 @@ msgstr "Versions must be semver tags or 40-character commit SHAs; branch na"
 "t the redundant https:// prefix and prefer a unique skill-name shorthand w"
 "hen safe. Use ↑/← for the previous item, ↓/→ for the next item, sp"
 "ace to toggle selections, d to show or hide the current description and co"
-"mmand, and enter to confirm. --yes installs every discovered skill."
+"mmand, and enter to confirm. --all installs every discovered skill."
 
 msgid "cli.get.short"
 msgstr "fetch a skill by immutable reference, update SKILL.mod / SKILL.lock"
@@ -405,7 +408,7 @@ msgstr "matching the requested skill name"
 #, go-format
 msgid "engine.get.multiple_skills_found_rerun"
 msgstr "multiple skills found in %s; rerun interactively to select one or m"
-"ore, use --yes to install all, or specify one of:\n  %s"
+"ore, use --all to install all, or specify one of:\n  %s"
 
 #, go-format
 msgid "engine.get.multiple_skills_found_select"

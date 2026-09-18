@@ -30,14 +30,32 @@ type conflict struct {
 	dir  string
 }
 
+// GetOptions controls one get run.
+type GetOptions struct {
+	All    bool // install every skill the repository publishes without asking
+	DryRun bool
+}
+
+func getOptions(options []GetOptions) GetOptions {
+	if len(options) == 0 {
+		return GetOptions{}
+	}
+	return options[0]
+}
+
 // Get implements skillmod get: resolve, download, validate, install, then write SKILL.mod and SKILL.lock.
 // A failure at any step leaves no partially updated state.
-func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO, options ...MutationOptions) (*Report, error) {
-	run := mutationOptions(options)
+func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO, options ...GetOptions) (*Report, error) {
+	run := getOptions(options)
 	defer io.stopProgress()
 	addr, err := address.Parse(rawAddr)
 	if err != nil {
 		return nil, err
+	}
+	if alias != "" {
+		if err := fsutil.ValidAlias(alias); err != nil {
+			return nil, err
+		}
 	}
 	unlock, err := e.lockState()
 	if err != nil {
@@ -53,14 +71,9 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO, options 
 		return nil, err
 	}
 
-	resolved, err := e.resolveGetSkills(ctx, addr, io)
+	resolved, err := e.resolveGetSkills(ctx, addr, io, run.All)
 	if err != nil {
 		return nil, err
-	}
-	if alias != "" {
-		if err := fsutil.ValidAlias(alias); err != nil {
-			return nil, err
-		}
 	}
 	if alias != "" && len(resolved) != 1 {
 		return nil, fmt.Errorf("%s", i18n.Text("engine.get.alias_requires_one_skill"))
@@ -269,7 +282,7 @@ type resolvedGetSkill struct {
 
 // resolveGetSkills supports standalone skills at a repository root and skill
 // collections beneath skills/. An explicit subdirectory always wins.
-func (e *Engine) resolveGetSkills(ctx context.Context, addr *address.Address, io IO) ([]resolvedGetSkill, error) {
+func (e *Engine) resolveGetSkills(ctx context.Context, addr *address.Address, io IO, all bool) ([]resolvedGetSkill, error) {
 	memo := newOperationMemo(io.Progress)
 	if addr.Subdir != "" {
 		mat, err := e.resolveAndFetch(ctx, addr.Repo, addr.Subdir, addr.Ref, memo)
@@ -308,7 +321,7 @@ func (e *Engine) resolveGetSkills(ctx context.Context, addr *address.Address, io
 		return nil, err
 	}
 	io.stopProgress()
-	candidates, err := chooseSkillCandidates(root.contentDir, addr.Repo, io)
+	candidates, err := chooseSkillCandidates(root.contentDir, addr.Repo, io, all)
 	if err != nil {
 		return nil, err
 	}
@@ -387,8 +400,11 @@ type skillCandidate struct {
 }
 
 // chooseSkillCandidates lets an interactive caller choose one or more skills.
-// --yes explicitly accepts the full discovered collection.
-func chooseSkillCandidates(root, repo string, io IO) ([]skillCandidate, error) {
+// --all accepts the full discovered collection without asking, and a single
+// candidate needs no choice at all. --yes is deliberately not consulted: it
+// answers the confirmation that follows, while --all is what states the set,
+// which is the same split remove and share use.
+func chooseSkillCandidates(root, repo string, io IO, all bool) ([]skillCandidate, error) {
 	candidates, err := skillCandidates(root)
 	if err != nil {
 		return nil, err
@@ -396,7 +412,7 @@ func chooseSkillCandidates(root, repo string, io IO) ([]skillCandidate, error) {
 	if len(candidates) == 0 {
 		return nil, &source.NoSkillMDError{Detail: i18n.Text("engine.get.skill_md_missing_repository")}
 	}
-	if len(candidates) == 1 || io.Yes {
+	if len(candidates) == 1 || all {
 		return candidates, nil
 	}
 

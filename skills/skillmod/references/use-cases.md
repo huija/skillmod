@@ -135,10 +135,14 @@ must satisfy.
 
 Interactive terminals show one line per candidate: use ↑/← and ↓/→ to move,
 Space to toggle a selection, D to show or hide the current description and
-command, and Enter to confirm. `--yes` installs every discovered skill, so use
-it only when the selection is already clear; for a repository that holds several
-skills, interactive selection is preferable unless the user asked for all of
-them.
+command, and Enter to confirm. `--all` installs every discovered skill without
+asking, so use it only when the selection is already clear; for a repository
+that holds several skills, interactive selection is preferable unless the user
+asked for all of them. `--yes` is not the same thing: it answers the
+confirmations that follow the selection, and a non-interactive run of a
+multi-skill repository has to say `--all` to get past the selection step.
+On a terminal, `--yes` still lets the user pick skills; it skips only the later
+confirmations. The same rule applies to `share` and `remove`.
 
 Long-running `get` and `update` runs show a compact animated status block on
 interactive terminals. Remote version checks request only HEAD, branch, and tag

@@ -7,12 +7,14 @@ package cli
 import (
 	"errors"
 
+	"github.com/huija/skillmod/internal/engine"
 	"github.com/huija/skillmod/internal/i18n"
 	"github.com/spf13/cobra"
 )
 
 func newGetCmd(options *rootOptions) *cobra.Command {
 	var alias string
+	var all bool
 	cmd := &cobra.Command{
 		Use:   i18n.Text("cli.get.use"),
 		Short: i18n.Text("cli.get.short"),
@@ -23,10 +25,13 @@ func newGetCmd(options *rootOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			rep, err := eng.Get(cmd.Context(), args[0], alias, options.newIO(cmd), options.mutationOptions())
+			rep, err := eng.Get(cmd.Context(), args[0], alias, options.newIO(cmd), engine.GetOptions{
+				All: all, DryRun: options.dryRun,
+			})
 			return errors.Join(err, options.output(cmd, rep))
 		},
 	}
 	cmd.Flags().StringVarP(&alias, "alias", "a", "", i18n.Text("cli.get.flag_alias"))
+	cmd.Flags().BoolVar(&all, "all", false, i18n.Text("cli.get.flag_all"))
 	return cmd
 }

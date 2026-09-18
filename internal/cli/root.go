@@ -166,7 +166,7 @@ func (options *rootOptions) newIO(cmd *cobra.Command) engine.IO {
 		Out: out,
 		Yes: options.yes,
 	}
-	if !options.yes && isTerminal(os.Stdin) {
+	if isTerminal(os.Stdin) {
 		io.Confirm = ui.Interactive(os.Stdin, cmd.ErrOrStderr())
 	}
 	if isTerminal(os.Stderr) {

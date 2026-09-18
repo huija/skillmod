@@ -203,10 +203,10 @@ func selectRemovals(m *modfile.Mod, names []string, all bool, io IO) (map[string
 		return nil, fmt.Errorf("%s", i18n.Text("engine.remove.nothing_declared"))
 	}
 	// --yes answers the confirmation; it does not choose what to delete. A run
-	// without a channel to ask through is refused for the same reason, with
+	// without a channel to ask through is refused, with
 	// the message that names the two ways to say it explicitly, rather than
 	// the generic empty-selection one.
-	if io.Yes || io.Confirm == nil {
+	if io.Confirm == nil {
 		return nil, fmt.Errorf("%s", i18n.Text("engine.remove.needs_selection"))
 	}
 	options := make([]ui.Option, len(m.Skills))

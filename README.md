@@ -199,12 +199,20 @@ Every command accepts `--json` (`-j`) for machine-readable output and `--global`
 accept `--dry-run` (`-n`) and `--yes` (`-y`). `get` also accepts `--alias`
 (`-a`), `init` accepts `--force` (`-f`), `sync` accepts `--check` (`-c`) and
 `--relink` (`-r`), `share` accepts `--skill` (`-s`), `--agent` (`-a`), and
-`--remove` (`-r`), `remove` accepts `--skill` (`-s`) and `--agent` (`-a`), and `upgrade` accepts `--check` (`-c`) and `--tag` (`-t`).
-`--install-mode` and `--allow-downgrade` deliberately have no shorthand: the
-obvious letters are ambiguous, and both are typed rarely. Command help,
-summaries, prompts, and errors follow `SKILLMOD_LANG` when it is set and the
-system locale otherwise; JSON field names and action identifiers are never
-translated.
+`--remove` (`-r`), `remove` accepts `--skill` (`-s`) and `--agent` (`-a`), and `upgrade` accepts
+`--check` (`-c`) and `--tag` (`-t`).
+
+`get`, `remove`, and `share` accept `--all`, which states the whole set instead
+of asking for it: every skill the repository publishes, every declared entry,
+and every installed skill respectively. `--yes` is the other half of that pair —
+it answers the confirmations that follow a selection and never decides what the
+selection is. `--all`, `--install-mode`, `--allow-downgrade`, and
+`--on-conflict` deliberately have no shorthand: the obvious letters are
+ambiguous or already taken, and the long forms read better.
+
+Command help, summaries, prompts, and errors follow `SKILLMOD_LANG` when it is
+set and the system locale otherwise; JSON field names and action identifiers are
+never translated.
 
 ## Where the details live
 

@@ -57,6 +57,9 @@ msgstr "agent 名 %q 不是单个目录名；skillmod 链接到 .<名字>/s"
 msgid "cli.get.flag_alias"
 msgstr "安装目录别名（解决同名冲突）"
 
+msgid "cli.get.flag_all"
+msgstr "安装仓库发布的全部技能，不再询问"
+
 msgid "cli.get.long"
 msgstr "版本必须是 semver tag 或 40 位 commit SHA；分支名为可"
 "变引用，已拒绝。\n未指定版本时，按以下顺序解析：<"
@@ -68,7 +71,7 @@ msgstr "版本必须是 semver tag 或 40 位 commit SHA；分支名为可"
 "命令会省略冗余的 https:// 前缀，并在安全时优先使用唯"
 "一 skill 名简写。使用 ↑/← 移到上一项，↓/→ 移到下"
 "一项，空格键勾选或取消勾选，d 键展开或收起当前项的"
-"描述与命令，回车键确认。--yes 会安装发现的全部 skill"
+"描述与命令，回车键确认。--all 会安装发现的全部 skill"
 "。"
 
 msgid "cli.get.short"
@@ -399,7 +402,7 @@ msgstr "正在匹配请求的 skill 名称"
 #, go-format
 msgid "engine.get.multiple_skills_found_rerun"
 msgstr "在 %s 中发现多个 skill；请在交互模式选择一个或多"
-"个，使用 --yes 安装全部，或指定以下其中一个：\n  %s"
+"个，使用 --all 安装全部，或指定以下其中一个：\n  %s"
 
 #, go-format
 msgid "engine.get.multiple_skills_found_select"
