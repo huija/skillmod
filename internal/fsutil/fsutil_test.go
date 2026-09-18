@@ -155,12 +155,14 @@ func TestWriteFile_AtomicOverwrite(t *testing.T) {
 	}
 }
 
-// readAll reads path, retrying only the transient sharing violations Windows
-// reports while another goroutine replaces the file: MoveFileEx holds the
-// target during replacement, and a concurrent open loses that race even
-// though the write itself is correct. POSIX rename never errors for readers,
-// so the retry is a no-op there. The write side applies the same retry inside
-// Replace; the deadline bounds the wait against real failures.
+// readAll reads path, retrying only the transient errors Windows reports
+// while another goroutine replaces the file. MoveFileEx either holds the
+// target (a sharing violation) or has already disposed of it without yet
+// linking the replacement (file not found); both windows close the moment
+// the rename completes, so a complete file is always imminent. POSIX rename
+// never errors for readers, so the retry is a no-op there. The write side
+// applies the same retry inside Replace; the deadline bounds the wait
+// against real failures such as a path that never existed.
 func readAll(path string) ([]byte, error) {
 	deadline := time.Now().Add(2 * time.Second)
 	delay := time.Millisecond
