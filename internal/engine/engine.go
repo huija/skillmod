@@ -518,7 +518,7 @@ func (e *Engine) materialize(ctx context.Context, repo, subdir string, res resol
 	}
 	version := res.Version
 	if res.Kind == resolve.KindCommit {
-		version = resolve.PseudoVersion(tree.CommitTime, res.Commit)
+		version = resolve.PseudoVersion(res.BaseTag, tree.CommitTime, res.Commit)
 	}
 	snap, err := e.Store.PutSnapshot(store.SnapshotInfo{
 		Repo: repo, Version: version, Commit: res.Commit, Treehash: treeHash,

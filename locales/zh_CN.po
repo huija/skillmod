@@ -230,8 +230,10 @@ msgstr "当较新的标签消失时，允许 update 选择更低的语义"
 "版本"
 
 msgid "cli.update.long"
-msgstr "不带名称时作用于全部条目；commit 钉住的条目（含"
-"伪版本）升到默认分支 HEAD 的新伪版本。"
+msgstr "不带名称时作用于全部条目；所有条目统一按最新"
+"语义解析：优先最高标签（先子目录后根级），仓库完"
+"全没有标签时才升到默认分支 HEAD 的新伪版本。commit 钉"
+"住的条目（含伪版本）同样迁移到最新标签。"
 
 msgid "cli.update.short"
 msgstr "重新解析最新版本，更新 lock 并安装"
@@ -980,10 +982,6 @@ msgstr "正在连接 Git 服务器"
 #, go-format
 msgid "engine.update.entry_label"
 msgstr "%s: %s（%s）"
-
-#, go-format
-msgid "engine.update.entry_remote_has_default"
-msgstr "条目 %s: 远端无默认分支"
 
 #, go-format
 msgid "engine.update.entry_skill_mod"

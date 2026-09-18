@@ -232,8 +232,11 @@ msgstr "allow update to select a lower semantic version when newer tags dis"
 "appeared"
 
 msgid "cli.update.long"
-msgstr "With no names, update every entry. Commit-pinned entries, including"
-" pseudo-versions, advance to a new pseudo-version at default-branch HEAD."
+msgstr "With no names, update every entry. All entries resolve with the sam"
+"e latest semantics as get: the highest tag wins (subdirectory tags first, "
+"then root), and only repositories without any tag advance to a new pseudo-"
+"version at default-branch HEAD. Commit-pinned entries, including pseudo-ve"
+"rsions, migrate to that tag as well."
 
 msgid "cli.update.short"
 msgstr "resolve the latest versions, update the lock, and install"
@@ -998,10 +1001,6 @@ msgstr "contacting Git servers"
 #, go-format
 msgid "engine.update.entry_label"
 msgstr "%s: %s (%s)"
-
-#, go-format
-msgid "engine.update.entry_remote_has_default"
-msgstr "entry %s: remote has no default branch"
 
 #, go-format
 msgid "engine.update.entry_skill_mod"

@@ -1413,7 +1413,7 @@ func TestInit_SkipsDirectoriesThatCannotBeAliases(t *testing.T) {
 	}
 }
 
-// update advances tagged entries to latest and pseudo-version entries to a new pseudo-version at HEAD.
+// update advances a tagged entry to the latest tag.
 func TestUpdate(t *testing.T) {
 	r := newHelloRepo(t)
 	root := t.TempDir()
@@ -1777,6 +1777,82 @@ func TestUpdate_PseudoVersion(t *testing.T) {
 	}
 	if !resolve.IsPseudoVersion(lk2.Version) {
 		t.Errorf("updated version %q should remain a pseudo-version", lk2.Version)
+	}
+
+	// A further update with an unchanged HEAD keeps the entry.
+	rep, err := eng.Update(ctx, nil, engine.UpdateOptions{}, testIO())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Action != engine.ActionKeep || rep.Entries[0].Note != "already up to date" {
+		t.Errorf("update with unchanged HEAD = %+v, want already up to date", rep.Entries)
+	}
+}
+
+// A commit-pinned entry migrates to the latest tag once the repository publishes one,
+// instead of continuing to track default-branch HEAD.
+func TestUpdate_PseudoVersionMigratesToTag(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.WriteSkill("", "edge")
+	r.CommitAll("c1")
+	r.Finish()
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL, "", testIO()); err != nil { // No ref resolves HEAD to a pseudo-version.
+		t.Fatal(err)
+	}
+	lk1 := loadLockSkill(t, root, "edge")
+	if !resolve.IsPseudoVersion(lk1.Version) {
+		t.Fatalf("version %q is not a pseudo-version", lk1.Version)
+	}
+
+	r.Write("more.md", "x\n")
+	r.CommitAll("c2")
+	r.Evolve("v1.0.0", false)
+
+	if _, err := eng.Update(ctx, nil, engine.UpdateOptions{}, testIO()); err != nil {
+		t.Fatal(err)
+	}
+	lk2 := loadLockSkill(t, root, "edge")
+	if lk2.Version != "v1.0.0" {
+		t.Errorf("version after update = %s, want migrated to tag v1.0.0", lk2.Version)
+	}
+	if lk2.Commit == lk1.Commit {
+		t.Error("update kept the old commit instead of moving to the tagged one")
+	}
+}
+
+// An explicit commit pin on a repository with tags encodes the highest tag as the
+// pseudo-version base: v<base>-0.<timestamp>-<hash>.
+func TestGet_ByCommitSHAEncodesBaseTag(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.WriteSkill("", "pinned")
+	r.CommitAll("c1")
+	r.Tag("v1.0.0")
+	r.Write("after.md", "after the tag\n")
+	sha := r.CommitAll("c2")
+	r.Finish()
+	r.Evolve("", false) // Push main and the existing tag without creating a new one.
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@"+sha, "", testIO()); err != nil {
+		t.Fatalf("Get by SHA: %v", err)
+	}
+	lk := loadLockSkill(t, root, "pinned")
+	if !strings.HasPrefix(lk.Version, "v1.0.0-0.") {
+		t.Errorf("locked version %q, want base-tag-encoded pseudo-version v1.0.0-0.<timestamp>-<hash>", lk.Version)
+	}
+	if !resolve.IsPseudoVersion(lk.Version) {
+		t.Errorf("version %q is not recognized as a pseudo-version", lk.Version)
+	}
+	if lk.Commit != sha {
+		t.Errorf("lock commit = %s, want %s", lk.Commit, sha)
+	}
+	// The pseudo-version orders strictly below its base tag.
+	if got := resolve.CompareVersions("v1.0.0", lk.Version); got <= 0 {
+		t.Errorf("pseudo-version %q should order below its base tag v1.0.0", lk.Version)
 	}
 }
 

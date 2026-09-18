@@ -219,7 +219,7 @@ remotes additionally require `ssh` on `PATH`.
 | `share` | Link installed skills into agent directories such as `.claude` or `.codex`; see [Share with agents](#share-with-agents) |
 | `list` | Show every declaration, its version, and its installation status |
 | `why <selector>` | Explain one entry: source, resolved version, commit, dirhash, and per-target status |
-| `update [selector]` | Move entries to the newest immutable version; refuses a silent downgrade |
+| `update [selector]` | Move entries to the newest immutable version — the highest tag wins and only tagless repositories track HEAD; refuses a silent downgrade of tag locks |
 | `verify` | Check installed content against the lock; the CI gate |
 | `remove [selector]` | Delete declarations and clean managed installations; with `--agent`, unlink only those agents and keep the skills |
 | `prune` | Drop stale installations and lock records left behind by hand edits |

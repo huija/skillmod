@@ -44,17 +44,18 @@ func TestResolve_Explicit(t *testing.T) {
 		req         Request
 		wantVersion string
 		wantCommit  string
-		wantErr     any // nil means no error; otherwise this is the errors.As target
+		wantBase    string // expected BaseTag for commit pins; empty otherwise
+		wantErr     any    // nil means no error; otherwise this is the errors.As target
 	}{
-		{"exact root tag", Request{Ref: "v1.0.0"}, "v1.0.0", sha1, nil},
-		{"bare subdirectory version adds prefix", Request{Subdir: "code-review", Ref: "v1.2.0"}, "code-review/v1.2.0", sha2, nil},
-		{"fully qualified subdirectory tag", Request{Subdir: "code-review", Ref: "code-review/v1.0.0"}, "code-review/v1.0.0", sha1, nil},
-		{"bare subdirectory version falls back to root tag", Request{Subdir: "pdf", Ref: "v1.0.0"}, "v1.0.0", sha1, nil},
-		{"40-character SHA pin", Request{Ref: sha1}, "", sha1, nil},
-		{"40-character SHA under subdirectory", Request{Subdir: "pdf", Ref: sha2}, "", sha2, nil},
-		{"branch rejected", Request{Ref: "main"}, "", "", &BranchError{}},
-		{"branch under subdirectory rejected", Request{Subdir: "pdf", Ref: "dev"}, "", "", &BranchError{}},
-		{"version not found", Request{Ref: "v9.9.9"}, "", "", &NotFoundError{}},
+		{"exact root tag", Request{Ref: "v1.0.0"}, "v1.0.0", sha1, "", nil},
+		{"bare subdirectory version adds prefix", Request{Subdir: "code-review", Ref: "v1.2.0"}, "code-review/v1.2.0", sha2, "", nil},
+		{"fully qualified subdirectory tag", Request{Subdir: "code-review", Ref: "code-review/v1.0.0"}, "code-review/v1.0.0", sha1, "", nil},
+		{"bare subdirectory version falls back to root tag", Request{Subdir: "pdf", Ref: "v1.0.0"}, "v1.0.0", sha1, "", nil},
+		{"40-character SHA pin", Request{Ref: sha1}, "", sha1, "v1.2.0", nil},
+		{"40-character SHA under subdirectory", Request{Subdir: "pdf", Ref: sha2}, "", sha2, "pdf/v0.8.1", nil},
+		{"branch rejected", Request{Ref: "main"}, "", "", "", &BranchError{}},
+		{"branch under subdirectory rejected", Request{Subdir: "pdf", Ref: "dev"}, "", "", "", &BranchError{}},
+		{"version not found", Request{Ref: "v9.9.9"}, "", "", "", &NotFoundError{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -68,8 +69,8 @@ func TestResolve_Explicit(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Resolve: %v", err)
 			}
-			if got.Version != tt.wantVersion || got.Commit != tt.wantCommit {
-				t.Errorf("= %+v, want version=%q commit=%q", got, tt.wantVersion, tt.wantCommit)
+			if got.Version != tt.wantVersion || got.Commit != tt.wantCommit || got.BaseTag != tt.wantBase {
+				t.Errorf("= %+v, want version=%q commit=%q base=%q", got, tt.wantVersion, tt.wantCommit, tt.wantBase)
 			}
 		})
 	}
@@ -203,13 +204,27 @@ func TestIsSHA(t *testing.T) {
 
 func TestPseudoVersion(t *testing.T) {
 	ts := time.Date(2026, 8, 26, 12, 30, 45, 0, time.FixedZone("CST", 8*3600))
-	v := PseudoVersion(ts, sha1)
+	// Legacy shape for repositories without tags.
+	v := PseudoVersion("", ts, sha1)
 	// Convert to UTC: 12:30:45 +0800 = 04:30:45Z.
 	if v != "v0.0.0-20260826043045-0123456789ab" {
 		t.Errorf("PseudoVersion = %q", v)
 	}
-	if !IsPseudoVersion(v) {
-		t.Errorf("generated pseudo-version %q was rejected by IsPseudoVersion", v)
+	// Base-tag shape encodes the highest tag preceding the commit.
+	base := PseudoVersion("v1.0.96", ts, sha1)
+	if base != "v1.0.96-0.20260826043045-0123456789ab" {
+		t.Errorf("PseudoVersion(base) = %q", base)
+	}
+	if !IsPseudoVersion(v) || !IsPseudoVersion(base) {
+		t.Errorf("IsPseudoVersion rejected a generated shape: %q / %q", v, base)
+	}
+	// The base-tag shape orders strictly below its base tag and above older tags,
+	// so latest selection needs no special-casing.
+	if got := CompareVersions("v1.0.96", base); got <= 0 {
+		t.Errorf("base-tag pseudo-version %q should order below its base tag v1.0.96", base)
+	}
+	if got := CompareVersions(base, "v1.0.95"); got <= 0 {
+		t.Errorf("base-tag pseudo-version %q should order above older tags", base)
 	}
 	if IsPseudoVersion("v1.2.0") || IsPseudoVersion("v0.0.0-999") {
 		t.Error("IsPseudoVersion accepted a non-pseudo-version")

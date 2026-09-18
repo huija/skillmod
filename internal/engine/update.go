@@ -30,8 +30,14 @@ type UpdateOptions struct {
 // Update implements skillmod update [names...]: resolve the latest versions, update the lock, and install.
 // A selector may be either the published skill name or its installation alias;
 // a published name selects every declaration with that name. With no selectors
-// it updates all remote entries. Commit-pinned entries, including pseudo-versions,
-// advance to a new pseudo-version at default-branch HEAD.
+// it updates all remote entries.
+//
+// Every remote entry follows the same latest semantics as get: the highest
+// <subdir>/v* tag, else the highest root-level v* tag, else — for repositories
+// without any tag — a new pseudo-version at default-branch HEAD. Commit-pinned
+// entries (pseudo-versions and SHAs) therefore migrate to the resolved tag
+// instead of tracking HEAD. --allow-downgrade opts in when the resolved tag is
+// older than an existing tag lock.
 func (e *Engine) Update(ctx context.Context, names []string, options UpdateOptions, io IO) (*Report, error) {
 	defer io.stopProgress()
 	unlock, err := e.lockState()
@@ -128,47 +134,47 @@ func (e *Engine) Update(ctx context.Context, names []string, options UpdateOptio
 			installedVersion = lk.Version
 		}
 
-		var res resolve.Resolution
-		if resolve.IsPseudoVersion(cur) || resolve.IsSHA(cur) {
-			// Advance a commit-pinned entry to default-branch HEAD.
-			if refs.DefaultHead == "" {
-				return nil, fmt.Errorf(i18n.Text("engine.update.entry_remote_has_default"), sk.Name)
-			}
-			if lk != nil && refs.DefaultHead == lk.Commit {
-				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: ActionKeep, Version: cur, Note: i18n.Text("engine.update.already_up_to_date")})
-				continue
-			}
-			fetchRef := "HEAD"
-			if refs.DefaultBranch != "" {
-				fetchRef = "refs/heads/" + refs.DefaultBranch
-			}
-			res = resolve.Resolution{Kind: resolve.KindCommit, Commit: refs.DefaultHead, FetchRef: fetchRef}
-		} else {
-			r, err := resolve.Resolve(resolve.Request{Repo: repo, Subdir: subdir}, refs)
-			if err != nil {
-				return nil, err
-			}
-			if r.Kind == resolve.KindTag && resolve.CompareVersions(r.Version, installedVersion) < 0 && !options.AllowDowngrade {
-				rep.Entries = append(rep.Entries, EntryReport{
-					Name: sk.Name, Source: sk.Source, Action: ActionKeep, Version: installedVersion,
-					Note: i18n.Format("engine.update.remote_latest_refusing", r.Version, installedVersion),
-				})
-				continue
-			}
-			if r.Version == installedVersion && lk != nil && lk.Commit != "" {
-				if r.Commit == lk.Commit {
-					rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: ActionKeep, Version: installedVersion, Note: i18n.Text("engine.update.already_up_to_date")})
-					continue
-				}
-				path, _ := e.Store.SnapshotPath(repo, installedVersion)
-				return nil, &store.SnapshotConflictError{
-					Path: path,
-					Have: store.SnapshotInfo{Repo: repo, Version: installedVersion, Commit: lk.Commit},
-					Want: store.SnapshotInfo{Repo: repo, Version: r.Version, Commit: r.Commit},
-				}
-			}
-			res = *r
+		// Unified latest semantics, shared with get: the highest <subdir>/v* tag,
+		// else the highest root-level v* tag, else — for repositories without any
+		// tag — a new pseudo-version at default-branch HEAD.
+		r, err := resolve.Resolve(resolve.Request{Repo: repo, Subdir: subdir}, refs)
+		if err != nil {
+			return nil, err
 		}
+		// Fast keep check for tagless repositories: an unchanged default-branch HEAD
+		// means the commit pin is already current.
+		if r.Kind == resolve.KindCommit &&
+			(resolve.IsPseudoVersion(installedVersion) || resolve.IsSHA(installedVersion)) &&
+			lk != nil && refs.DefaultHead == lk.Commit {
+			rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: ActionKeep, Version: installedVersion, Note: i18n.Text("engine.update.already_up_to_date")})
+			continue
+		}
+		// Refuse a downgrade only for tag locks: commit pins carry no comparable base
+		// version, and moving them to the resolved latest tag is the point of the
+		// unified semantics. Legacy v0.0.0 pseudo-versions sort below every tag even
+		// when their commit is newer content, so comparing them would wrongly classify
+		// the migration as a downgrade.
+		commitPinned := resolve.IsPseudoVersion(installedVersion) || resolve.IsSHA(installedVersion)
+		if r.Kind == resolve.KindTag && !commitPinned && resolve.CompareVersions(r.Version, installedVersion) < 0 && !options.AllowDowngrade {
+			rep.Entries = append(rep.Entries, EntryReport{
+				Name: sk.Name, Source: sk.Source, Action: ActionKeep, Version: installedVersion,
+				Note: i18n.Format("engine.update.remote_latest_refusing", r.Version, installedVersion),
+			})
+			continue
+		}
+		if r.Version == installedVersion && lk != nil && lk.Commit != "" {
+			if r.Commit == lk.Commit {
+				rep.Entries = append(rep.Entries, EntryReport{Name: sk.Name, Action: ActionKeep, Version: installedVersion, Note: i18n.Text("engine.update.already_up_to_date")})
+				continue
+			}
+			path, _ := e.Store.SnapshotPath(repo, installedVersion)
+			return nil, &store.SnapshotConflictError{
+				Path: path,
+				Have: store.SnapshotInfo{Repo: repo, Version: installedVersion, Commit: lk.Commit},
+				Want: store.SnapshotInfo{Repo: repo, Version: r.Version, Commit: r.Commit},
+			}
+		}
+		res := *r
 
 		mat, err := e.materialize(ctx, repo, subdir, res, "", memo)
 		if err != nil {

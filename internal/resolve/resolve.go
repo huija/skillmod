@@ -34,7 +34,8 @@ const (
 	// KindTag identifies a Git tag; Version contains its complete name.
 	KindTag Kind = iota
 	// KindCommit pins a commit, either an explicit 40-character SHA or the default-branch HEAD fallback.
-	// Version starts empty and is filled with PseudoVersion by the engine after fetching.
+	// Version starts empty and is filled with PseudoVersion by the engine after fetching;
+	// BaseTag carries the base tag to encode into that pseudo-version.
 	KindCommit
 )
 
@@ -44,6 +45,7 @@ type Resolution struct {
 	Version  string // version written to mod and lock files; the complete tag name for KindTag
 	Commit   string // target commit SHA
 	FetchRef string // remote ref suitable for a targeted fetch; empty for an explicit SHA
+	BaseTag  string // highest semantic-version tag preceding a KindCommit pin; empty when the repository has no tags
 }
 
 // Request describes one resolution request.
@@ -103,8 +105,10 @@ func resolveExplicit(req Request, refs *Refs) (*Resolution, error) {
 		return r, nil
 	}
 	// 3. Pin a 40-character hex commit directly, skipping every check except tag matching.
+	// BaseTag assumes the commit follows the current highest tag (the common pin-beyond-latest
+	// case); ancestry cannot be proven from an ls-remote snapshot alone.
 	if IsSHA(req.Ref) {
-		return &Resolution{Kind: KindCommit, Commit: req.Ref}, nil
+		return &Resolution{Kind: KindCommit, Commit: req.Ref, BaseTag: baseTagFor(req.Subdir, refs)}, nil
 	}
 	// 4. Reject branch names using ls-remote data rather than string-pattern guesses.
 	if _, ok := refs.Heads[req.Ref]; ok {
@@ -126,6 +130,8 @@ func resolveLatest(req Request, refs *Refs) (*Resolution, error) {
 		return &Resolution{Kind: KindTag, Version: tag, Commit: refs.Tags[tag], FetchRef: "refs/tags/" + tag}, nil
 	}
 	// 3. Default-branch HEAD as a pseudo-version generated after fetching.
+	// BaseTag stays empty: this branch only fires when no semantic-version tag exists,
+	// so there is no base to encode.
 	if refs.DefaultHead != "" {
 		fetchRef := "HEAD"
 		if refs.DefaultBranch != "" {
@@ -134,6 +140,22 @@ func resolveLatest(req Request, refs *Refs) (*Resolution, error) {
 		return &Resolution{Kind: KindCommit, Commit: refs.DefaultHead, FetchRef: fetchRef}, nil
 	}
 	return nil, &EmptyRepoError{Repo: req.Repo}
+}
+
+// baseTagFor returns the tag to encode into a pseudo-version for a commit pin:
+// the highest <subdir>/v* tag when present, else the highest root-level v* tag,
+// mirroring the resolveLatest priority. Empty when the repository has no
+// semantic-version tags.
+func baseTagFor(subdir string, refs *Refs) string {
+	if subdir != "" {
+		if tag, ok := highestSemver(prefixedTags(refs.Tags, subdir+"/")); ok {
+			return tag
+		}
+	}
+	if tag, ok := highestSemver(rootTags(refs.Tags)); ok {
+		return tag
+	}
+	return ""
 }
 
 func tryTag(tag string, refs *Refs) *Resolution {
@@ -224,13 +246,23 @@ func isLowerHex(c rune) bool {
 	return '0' <= c && c <= '9' || 'a' <= c && c <= 'f'
 }
 
-// PseudoVersion creates v0.0.0-<UTC commit time: yyyymmddhhmmss>-<sha12>,
-// following the Go pseudo-version format.
-func PseudoVersion(commitTime time.Time, sha string) string {
-	return fmt.Sprintf("v0.0.0-%s-%s", commitTime.UTC().Format("20060102150405"), sha[:12])
+// PseudoVersion creates a Go-style pseudo-version for a commit pin:
+//
+//	base empty (repository without tags): v0.0.0-<UTC commit time>-<sha12>;
+//	base non-empty: v<base>-0.<UTC commit time>-<sha12>, which semver-orders
+//	strictly below the base tag and above every older tag, so latest selection
+//	needs no special-casing.
+//
+// The timestamp format is yyyymmddhhmmss in UTC.
+func PseudoVersion(base string, commitTime time.Time, sha string) string {
+	if base == "" {
+		return fmt.Sprintf("v0.0.0-%s-%s", commitTime.UTC().Format("20060102150405"), sha[:12])
+	}
+	return fmt.Sprintf("%s-0.%s-%s", base, commitTime.UTC().Format("20060102150405"), sha[:12])
 }
 
-// IsPseudoVersion recognizes v0.0.0-<14-digit timestamp>-<12 hex digits>.
+// IsPseudoVersion recognizes both pseudo-version shapes:
+// v0.0.0-<14-digit timestamp>-<12 hex digits> and v<semver>-0.<14-digit timestamp>-<12 hex digits>.
 func IsPseudoVersion(v string) bool {
 	return pseudoVersionRe.MatchString(v)
 }
@@ -241,4 +273,7 @@ func CompareVersions(a, b string) int {
 	return semver.Compare(stripPrefix(a), stripPrefix(b))
 }
 
-var pseudoVersionRe = regexp.MustCompile(`^v0\.0\.0-\d{14}-[0-9a-f]{12}$`)
+// pseudoVersionRe recognizes both pseudo-version shapes: the legacy
+// v0.0.0-<timestamp>-<hash> form written before base tags existed, and the
+// base-tag-encoded v<semver>-0.<timestamp>-<hash> form.
+var pseudoVersionRe = regexp.MustCompile(`^v\d+\.\d+\.\d+-(?:0\.\d{14}|\d{14})-[0-9a-f]{12}$`)

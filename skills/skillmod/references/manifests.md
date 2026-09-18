@@ -35,10 +35,13 @@ reference cannot be locked.
 | --- | --- | --- |
 | Semantic-version tag | `v1.2.0`, `code-review/v1.2.0` | The publisher tags releases |
 | Commit SHA | a full 40-character SHA | You need one exact revision |
-| Pseudo-version | `v0.0.0-20260624023612-49f948faa925` | The repository has no tags |
+| Pseudo-version | `v1.0.96-0.20260624023612-49f948faa925` | A commit pin; the base is the highest tag when the repository has tags, plain `v0.0.0` when it has none |
 
 `SKILL.lock` additionally records the resolved commit and the content hash, so a
 pseudo-version remains resolvable on a machine that has never seen the tag.
+Locks written before base tags existed use the plain
+`v0.0.0-<timestamp>-<hash>` shape and stay valid; the next `update` migrates
+them to the repository's latest tag.
 
 ## Repository addresses
 

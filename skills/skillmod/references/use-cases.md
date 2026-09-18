@@ -241,9 +241,16 @@ A published name can represent more than one aliased declaration; an
 installation alias selects its corresponding entry. Review the output whenever
 the selector may not be unique.
 
-skillmod refuses an accidental semantic-version downgrade when newer tags have
-disappeared. Use `--allow-downgrade` only after confirming that the remote tag
-removal was intentional:
+`update` shares `get`'s latest semantics: every remote entry moves to the
+highest semantic-version tag (subdirectory tags first, then root), and only a
+repository without any tag advances to a new pseudo-version at default-branch
+HEAD. Entries pinned to a commit — pseudo-versions and SHAs — migrate to that
+tag as well, so machines that adopted the same skill differently converge on
+the same version.
+
+skillmod refuses an accidental semantic-version downgrade of a tag lock when
+newer tags have disappeared. Use `--allow-downgrade` only after confirming that
+the remote tag removal was intentional:
 
 ```sh
 skillmod update review --allow-downgrade
