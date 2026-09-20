@@ -882,8 +882,12 @@ msgstr "SKILL.lock is tool-maintained; repair the listed entry by hand, or "
 "back up and delete the file, then re-run skillmod sync to regenerate it"
 
 msgid "engine.skill_mod_found_advice"
-msgstr "SKILL.mod not found\nAdvice: run skillmod init or skillmod get firs"
-"t"
+msgstr "SKILL.mod not found\nAdvice: run skillmod init or skillmod get to m"
+"anage this directory as a project, or add --global to manage global skills"
+
+msgid "engine.skill_mod_found_advice_global"
+msgstr "SKILL.mod not found\nAdvice: run skillmod --global init or skillmod"
+" --global get to manage global skills"
 
 #, go-format
 msgid "engine.skill_path_not_materializable"

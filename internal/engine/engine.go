@@ -149,6 +149,16 @@ func (e *Engine) saveState(m *modfile.Mod, lock *modfile.Lock) error {
 func (e *Engine) loadMod() (*modfile.Mod, error) {
 	m, err := modfile.LoadMod(e.manifestRoot())
 	if os.IsNotExist(err) {
+		// The advice differs by scope because the recovery paths differ. A
+		// project without a manifest usually means the user is standing in
+		// the wrong directory — most often $HOME, whose installation
+		// directories are the global scope's — so the project message offers
+		// --global as the likely intent before suggesting init. The global
+		// scope has exactly one recovery path, spelled with the same flag
+		// that selects it.
+		if e.ManifestRoot != "" {
+			return nil, fmt.Errorf("%s", i18n.Text("engine.skill_mod_found_advice_global"))
+		}
 		return nil, fmt.Errorf("%s", i18n.Text("engine.skill_mod_found_advice"))
 	}
 	return m, err

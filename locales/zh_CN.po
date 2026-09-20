@@ -865,7 +865,13 @@ msgstr "SKILL.lock 由工具维护；请手工修复出错的条目，或"
 "备份并删除该文件后重新运行 skillmod sync 重新生成"
 
 msgid "engine.skill_mod_found_advice"
-msgstr "未找到 SKILL.mod\n建议先执行 skillmod init 或 skillmod get"
+msgstr "未找到 SKILL.mod\n建议：执行 skillmod init 或 skillmod get"
+" 将当前目录作为项目管理；若要管理全局技能，请在命"
+"令中加入 --global"
+
+msgid "engine.skill_mod_found_advice_global"
+msgstr "未找到 SKILL.mod\n建议先执行 skillmod --global init 或 ski"
+"llmod --global get 管理全局技能"
 
 #, go-format
 msgid "engine.skill_path_not_materializable"
