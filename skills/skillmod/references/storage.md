@@ -41,7 +41,14 @@ touching the remote. An explicit `@commit` reuses an existing snapshot of that
 commit the same way. Requesting latest, or running `skillmod update`, keeps
 online refresh semantics.
 
-Set `SKILLMOD_HOME` to relocate the store.
+Each `ls-remote` result is cached with the time it was taken. `list` reuses a
+snapshot younger than 15 minutes instead of contacting every declared
+repository again, which is what keeps `list --global` fast on a machine with
+many skills; `update` is the command that deliberately refreshes, and a `list`
+run after a new tag shows it. `why` and `verify` never contact the remote at
+all — they answer from `SKILL.mod`, `SKILL.lock`, and the installed content —
+so they report the local state rather than a snapshot. Set `SKILLMOD_HOME` to
+relocate the store.
 
 `--dry-run` leaves manifests and installations untouched, though remote
 provenance verification may still populate the shared cache.

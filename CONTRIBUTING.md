@@ -9,6 +9,8 @@ see [README.md](README.md) and the agent skill under
 
 - Go 1.26.6 or later, and `git` on `PATH`.
 - Run `make check` before opening a pull request; CI enforces the same gate.
+- Changes reach `main` only through pull requests: branch protection requires
+  the CI checks to pass before a merge can land.
 
 ## The gate
 
@@ -50,10 +52,10 @@ sees them:
   at its root, because `upgrade` locates the binary by base name.
 
 Because the archives are not built until the release run, the check that catches
-a platform break before the tag is the ordinary one: land the change on `main`,
-wait for CI to go green, and only then push the tag. The release workflow
-re-runs every gate before publishing, so a failure there leaves a tag that has to
-be deleted or moved.
+a platform break before the tag is the ordinary one: merge the change through a
+pull request, wait for CI to go green on `main`, and only then push the tag. The
+release workflow re-runs every gate before publishing, so a failure there leaves
+a tag that has to be deleted or moved.
 
 ## User-facing text
 

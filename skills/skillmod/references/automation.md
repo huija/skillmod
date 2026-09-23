@@ -16,10 +16,17 @@ skillmod run instead of a person reading its output.
 of overwriting it. That is not total failure and not total success; read the
 report to see what was preserved and why.
 
-An in-progress command prints its human summary as usual. Add `--json` to also
-emit a structured report on stdout.
-
 ## JSON reports
+
+`--json` (`-j`) writes exactly one document to stdout and nothing else — the
+human summary is not printed in that mode, and a failing run writes a document
+too, with an `error` field naming the failure and the same exit code it would
+have had anyway. That holds whether the command failed partway through or
+before it could report anything at all, so the document is the one place a job
+has to look. A `grep` for `"error"` therefore tells the two outcomes apart
+without parsing anything. Only a usage error, such as an unknown flag, stays
+plain text on stderr with exit code 1, because no command ran to produce a
+report.
 
 A report separates the command that ran from the outcome of each declaration and
 of each installation directory.
@@ -42,7 +49,8 @@ executable's own `targetResults[0].action` says what happened to the file:
 `keep` means it was left alone. The report is written even when the upgrade
 fails, so `--json` always decodes one document.
 
-Add `--json` to `list`, `why`, and `verify` for the report shape shown below:
+Every command takes `--json`. The shape is the same everywhere; the example is
+a `verify` run:
 
 ```json
 {
@@ -68,6 +76,21 @@ Add `--json` to `list`, `why`, and `verify` for the report shape shown below:
   ]
 }
 ```
+
+A failing run keeps the same shape and adds `"error": "..."` with the message
+that would otherwise have gone to stderr:
+
+```json
+{
+  "action": "get",
+  "entries": [],
+  "error": "no skill named \"nope\" in github.com/openai/skills; the repository provides: gh-fix-ci"
+}
+```
+
+`entries` is always an array, and a document with `error` has no entries for
+the work that never started. Read the exit code for the outcome class, the
+`action` field for the command, and `error` when the run failed.
 
 Inspection reports (`list`, `why`, and `verify`) also carry `requestedVersion`
 for remote entries: it is the exact `SKILL.mod` value, while `version` is the
