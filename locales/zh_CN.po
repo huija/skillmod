@@ -713,12 +713,21 @@ msgstr "本地条目，无版本"
 msgid "engine.remove.locally_modified_kept"
 msgstr "存在本地修改，已保留安装文件："
 
+#, go-format
+msgid "engine.remove.multiple_from_repository"
+msgstr "%s 中有多个条目；交互模式中选择一个或多个，或"
+"直接指定：%s"
+
 msgid "engine.remove.needs_selection"
 msgstr "未指定条目；请给出名称或传 --all，或在终端中运"
 "行 remove"
 
 msgid "engine.remove.no_entries_selected"
 msgstr "未选择任何条目"
+
+#, go-format
+msgid "engine.remove.no_entry_from_repository"
+msgstr "SKILL.mod 中没有来自 %s 的条目"
 
 msgid "engine.remove.nothing_declared"
 msgstr "SKILL.mod 中没有声明条目"
@@ -729,6 +738,10 @@ msgstr "已删除 %d 个声明和 %d 个内容未改动的安装目录"
 
 msgid "engine.remove.select_entries"
 msgstr "选择要删除的条目"
+
+#, go-format
+msgid "engine.remove.select_from_repository"
+msgstr "%s 中有多个 skill；选择一个或多个"
 
 msgid "engine.remove.share_cleanup_failed"
 msgstr "清理部分分享链接失败"

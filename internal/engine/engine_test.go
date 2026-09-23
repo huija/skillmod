@@ -2232,6 +2232,183 @@ func TestRemoveWithoutNamesNeedsASelection(t *testing.T) {
 	assertStateDirs(t, root, "alpha")
 }
 
+// TestRemoveAcceptsARepositorySelector covers remove's repository form: a
+// repository that declares one skill needs no choice, several entries from one
+// repository are offered interactively exactly like get's chooser, and a
+// repository nothing comes from is reported instead of ignored.
+func TestRemoveAcceptsARepositorySelector(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.WriteSkill("skills/alpha", "alpha")
+	r.WriteSkill("skills/beta", "beta")
+	r.CommitAll("collection")
+	r.Tag("v1.0.0")
+	r.Finish()
+	other := newHelloRepo(t)
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO(), engine.GetOptions{All: true}); err != nil {
+		t.Fatalf("Get collection: %v", err)
+	}
+	if _, err := eng.Get(ctx, other.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get hello: %v", err)
+	}
+
+	// A single-entry repository removes without asking.
+	rep, err := eng.Remove(ctx, []string{other.URL}, testIO())
+	if err != nil {
+		t.Fatalf("Remove(single-entry repository): %v", err)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Name != "hello" {
+		t.Fatalf("Remove report = %+v, want only hello", rep.Entries)
+	}
+
+	// Several entries from one repository: the caller picks which.
+	chooser := &shareChooser{selections: [][]int{{1}}}
+	rep, err = eng.Remove(ctx, []string{r.URL}, engine.IO{Out: io.Discard, Confirm: chooser})
+	if err != nil {
+		t.Fatalf("Remove(repository with several entries): %v", err)
+	}
+	if chooser.calls != 1 {
+		t.Fatalf("selector calls = %d, want one repository selection", chooser.calls)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Name != "beta" {
+		t.Fatalf("Remove report = %+v, want only the picked beta", rep.Entries)
+	}
+	if _, err := os.Stat(installedDir(root, "beta")); !os.IsNotExist(err) {
+		t.Errorf("picked installation error = %v, want not exist", err)
+	}
+	if _, err := os.Stat(installedDir(root, "alpha")); err != nil {
+		t.Errorf("unpicked installation = %v, want kept", err)
+	}
+
+	// A repository nothing comes from is reported rather than silently ignored.
+	if _, err := eng.Remove(ctx, []string{"github.com/acme/other"}, testIO()); err == nil ||
+		!strings.Contains(err.Error(), "github.com/acme/other") {
+		t.Errorf("Remove(unknown repository) error = %v, want the repository named", err)
+	}
+}
+
+// TestRemoveRepositorySelectorWithoutAChannelListsCandidates refuses to guess
+// between several entries from one repository when there is no terminal to ask
+// through, and lists them the way get lists multiple skills.
+func TestRemoveRepositorySelectorWithoutAChannelListsCandidates(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.WriteSkill("skills/alpha", "alpha")
+	r.WriteSkill("skills/beta", "beta")
+	r.CommitAll("collection")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO(), engine.GetOptions{All: true}); err != nil {
+		t.Fatalf("Get collection: %v", err)
+	}
+	_, err := eng.Remove(ctx, []string{r.URL}, testIO())
+	if err == nil {
+		t.Fatal("Remove(repository) without a channel succeeded, want a candidate listing")
+	}
+	for _, want := range []string{"alpha", "beta"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Remove error = %v, want %q listed", err, want)
+		}
+	}
+	assertStateDirs(t, root, "alpha", "beta")
+}
+
+// TestRemoveRepositorySelectorWithAllTakesEveryEntry pins the non-interactive
+// way to say "everything this repository brought in". --all expands a
+// repository selector, so a run with no terminal deletes the whole set instead
+// of stopping to list candidates, and entries from other repositories stay.
+func TestRemoveRepositorySelectorWithAllTakesEveryEntry(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.WriteSkill("skills/alpha", "alpha")
+	r.WriteSkill("skills/beta", "beta")
+	r.CommitAll("collection")
+	r.Tag("v1.0.0")
+	r.Finish()
+	other := newHelloRepo(t)
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO(), engine.GetOptions{All: true}); err != nil {
+		t.Fatalf("Get collection: %v", err)
+	}
+	if _, err := eng.Get(ctx, other.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get hello: %v", err)
+	}
+
+	rep, err := eng.Remove(ctx, []string{r.URL}, testIO(), engine.RemoveOptions{All: true})
+	if err != nil {
+		t.Fatalf("Remove(repository, all): %v", err)
+	}
+	if len(rep.Entries) != 2 {
+		t.Fatalf("Remove report = %+v, want both collection entries", rep.Entries)
+	}
+	assertStateDirs(t, root, "hello")
+
+	// --all states the set, so naming a skill alongside it is still refused
+	// rather than silently widened to the whole declaration.
+	if _, err := eng.Remove(ctx, []string{"hello"}, testIO(), engine.RemoveOptions{All: true}); err == nil ||
+		!strings.Contains(err.Error(), "--all") {
+		t.Errorf("Remove(name, all) error = %v, want the combination refused", err)
+	}
+	assertStateDirs(t, root, "hello")
+}
+
+// TestRemoveAgentWithAllAndARepositorySelector pins the --agent path's
+// repository form. --all expands a repository selector there exactly as it does
+// for a removal, so one non-interactive command unshares everything that
+// repository declared; the expansion happens before the delegation to share,
+// which is why share does not see a set stated twice and refuse it.
+func TestRemoveAgentWithAllAndARepositorySelector(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.WriteSkill("skills/alpha", "alpha")
+	r.WriteSkill("skills/beta", "beta")
+	r.CommitAll("collection")
+	r.Tag("v1.0.0")
+	r.Finish()
+	other := newHelloRepo(t)
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO(), engine.GetOptions{All: true}); err != nil {
+		t.Fatalf("Get collection: %v", err)
+	}
+	if _, err := eng.Get(ctx, other.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get hello: %v", err)
+	}
+	for _, name := range []string{"alpha", "beta", "hello"} {
+		if _, err := eng.Share(ctx, engine.ShareOptions{Skills: []string{name}, Agents: []string{"claude"}}, testIO()); err != nil {
+			t.Fatalf("Share(%s): %v", name, err)
+		}
+	}
+
+	rep, err := eng.Remove(ctx, []string{r.URL}, testIO(), engine.RemoveOptions{All: true, Agents: []string{"claude"}})
+	if err != nil {
+		t.Fatalf("Remove(repository, all, --agent claude): %v", err)
+	}
+	if len(rep.Entries) != 2 {
+		t.Fatalf("Remove report = %+v, want both collection entries", rep.Entries)
+	}
+	for _, name := range []string{"alpha", "beta"} {
+		if got := agentsOf(loadMod(t, root), name); len(got) != 0 {
+			t.Errorf("%s agents after unsharing the repository = %v, want none", name, got)
+		}
+		if _, err := os.Stat(filepath.Join(agentSkillsDir(root, "claude"), name)); !os.IsNotExist(err) {
+			t.Errorf("%s claude link = %v, want not exist", name, err)
+		}
+	}
+	// hello came from another repository, so it is left linked, and the managed
+	// copies stay either way: --agent only stops the sharing.
+	if got := agentsOf(loadMod(t, root), "hello"); len(got) != 1 || got[0] != "claude" {
+		t.Errorf("hello agents = %v, want [claude]", got)
+	}
+	assertStateDirs(t, root, "alpha", "beta", "hello")
+}
+
+// TestRemoveKeepsModifiedInstallationAndReportsPartial covers the partial path.
 func TestRemoveKeepsModifiedInstallationAndReportsPartial(t *testing.T) {
 	r := newHelloRepo(t)
 	root := t.TempDir()

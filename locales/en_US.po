@@ -728,12 +728,21 @@ msgstr "local entry, no version"
 msgid "engine.remove.locally_modified_kept"
 msgstr "locally modified; kept installed files: "
 
+#, go-format
+msgid "engine.remove.multiple_from_repository"
+msgstr "multiple entries come from %s; rerun interactively to select one or"
+" more, or name them: %s"
+
 msgid "engine.remove.needs_selection"
 msgstr "no entries were requested; pass names or --all, or run remove in a "
 "terminal"
 
 msgid "engine.remove.no_entries_selected"
 msgstr "no entries were selected"
+
+#, go-format
+msgid "engine.remove.no_entry_from_repository"
+msgstr "no entry in SKILL.mod comes from %s"
 
 msgid "engine.remove.nothing_declared"
 msgstr "SKILL.mod declares no entries"
@@ -744,6 +753,10 @@ msgstr "removed %d declarations and %d clean installation directories"
 
 msgid "engine.remove.select_entries"
 msgstr "select the entries to remove"
+
+#, go-format
+msgid "engine.remove.select_from_repository"
+msgstr "multiple skills from %s; select one or more"
 
 msgid "engine.remove.share_cleanup_failed"
 msgstr "failed to remove some share links"
