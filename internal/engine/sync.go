@@ -7,6 +7,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/i18n"
@@ -18,12 +19,18 @@ import (
 type SyncOptions struct {
 	CheckOnly bool
 	Relink    bool
-	DryRun    bool
+	// Adopt declares the skill directories that exist on disk but in neither
+	// manifest as local entries, the way init adopts existing skills.
+	Adopt  bool
+	DryRun bool
 }
 
 // Sync reconciles local skill directories with SKILL.lock:
 // it is idempotent and verifiable, rolls back on failure, and never deletes installed files automatically.
 func (e *Engine) Sync(ctx context.Context, options SyncOptions, io IO) (*Report, error) {
+	if options.CheckOnly && options.Adopt {
+		return nil, fmt.Errorf("%s", i18n.Text("engine.sync.adopt_with_check"))
+	}
 	if options.CheckOnly {
 		return e.Verify(ctx, io) // sync --check is an alias for verify and uses the same implementation.
 	}
@@ -45,6 +52,10 @@ func (e *Engine) Sync(ctx context.Context, options SyncOptions, io IO) (*Report,
 	if err != nil {
 		return nil, err
 	}
+	// Adopted entries join the declaration here, so the saved mod carries them
+	// alongside the declared ones. An unchanged copy marshals to the same bytes
+	// saveState already read, so a sync that adopts nothing still writes nothing.
+	newMod := &modfile.Mod{SchemaVersion: m.SchemaVersion, Skills: append([]modfile.ModSkill(nil), m.Skills...)}
 	rep := &Report{Action: CommandSync}
 	var plans []plannedInstall
 	var conflicts []conflict
@@ -119,6 +130,16 @@ func (e *Engine) Sync(ctx context.Context, options SyncOptions, io IO) (*Report,
 		}
 	}
 
+	// Take stock of the skills another tool or a manual copy left in the
+	// installation directory. They are not failures and not drift, so this
+	// runs after the declared entries are classified and never touches files:
+	// --adopt declares them as local entries, and a plain sync only names them.
+	// A dry run plans the adoption without asking, so the plan never blocks.
+	adopted, err := e.reconcileUndeclaredSkills(options.Adopt, options.DryRun, m, newMod, lock, newLock, io, rep)
+	if err != nil {
+		return nil, err
+	}
+
 	// Leave stale entry files untouched and recommend prune.
 	for _, lk := range staleEntries(m, lock) {
 		rep.Entries = append(rep.Entries, EntryReport{
@@ -189,8 +210,8 @@ func (e *Engine) Sync(ctx context.Context, options SyncOptions, io IO) (*Report,
 	}
 	// Keep past destinations for cleanup, and record all currently declared
 	// ones even when this machine did not have an installed copy before sync.
-	for _, skill := range m.Skills {
-		targets, err := e.shareTargetsFor(m, skill.DirName())
+	for _, skill := range newMod.Skills {
+		targets, err := e.shareTargetsFor(newMod, skill.DirName())
 		if err != nil {
 			return nil, err
 		}
@@ -212,7 +233,9 @@ func (e *Engine) Sync(ctx context.Context, options SyncOptions, io IO) (*Report,
 		}
 		skipped := skippedConflictCount(conflicts, skip)
 		var writeErr error
-		if planned == 0 && skipped > 0 {
+		if planned == 0 && adopted > 0 {
+			writeErr = io.printf(i18n.Format("engine.sync.dry_run_adopt_planned", adopted))
+		} else if planned == 0 && skipped > 0 {
 			writeErr = io.printf(i18n.Format("engine.sync.dry_run_writes_planned", skipped))
 		} else if planned == 0 {
 			writeErr = io.printf(i18n.Text("engine.sync.dry_run_everything_already"))
@@ -227,7 +250,7 @@ func (e *Engine) Sync(ctx context.Context, options SyncOptions, io IO) (*Report,
 	if err != nil {
 		return nil, err
 	}
-	if err := e.saveState(m, newLock); err != nil {
+	if err := e.saveState(newMod, newLock); err != nil {
 		return nil, errors.Join(err, finalize(false))
 	}
 	if err := finalize(true); err != nil {
@@ -243,19 +266,35 @@ func (e *Engine) Sync(ctx context.Context, options SyncOptions, io IO) (*Report,
 	}
 
 	changed := 0
+	drifted := 0
 	for _, en := range rep.Entries {
 		if en.Action == ActionInstall || en.Action == ActionPartial {
 			changed++
 		}
-	}
-	if changed == 0 {
-		if skipped := skippedConflictCount(conflicts, skip); skipped > 0 {
-			err = io.printf(i18n.Format("engine.sync.changes_conflicting_targets", skipped))
-		} else {
-			err = io.printf(i18n.Text("engine.sync.changes")) // Idempotency requires a stable no-change result.
+		if en.Action == ActionLocalDrift {
+			drifted++
 		}
-	} else {
+	}
+	skipped := skippedConflictCount(conflicts, skip)
+	switch {
+	case changed == 0 && adopted > 0:
+		err = io.printf(i18n.Format("engine.sync.adopted_entries", adopted))
+	case changed == 0 && skipped > 0:
+		err = io.printf(i18n.Format("engine.sync.changes_conflicting_targets", skipped))
+	case changed == 0 && drifted == 0:
+		err = io.printf(i18n.Text("engine.sync.changes")) // Idempotency requires a stable no-change result.
+	case changed > 0:
 		err = io.printf(i18n.Text("engine.sync.synchronized_entries"), changed)
+	}
+	// A run with only drifted local entries prints the drift line alone; the
+	// four cases above all describe alignment work that did not happen.
+	if drifted > 0 {
+		// None of the summaries above name local edits: a run can report no
+		// changes, or install remote entries, while sync silently detected
+		// and preserved the modified local ones. State it explicitly; drift
+		// is the designed steady state for a local entry, not a failure —
+		// verify is the command that judges it.
+		err = errors.Join(err, io.printf(i18n.Format("engine.sync.local_drift_preserved", drifted)))
 	}
 	return rep, errors.Join(err, partialError(rep, conflicts, skip))
 }

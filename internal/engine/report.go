@@ -32,6 +32,7 @@ const (
 	CommandVerify  Command = "verify"
 	CommandWhy     Command = "why"
 
+	ActionAdopt        = "adopt"
 	ActionConflict     = "conflict"
 	ActionDrift        = "drift"
 	ActionInstall      = "install"

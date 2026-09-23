@@ -211,6 +211,9 @@ msgstr "把已安装技能记录为链接到其他 agent 目录"
 msgid "cli.share.use"
 msgstr "share [技能名...]"
 
+msgid "cli.sync.flag_adopt"
+msgstr "把 skillmod 之外新增的 skill 收录为本地条目"
+
 msgid "cli.sync.flag_check"
 msgstr "只校验不修改（skillmod verify 的别名）"
 
@@ -941,6 +944,41 @@ msgstr "恢复 %s 失败：%w"
 msgid "engine.state.stage_removal"
 msgstr "暂存删除 %s 失败：%w"
 
+#, go-format
+msgid "engine.sync.adopt_case_collision"
+msgstr "两个 skill 仅大小写不同：%s 与 %s，会映射到同一个"
+"安装目录；请重命名其中一个目录"
+
+#, go-format
+msgid "engine.sync.adopt_confirm"
+msgstr "将 %s（%s）收录为本地条目？"
+
+msgid "engine.sync.adopt_dry_run_confirm"
+msgstr "真实运行将逐个确认；传 --yes 全部收录"
+
+msgid "engine.sync.adopt_dry_run_entry"
+msgstr "真实运行将收录为本地条目"
+
+#, go-format
+msgid "engine.sync.adopt_needs_confirmation"
+msgstr "发现 %d 个未声明 skill；传 --yes 全部收录，或在终"
+"端中选择"
+
+#, go-format
+msgid "engine.sync.adopt_skipped"
+msgstr "跳过 %s：%s"
+
+msgid "engine.sync.adopt_with_check"
+msgstr "--adopt 不能与 --check 同时使用；--check 只校验、不写"
+"任何文件"
+
+#, go-format
+msgid "engine.sync.adopted_entries"
+msgstr "已收录 %d 个本地条目"
+
+msgid "engine.sync.adopted_local_entry"
+msgstr "已收录为本地条目"
+
 msgid "engine.sync.baseline_re_established"
 msgstr "已从已安装文件重建本地基线（此前的 remote lock 记"
 "录已移除）"
@@ -963,6 +1001,10 @@ msgid "engine.sync.contents_match_baseline_local"
 msgstr "内容与基线不符（本地改动）"
 
 #, go-format
+msgid "engine.sync.dry_run_adopt_planned"
+msgstr "dry-run: 将收录 %d 个未声明 skill"
+
+#, go-format
 msgid "engine.sync.dry_run_entries_installed"
 msgstr "dry-run: %d 个条目将被安装或更新"
 
@@ -973,12 +1015,19 @@ msgstr "dry-run: 所有条目已一致"
 msgid "engine.sync.dry_run_writes_planned"
 msgstr "试运行：没有计划写入；将保留 %d 个冲突目标"
 
+#, go-format
+msgid "engine.sync.local_drift_preserved"
+msgstr "%d 个本地条目与锁定记录不一致（改动保留）"
+
 msgid "engine.sync.missing"
 msgstr "缺失: "
 
 msgid "engine.sync.no_baseline"
 msgstr "lock 中无基线记录，跳过校验（重新 init 可建立基"
 "线）"
+
+msgid "engine.sync.no_skills_adopted"
+msgstr "没有收录任何未声明 skill"
 
 msgid "engine.sync.removed_mod_files_kept"
 msgstr "已从 mod 移除，文件保留；运行 skillmod prune 清理"
@@ -989,6 +1038,11 @@ msgstr "重建部分分享链接失败；再次运行 sync 可重试"
 #, go-format
 msgid "engine.sync.synchronized_entries"
 msgstr "已同步 %d 项，校验通过"
+
+#, go-format
+msgid "engine.sync.undeclared_skills_found"
+msgstr "发现 %d 个未声明 skill；运行 skillmod sync --adopt 可将"
+"它们收录为本地条目"
 
 msgid "engine.update.already_up_to_date"
 msgstr "已是最新"

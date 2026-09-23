@@ -344,6 +344,7 @@ func TestFlagsCarryShorthands(t *testing.T) {
 		"allow-downgrade": "it overrides a safety check",
 		"all":             "the letter is taken by --agent, and the long form reads better",
 		"on-conflict":     "the policy names are long; a letter would hide the meaning",
+		"adopt":           "it is typed rarely, and a letter would not say what it adopts",
 	}
 	root := NewRootCmd()
 	check := func(cmd *cobra.Command) {

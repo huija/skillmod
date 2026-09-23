@@ -31,11 +31,11 @@ var (
 		string(engine.CommandWhy),
 	}
 	documentedEntryActions = []string{
-		engine.ActionConflict, engine.ActionDrift, engine.ActionInstall, engine.ActionInstalled,
-		engine.ActionKeep, engine.ActionLocal, engine.ActionLocalDrift, engine.ActionMatched,
-		engine.ActionMissing, engine.ActionPartial, engine.ActionPrune, engine.ActionRemove,
-		engine.ActionSkip, engine.ActionStale, engine.ActionUnlocked, engine.ActionUnresolved,
-		engine.ActionUnverifiable, engine.ActionUpdate,
+		engine.ActionAdopt, engine.ActionConflict, engine.ActionDrift, engine.ActionInstall,
+		engine.ActionInstalled, engine.ActionKeep, engine.ActionLocal, engine.ActionLocalDrift,
+		engine.ActionMatched, engine.ActionMissing, engine.ActionPartial, engine.ActionPrune,
+		engine.ActionRemove, engine.ActionSkip, engine.ActionStale, engine.ActionUnlocked,
+		engine.ActionUnresolved, engine.ActionUnverifiable, engine.ActionUpdate,
 	}
 	documentedTargetActions = []string{
 		engine.ActionDrift, engine.ActionInstall, engine.ActionInstalled, engine.ActionKeep,

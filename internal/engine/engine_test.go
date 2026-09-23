@@ -2915,3 +2915,325 @@ func TestWhyReportsImmutableProvenanceAndTargetResults(t *testing.T) {
 		t.Error("Why(missing) succeeded")
 	}
 }
+
+// TestSyncAdoptsLocallyAddedSkills covers the sync form of init's local
+// adoption: a skill another tool or a manual copy left in the installation
+// directory becomes a local declaration with its content untouched, and a
+// second run is a no-op rather than a re-adoption.
+func TestSyncAdoptsLocallyAddedSkills(t *testing.T) {
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	writeLocalSkill(t, root, "added-later", "echo hi\n")
+
+	rep, err := eng.Sync(ctx, engine.SyncOptions{Adopt: true}, testIO())
+	if err != nil {
+		t.Fatalf("Sync(adopt): %v", err)
+	}
+	var adopted *engine.EntryReport
+	for i := range rep.Entries {
+		if rep.Entries[i].Name == "added-later" {
+			adopted = &rep.Entries[i]
+		}
+	}
+	if adopted == nil || adopted.Action != engine.ActionAdopt || !strings.Contains(adopted.Note, "adopted") {
+		t.Fatalf("Sync(adopt) report = %+v, want an adopted local entry", rep.Entries)
+	}
+	m := loadMod(t, root)
+	if len(m.Skills) != 1 || !m.Skills[0].Local || m.Skills[0].Name != "added-later" {
+		t.Fatalf("declarations after adoption = %+v, want one local entry", m.Skills)
+	}
+	lk := loadLockSkill(t, root, "added-later")
+	if lk.Source != "" || lk.Dirhash == "" {
+		t.Fatalf("lock after adoption = %+v, want a local baseline with a dirhash", lk)
+	}
+	// The adopted content is exactly what was on disk.
+	if got := readFileString(t, filepath.Join(installedDir(root, "added-later"), "run.sh")); got != "echo hi\n" {
+		t.Errorf("adopted run.sh = %q, want the local content preserved", got)
+	}
+
+	// A second run adopts nothing new and reports the local entry as consistent.
+	rep, err = eng.Sync(ctx, engine.SyncOptions{Adopt: true}, testIO())
+	if err != nil {
+		t.Fatalf("second Sync(adopt): %v", err)
+	}
+	for _, entry := range rep.Entries {
+		if entry.Name == "added-later" && strings.Contains(entry.Note, "adopted as") {
+			t.Errorf("second run re-adopted: %+v", entry)
+		}
+	}
+}
+
+// TestSyncAdoptRecordsTheDirectoryAsAlias covers a directory whose frontmatter
+// name is not its own directory name, which is what a skill installed under a
+// local name looks like. The declaration keeps the published name and records
+// the directory as the alias, which is the only identity the filesystem offers.
+func TestSyncAdoptRecordsTheDirectoryAsAlias(t *testing.T) {
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	dir := filepath.Join(root, ".agents", "skills", "vendored-copy")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"),
+		[]byte("---\nname: published-name\ndescription: test skill\n---\n# x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Sync(ctx, engine.SyncOptions{Adopt: true}, testIO()); err != nil {
+		t.Fatalf("Sync(adopt): %v", err)
+	}
+	m := loadMod(t, root)
+	if len(m.Skills) != 1 {
+		t.Fatalf("declarations after adoption = %+v, want one entry", m.Skills)
+	}
+	if m.Skills[0].Name != "published-name" || m.Skills[0].Alias != "vendored-copy" {
+		t.Errorf("declaration = %+v, want the published name with the directory as alias", m.Skills[0])
+	}
+	// The installation directory stays the one on disk, so the entry resolves
+	// back to the files it came from.
+	if got := m.Skills[0].DirName(); got != "vendored-copy" {
+		t.Errorf("DirName() = %q, want the directory it was found in", got)
+	}
+	if _, err := os.Stat(filepath.Join(installedDir(root, "vendored-copy"), "SKILL.md")); err != nil {
+		t.Errorf("installation = %v, want kept under its own directory", err)
+	}
+}
+
+// TestSyncWithoutAdoptOnlyNamesUndeclaredSkills keeps a plain sync from
+// changing the declaration while still telling the user the flag exists.
+func TestSyncWithoutAdoptOnlyNamesUndeclaredSkills(t *testing.T) {
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	writeLocalSkill(t, root, "added-later", "")
+
+	var out bytes.Buffer
+	rep, err := eng.Sync(ctx, engine.SyncOptions{}, engine.IO{Out: &out, Yes: true})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if len(loadMod(t, root).Skills) != 0 {
+		t.Errorf("declarations after a plain sync = %+v, want none", loadMod(t, root).Skills)
+	}
+	joined := strings.Join(rep.Notes, "\n") + out.String()
+	if !strings.Contains(joined, "--adopt") {
+		t.Errorf("plain sync output = %q, want the --adopt hint", joined)
+	}
+}
+
+// TestSyncAdoptNeedsAChannelOrYes refuses to record provenance on a real run
+// that can neither ask nor state the intent. A dry run is exempt: it only
+// prints the plan, so it never needs an answer
+// (TestSyncAdoptDryRunPlansWithoutAsking).
+func TestSyncAdoptNeedsAChannelOrYes(t *testing.T) {
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	writeLocalSkill(t, root, "added-later", "")
+	if _, err := eng.Sync(ctx, engine.SyncOptions{Adopt: true}, engine.IO{Out: io.Discard}); err == nil {
+		t.Fatal("Sync(adopt) without a channel succeeded, want a diagnostic")
+	}
+	if len(loadMod(t, root).Skills) != 0 {
+		t.Errorf("declarations after a refused adoption = %+v, want none", loadMod(t, root).Skills)
+	}
+}
+
+// TestSyncAdoptCheckIsRefused: --check only verifies, so the adoption flag has
+// nothing to act on and saying so beats silently ignoring it.
+func TestSyncAdoptCheckIsRefused(t *testing.T) {
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, err := eng.Sync(ctx, engine.SyncOptions{CheckOnly: true, Adopt: true}, testIO()); err == nil {
+		t.Fatal("Sync(--check --adopt) succeeded, want a refusal")
+	}
+}
+
+// dryRunAskRecorder fails a dry run that consults the confirmation channel:
+// printing a plan must never wait on input.
+type dryRunAskRecorder struct{ asked bool }
+
+func (r *dryRunAskRecorder) Confirm(string) (bool, error) {
+	r.asked = true
+	return false, nil
+}
+
+func (*dryRunAskRecorder) Choose(string, []string) (int, error) { return 0, nil }
+
+// TestSyncAdoptDryRunPlansWithoutAsking keeps a dry run from blocking on the
+// adoption prompt: the plan lists every candidate as pending, the manifests
+// stay untouched, the confirmation channel is never consulted, and a run
+// without any channel still prints the plan instead of refusing.
+func TestSyncAdoptDryRunPlansWithoutAsking(t *testing.T) {
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	writeLocalSkill(t, root, "added-later", "echo hi\n")
+
+	ask := &dryRunAskRecorder{}
+	rep, err := eng.Sync(ctx, engine.SyncOptions{Adopt: true, DryRun: true}, engine.IO{Out: io.Discard, Confirm: ask})
+	if err != nil {
+		t.Fatalf("Sync(adopt, dry-run): %v", err)
+	}
+	if ask.asked {
+		t.Error("dry run consulted the confirmation channel")
+	}
+	if skills := loadMod(t, root).Skills; len(skills) != 0 {
+		t.Errorf("declarations after a dry run = %+v, want none", skills)
+	}
+	var planned *engine.EntryReport
+	for i := range rep.Entries {
+		if rep.Entries[i].Name == "added-later" {
+			planned = &rep.Entries[i]
+		}
+	}
+	// The plan carries the adoption action, so a --json consumer can tell a
+	// pending adoption from an existing local entry in the same document
+	// without parsing the note.
+	if planned == nil || planned.Action != engine.ActionAdopt || !strings.Contains(planned.Note, "will be adopted") {
+		t.Fatalf("dry-run report = %+v, want a pending adoption entry", rep.Entries)
+	}
+	if notes := strings.Join(rep.Notes, "\n"); !strings.Contains(notes, "--yes") {
+		t.Errorf("dry-run notes = %q, want the real-run hint", notes)
+	}
+
+	// Without any channel the dry run still succeeds: refusing to ask is a
+	// real-run refusal, not a plan-time one.
+	rep, err = eng.Sync(ctx, engine.SyncOptions{Adopt: true, DryRun: true}, engine.IO{Out: io.Discard})
+	if err != nil {
+		t.Fatalf("Sync(adopt, dry-run) without a channel: %v", err)
+	}
+	if skills := loadMod(t, root).Skills; len(skills) != 0 {
+		t.Errorf("declarations after a channel-less dry run = %+v, want none", skills)
+	}
+	if len(rep.Entries) == 0 {
+		t.Error("channel-less dry run produced no planned entries")
+	}
+}
+
+// TestSyncAdoptRejectsCaseCollidingDirectories keeps the portability guard init
+// applies: two directories that differ only in letter case map to one
+// installation directory on Windows and macOS, so adopting both would write a
+// declaration no other machine can materialize. The run is refused before
+// either declaration is written, and the message says how to get past it.
+func TestSyncAdoptRejectsCaseCollidingDirectories(t *testing.T) {
+	root := t.TempDir()
+	if caseInsensitiveFS(root) {
+		t.Skip("requires a case-sensitive filesystem")
+	}
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	for _, dirName := range []string{"Demo", "demo"} {
+		writeLocalSkill(t, root, dirName, "echo hi\n")
+	}
+
+	_, err := eng.Sync(ctx, engine.SyncOptions{Adopt: true}, testIO())
+	if err == nil {
+		t.Fatal("Sync(adopt) accepted installation directories that collide when case is folded")
+	}
+	for _, want := range []string{"Demo", "demo", "rename"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Sync error = %v, want %q named", err, want)
+		}
+	}
+	if skills := loadMod(t, root).Skills; len(skills) != 0 {
+		t.Errorf("declarations after a refused adoption = %+v, want none", skills)
+	}
+}
+
+// TestSyncSummaryNamesLocalDrift keeps the human summary from claiming "no
+// changes" on a run whose most important fact is a detected and preserved
+// local edit; the detail stays in the report, the summary must name it.
+func TestSyncSummaryNamesLocalDrift(t *testing.T) {
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	writeLocalSkill(t, root, "added-later", "echo hi\n")
+	if _, err := eng.Sync(ctx, engine.SyncOptions{Adopt: true}, testIO()); err != nil {
+		t.Fatalf("Sync(adopt): %v", err)
+	}
+
+	// Edit the adopted skill behind sync's back, then run a plain sync.
+	skillMd := filepath.Join(installedDir(root, "added-later"), "SKILL.md")
+	if err := os.WriteFile(skillMd, []byte("---\nname: added-later\ndescription: edited\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	rep, err := eng.Sync(ctx, engine.SyncOptions{}, engine.IO{Out: &out, Yes: true})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	drifted := false
+	for _, entry := range rep.Entries {
+		if entry.Action == engine.ActionLocalDrift {
+			drifted = true
+		}
+	}
+	if !drifted {
+		t.Fatalf("Sync report = %+v, want a local-drift entry", rep.Entries)
+	}
+	joined := strings.Join(rep.Notes, "\n") + out.String()
+	if !strings.Contains(joined, "differ from their lock records") {
+		t.Errorf("sync summary = %q, want the local-drift line", joined)
+	}
+	if strings.Contains(joined, "no changes") {
+		t.Errorf("sync summary = %q, must not claim no changes while local edits exist", joined)
+	}
+
+	// The drifted lock record is untouched: sync informs, it does not re-baseline.
+	if lk := loadLockSkill(t, root, "added-later"); lk.Dirhash == "" {
+		t.Errorf("lock after a drifted sync = %+v, want the original baseline kept", lk)
+	}
+}
+
+// TestSyncAdoptLeavesStaleLockRecordsForPrune: a directory a lock record still
+// occupies is not local content to adopt, it is a stale declaration's remains.
+func TestSyncAdoptLeavesStaleLockRecordsForPrune(t *testing.T) {
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	writeLocalSkill(t, root, "declared", "")
+	if _, err := eng.Sync(ctx, engine.SyncOptions{Adopt: true}, testIO()); err != nil {
+		t.Fatalf("Sync(adopt): %v", err)
+	}
+	// Hand-edit the declaration away, exactly the state prune exists for.
+	m := loadMod(t, root)
+	m.Skills = nil
+	if err := modfile.SaveMod(root, m); err != nil {
+		t.Fatal(err)
+	}
+	writeLocalSkill(t, root, "brand-new", "")
+
+	rep, err := eng.Sync(ctx, engine.SyncOptions{Adopt: true}, testIO())
+	if err != nil {
+		t.Fatalf("Sync(adopt) with a stale record: %v", err)
+	}
+	for _, entry := range rep.Entries {
+		if entry.Name == "declared" && strings.Contains(entry.Note, "adopted as") {
+			t.Errorf("stale lock record was adopted: %+v", entry)
+		}
+	}
+	if got := loadMod(t, root).Skills; len(got) != 1 || got[0].Name != "brand-new" {
+		t.Errorf("declarations = %+v, want only brand-new adopted", got)
+	}
+}

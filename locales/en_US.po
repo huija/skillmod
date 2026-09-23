@@ -213,6 +213,9 @@ msgstr "Record installed skills as linked into other agent directories"
 msgid "cli.share.use"
 msgstr "share [skills...]"
 
+msgid "cli.sync.flag_adopt"
+msgstr "declare skills added outside skillmod as local entries"
+
 msgid "cli.sync.flag_check"
 msgstr "verify without modifying anything (alias for skillmod verify)"
 
@@ -957,6 +960,41 @@ msgstr "restore %s: %w"
 msgid "engine.state.stage_removal"
 msgstr "stage removal of %s: %w"
 
+#, go-format
+msgid "engine.sync.adopt_case_collision"
+msgstr "two skills differ only by letter case: %s and %s, which map to one "
+"installation directory; rename one of the directories"
+
+#, go-format
+msgid "engine.sync.adopt_confirm"
+msgstr "adopt %s (%s) as a local entry?"
+
+msgid "engine.sync.adopt_dry_run_confirm"
+msgstr "a real run confirms each one; pass --yes to adopt all"
+
+msgid "engine.sync.adopt_dry_run_entry"
+msgstr "will be adopted as a local entry on a real run"
+
+#, go-format
+msgid "engine.sync.adopt_needs_confirmation"
+msgstr "found %d undeclared skills; pass --yes to adopt them all, or run in"
+" a terminal to choose"
+
+#, go-format
+msgid "engine.sync.adopt_skipped"
+msgstr "skipped %s: %s"
+
+msgid "engine.sync.adopt_with_check"
+msgstr "--adopt cannot be combined with --check, which only verifies and ne"
+"ver writes"
+
+#, go-format
+msgid "engine.sync.adopted_entries"
+msgstr "adopted %d local entries"
+
+msgid "engine.sync.adopted_local_entry"
+msgstr "adopted as a local entry"
+
 msgid "engine.sync.baseline_re_established"
 msgstr "baseline re-established from the installed files (the previous remo"
 "te lock record was removed)"
@@ -979,6 +1017,10 @@ msgid "engine.sync.contents_match_baseline_local"
 msgstr "contents do not match the baseline (local changes)"
 
 #, go-format
+msgid "engine.sync.dry_run_adopt_planned"
+msgstr "dry-run: %d undeclared skills would be adopted"
+
+#, go-format
 msgid "engine.sync.dry_run_entries_installed"
 msgstr "dry-run: %d entries would be installed or updated"
 
@@ -989,12 +1031,20 @@ msgstr "dry-run: everything is already consistent"
 msgid "engine.sync.dry_run_writes_planned"
 msgstr "dry-run: no writes planned; %d conflicting targets would be kept"
 
+#, go-format
+msgid "engine.sync.local_drift_preserved"
+msgstr "%d local entries differ from their lock records; edits are kept as-"
+"is"
+
 msgid "engine.sync.missing"
 msgstr "missing: "
 
 msgid "engine.sync.no_baseline"
 msgstr "no baseline in the lock; verification skipped (run init again to es"
 "tablish one)"
+
+msgid "engine.sync.no_skills_adopted"
+msgstr "no undeclared skills were adopted"
 
 msgid "engine.sync.removed_mod_files_kept"
 msgstr "removed from the mod; files were kept—run skillmod prune to clean"
@@ -1006,6 +1056,11 @@ msgstr "recreating some share links failed; run sync again to retry"
 #, go-format
 msgid "engine.sync.synchronized_entries"
 msgstr "synchronized %d entries; verification passed"
+
+#, go-format
+msgid "engine.sync.undeclared_skills_found"
+msgstr "found %d undeclared skills; run skillmod sync --adopt to declare th"
+"em as local entries"
 
 msgid "engine.update.already_up_to_date"
 msgstr "already up to date"

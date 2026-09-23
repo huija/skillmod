@@ -13,7 +13,7 @@ import (
 )
 
 func newSyncCmd(options *rootOptions) *cobra.Command {
-	var check, relink bool
+	var check, relink, adopt bool
 	cmd := &cobra.Command{
 		Use:   "sync",
 		Short: i18n.Text("cli.sync.short"),
@@ -25,13 +25,14 @@ func newSyncCmd(options *rootOptions) *cobra.Command {
 				return err
 			}
 			rep, err := eng.Sync(cmd.Context(), engine.SyncOptions{
-				CheckOnly: check, Relink: relink, DryRun: options.dryRun,
+				CheckOnly: check, Relink: relink, Adopt: adopt, DryRun: options.dryRun,
 			}, options.newIO(cmd))
 			return errors.Join(err, options.output(cmd, rep, err))
 		},
 	}
 	cmd.Flags().BoolVarP(&check, "check", "c", false, i18n.Text("cli.sync.flag_check"))
 	cmd.Flags().BoolVarP(&relink, "relink", "r", false, i18n.Text("cli.sync.flag_relink"))
+	cmd.Flags().BoolVar(&adopt, "adopt", false, i18n.Text("cli.sync.flag_adopt"))
 	cmd.MarkFlagsMutuallyExclusive("check", "relink")
 	return cmd
 }
