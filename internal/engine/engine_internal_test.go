@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/huija/skillmod/internal/address"
+	"github.com/huija/skillmod/internal/config"
 	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/modfile"
 	"github.com/huija/skillmod/internal/source"
@@ -249,6 +251,45 @@ func TestCandidateAddress(t *testing.T) {
 				t.Errorf("candidateAddress(%q, %q) = %q, want %q", tt.repo, tt.subdir, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestShortAddressResolutionHint covers the hint that names the default host a
+// short address was completed to. It exists because a failed fetch names a URL
+// the user never typed, which is indistinguishable from "the repository moved"
+// unless the resolution is stated. A completed address states it; an address
+// that was never completed has nothing to add and returns nil.
+func TestShortAddressResolutionHint(t *testing.T) {
+	short, err := address.Parse("acme/skills")
+	if err != nil {
+		t.Fatalf("Parse(\"acme/skills\"): %v", err)
+	}
+	if !short.Completed || short.Repo != "https://github.com/acme/skills" {
+		t.Fatalf("Parse = %+v, want the github.com completion recorded", short)
+	}
+	hint := shortAddressResolutionHint(short)
+	if hint == nil {
+		t.Fatal("hint = nil, want the resolution named")
+	}
+	if !strings.Contains(hint.Error(), "github.com/acme/skills") ||
+		!strings.Contains(hint.Error(), "file://") {
+		t.Errorf("hint = %q, want the resolved host and the local-path remedy", hint)
+	}
+
+	// An address the user spelled out needs no hint, including one that went
+	// through the same completion path and was then written in full.
+	for _, raw := range []string{
+		"github.com/acme/skills",
+		"https://github.com/acme/skills",
+		"file:///tmp/acme/skills",
+	} {
+		full, parseErr := address.Parse(raw)
+		if parseErr != nil {
+			t.Fatalf("Parse(%q): %v", raw, parseErr)
+		}
+		if hint := shortAddressResolutionHint(full); hint != nil {
+			t.Errorf("hint(%q) = %q, want nil", raw, hint)
+		}
 	}
 }
 

@@ -20,6 +20,10 @@ type Address struct {
 	Repo   string // normalized Git address; bare paths include an https:// prefix
 	Subdir string // subdirectory within the repository; empty means the repository root
 	Ref    string // explicit version reference; empty asks package resolve for the latest version
+	// Completed records that a bare owner/repo input was extended with the
+	// default host. The fetch failure of such an address names a URL the raw
+	// input never contained, so callers surface the resolution alongside it.
+	Completed bool
 }
 
 // String returns the canonical address.
@@ -36,6 +40,9 @@ func (a *Address) String() string {
 
 // scpLike matches git@host:path addresses, where @ is not a version separator.
 var scpLike = regexp.MustCompile(`^[^/@\s:]+@[^/@\s:]+:`)
+
+// defaultGitHubHost is the host a bare owner/repo path is resolved against.
+const defaultGitHubHost = "github.com"
 
 // Parse validates and normalizes an address without accessing the network.
 // Branch names are rejected later by package resolve using ls-remote data rather than string heuristics.
@@ -65,7 +72,7 @@ func Parse(raw string) (*Address, error) {
 	if strings.ContainsAny(repo, " \t") {
 		return nil, fmt.Errorf(i18n.Text("address.repository_whitespace"), repoaddr.Redact(repo))
 	}
-	repo = normalizeRepo(repo)
+	repo, completed := normalizeRepo(repo)
 	repo, err = repoaddr.PersistedTransport(repo)
 	if err != nil {
 		return nil, err
@@ -76,7 +83,7 @@ func Parse(raw string) (*Address, error) {
 			return nil, err
 		}
 	}
-	return &Address{Repo: repo, Subdir: subdir, Ref: ref}, nil
+	return &Address{Repo: repo, Subdir: subdir, Ref: ref, Completed: completed}, nil
 }
 
 // splitRef splits at the final @ that acts as a version separator. Explicit
@@ -122,11 +129,27 @@ func splitSubdir(s string) (repo, subdir string, err error) {
 }
 
 // normalizeRepo adds https:// to bare paths and preserves full URLs and scp-like addresses.
-func normalizeRepo(repo string) string {
+// A bare owner/repo path defaults to github.com, because that is where skill
+// repositories overwhelmingly live; a first segment that already carries a dot
+// is a host, and one that is empty, "." or ".." reads as a filesystem path.
+// Neither of those two takes the github.com default, though both still come
+// back with the https:// prefix that every bare path gains.
+// The second result reports whether that default was applied.
+func normalizeRepo(repo string) (string, bool) {
 	if strings.Contains(repo, "://") || scpLike.MatchString(repo) {
-		return repo
+		return repo, false
 	}
-	return "https://" + repo
+	if first, _, found := strings.Cut(repo, "/"); found {
+		switch {
+		case first == "" || first == "." || first == "..":
+			// A filesystem path, absolute or relative.
+		case strings.ContainsAny(first, ".:"):
+			// A host, possibly with a port, or a Windows drive letter.
+		default:
+			return "https://" + defaultGitHubHost + "/" + repo, true
+		}
+	}
+	return "https://" + repo, false
 }
 
 // ManifestSource returns the address form recorded in SKILL.mod and SKILL.lock.

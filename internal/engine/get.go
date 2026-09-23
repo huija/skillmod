@@ -73,6 +73,9 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO, options 
 
 	resolved, err := e.resolveGetSkills(ctx, addr, io, run.All)
 	if err != nil {
+		if hint := shortAddressResolutionHint(addr); hint != nil {
+			err = errors.Join(err, hint)
+		}
 		return nil, err
 	}
 	if alias != "" && len(resolved) != 1 {
@@ -230,6 +233,19 @@ func (e *Engine) Get(ctx context.Context, rawAddr, alias string, io IO, options 
 		}
 	}
 	return rep, partialError(rep, conflicts, skip)
+}
+
+// shortAddressResolutionHint names the default host a bare owner/repo was
+// extended with, for the run whose fetch then failed. The failure names a URL
+// the raw input never contained, so a user who meant a local path needs the
+// resolution stated. The normalized address is echoed rather than the raw
+// input, which Redact would replace with a placeholder. An address that was
+// never completed has nothing to state and returns nil.
+func shortAddressResolutionHint(addr *address.Address) error {
+	if !addr.Completed {
+		return nil
+	}
+	return fmt.Errorf("%s", i18n.Format("engine.get.short_address_resolved", addr.Repo))
 }
 
 func printGetDryRunReport(rep *Report, io IO) error {

@@ -436,6 +436,11 @@ msgstr "%s — %s\n  %s"
 msgid "engine.get.reading_skill_metadata"
 msgstr "reading skill metadata"
 
+#, go-format
+msgid "engine.get.short_address_resolved"
+msgstr "the short address was resolved as %s; for a local repository, use t"
+"he file:// prefix"
+
 msgid "engine.get.skill_md_missing_repository"
 msgstr "SKILL.md is missing from the repository root and every descendant o"
 "f skills/"

@@ -429,6 +429,11 @@ msgstr "%s — %s\n  %s"
 msgid "engine.get.reading_skill_metadata"
 msgstr "正在读取 skill 元数据"
 
+#, go-format
+msgid "engine.get.short_address_resolved"
+msgstr "简写地址已解析为 %s；若指本地仓库，请使用 file:/"
+"/ 前缀"
+
 msgid "engine.get.skill_md_missing_repository"
 msgstr "仓库根目录及 skills/ 下所有子目录中均未找到 SKILL."
 "md"
