@@ -22,6 +22,7 @@ import (
 	"github.com/huija/skillmod/internal/config"
 	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/engine"
+	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/install"
 	"github.com/huija/skillmod/internal/modfile"
 	"github.com/huija/skillmod/internal/resolve"
@@ -1542,6 +1543,67 @@ func readFileString(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+// Regression: the empty-candidate path used to report that it had generated an
+// empty manifest and then fall into the shared non-interactive confirmation
+// gate, which returned before the write phase. The report described a write
+// that never happened, and a non-interactive environment could not get past the
+// prompt it could not answer. An empty run has nothing to confirm, so it must
+// reach the write phase and keep the promise its own note made.
+func TestInit_EmptyRunKeepsTheManifestItReports(t *testing.T) {
+	t.Setenv(i18n.Env, "en")
+	// Confirm is nil and Yes is false: the shape a script or CI run sees.
+	unattended := engine.IO{Out: io.Discard}
+
+	t.Run("writes the reported empty manifest", func(t *testing.T) {
+		root := t.TempDir()
+		rep, err := newEngine(t, root, t.TempDir()).Init(ctx, false, unattended)
+		if err != nil {
+			t.Fatalf("an empty init should not require confirmation: %v", err)
+		}
+		if len(rep.Entries) != 0 {
+			t.Errorf("entries = %d, want 0", len(rep.Entries))
+		}
+		if note := strings.Join(rep.Notes, "\n"); !strings.Contains(note, "generated an empty manifest") {
+			t.Errorf("notes = %q, want the manifest already reported as generated", note)
+		}
+		if _, err := os.Stat(filepath.Join(root, modfile.ModFileName)); err != nil {
+			t.Errorf("the reported manifest was not written: %v", err)
+		}
+	})
+
+	t.Run("dry run promises instead of claiming", func(t *testing.T) {
+		root := t.TempDir()
+		rep, err := newEngine(t, root, t.TempDir()).Init(ctx, false, unattended, engine.MutationOptions{DryRun: true})
+		if err != nil {
+			t.Fatalf("init --dry-run: %v", err)
+		}
+		if note := strings.Join(rep.Notes, "\n"); !strings.Contains(note, "will generate an empty manifest") {
+			t.Errorf("notes = %q, want the future tense for a run that writes nothing", note)
+		}
+		if _, err := os.Stat(filepath.Join(root, modfile.ModFileName)); !os.IsNotExist(err) {
+			t.Errorf("dry-run wrote SKILL.mod: %v", err)
+		}
+	})
+
+	// Widening the gate must stay scoped to an empty run: a run with a candidate
+	// still has something to confirm, and silently accepting it would install a
+	// skill the user never approved.
+	t.Run("a run with candidates still requires confirmation", func(t *testing.T) {
+		root := t.TempDir()
+		dir := installedDir(root, "local-skill")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := "---\nname: local-skill\ndescription: local\n---\n# local\n"
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := newEngine(t, root, t.TempDir()).Init(ctx, false, unattended); err == nil {
+			t.Error("a run with candidates should still require confirmation")
+		}
+	})
 }
 
 func TestInit_ScansTheManagedDirectory(t *testing.T) {

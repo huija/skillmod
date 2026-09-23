@@ -532,6 +532,10 @@ msgid "engine.init.skills_found_generated_empty"
 msgstr "no skills found; generated an empty manifest—use skillmod get to "
 "add one"
 
+msgid "engine.init.skills_found_will_generate_empty"
+msgstr "no skills found; will generate an empty manifest—use skillmod get"
+" to add one"
+
 #, go-format
 msgid "engine.init.source_unverified_local"
 msgstr "source could not be verified; kept as local: %v"

@@ -327,7 +327,13 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO, options ...Mutatio
 	}
 
 	if len(rep.Entries) == 0 {
-		rep.Notes = append(rep.Notes, i18n.Text("engine.init.skills_found_generated_empty"))
+		// State the tense the run can keep: the manifest is written below, and
+		// a dry run never writes one.
+		note := i18n.Text("engine.init.skills_found_generated_empty")
+		if run.DryRun {
+			note = i18n.Text("engine.init.skills_found_will_generate_empty")
+		}
+		rep.Notes = append(rep.Notes, note)
 	}
 	if unresolved > 0 {
 		rep.Notes = append(rep.Notes, i18n.Format("engine.init.unresolved_sources", unresolved))
@@ -358,7 +364,11 @@ func (e *Engine) Init(ctx context.Context, force bool, io IO, options ...Mutatio
 	}
 
 	// Confirm each entry individually so users can reject uncertain provenance.
-	if !io.Yes && io.Confirm == nil {
+	// An empty run has nothing to reject, so the gate stays open: a run that
+	// found no skill must still write the empty manifest it reported above,
+	// rather than stop at a prompt a non-interactive environment cannot
+	// answer.
+	if len(m.Skills) > 0 && !io.Yes && io.Confirm == nil {
 		rep.Notes = append(rep.Notes, i18n.Text("engine.init.confirmed_non_interactive"))
 		return rep, fmt.Errorf("%s", i18n.Text("engine.init.init_requires_confirmation"))
 	}

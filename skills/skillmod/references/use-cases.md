@@ -94,6 +94,9 @@ one unresolved entry does not discard the rest of the import.
 
 Import writes both `SKILL.mod` and `SKILL.lock`. Replacing an existing
 declaration requires `--force`, which first backs it up as `SKILL.mod.bak`.
+Every detected entry is confirmed before the write, so a non-interactive
+environment passes `--yes`; a scan that finds nothing has no entry to confirm
+and writes the empty manifest rather than stopping at an unanswerable prompt.
 
 Use global scope only when requested:
 

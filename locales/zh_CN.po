@@ -520,6 +520,9 @@ msgstr "正在恢复已安装技能来源：%s"
 msgid "engine.init.skills_found_generated_empty"
 msgstr "未发现 skill，已生成空清单，可用 skillmod get 添加"
 
+msgid "engine.init.skills_found_will_generate_empty"
+msgstr "未发现 skill，将生成空清单，可用 skillmod get 添加"
+
 #, go-format
 msgid "engine.init.source_unverified_local"
 msgstr "无法验证来源，保留为本地技能：%v"
