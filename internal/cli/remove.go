@@ -38,7 +38,7 @@ func newRemoveCmd(options *rootOptions) *cobra.Command {
 			rep, err := eng.Remove(cmd.Context(), names, options.newIO(cmd), engine.RemoveOptions{
 				All: all, DryRun: options.dryRun, Agents: targets,
 			})
-			return errors.Join(err, options.output(cmd, rep))
+			return errors.Join(err, options.output(cmd, rep, err))
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, i18n.Text("cli.remove.flag_all"))

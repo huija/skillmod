@@ -27,7 +27,7 @@ func newSyncCmd(options *rootOptions) *cobra.Command {
 			rep, err := eng.Sync(cmd.Context(), engine.SyncOptions{
 				CheckOnly: check, Relink: relink, DryRun: options.dryRun,
 			}, options.newIO(cmd))
-			return errors.Join(err, options.output(cmd, rep))
+			return errors.Join(err, options.output(cmd, rep, err))
 		},
 	}
 	cmd.Flags().BoolVarP(&check, "check", "c", false, i18n.Text("cli.sync.flag_check"))

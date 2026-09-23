@@ -22,7 +22,7 @@ func newPruneCmd(options *rootOptions) *cobra.Command {
 				return err
 			}
 			rep, err := eng.Prune(cmd.Context(), options.newIO(cmd), options.mutationOptions())
-			return errors.Join(err, options.output(cmd, rep))
+			return errors.Join(err, options.output(cmd, rep, err))
 		},
 	}
 }

@@ -102,8 +102,11 @@ func TestNewEngineAndIO(t *testing.T) {
 	}
 	options.json = true
 	got = options.newIO(cmd)
-	if got.Out != &stderr {
-		t.Fatalf("--json must route engine summaries to stderr; newIO = %+v", got)
+	if got.Out != io.Discard {
+		t.Fatalf("--json must discard engine summaries; newIO.Out = %+v", got.Out)
+	}
+	if got.Progress != nil {
+		t.Fatal("--json must not attach an interactive progress writer")
 	}
 }
 
@@ -113,7 +116,7 @@ func TestOutputJSON(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	rep := &engine.Report{Action: engine.CommandVerify, Entries: []engine.EntryReport{{Name: "demo", Action: engine.ActionInstalled}}}
-	if err := options.output(cmd, rep); err != nil {
+	if err := options.output(cmd, rep, nil); err != nil {
 		t.Fatal(err)
 	}
 	var got engine.Report
@@ -126,12 +129,69 @@ func TestOutputJSON(t *testing.T) {
 
 	out.Reset()
 	options.json = false
-	if err := options.output(cmd, rep); err != nil || out.Len() != 0 {
+	if err := options.output(cmd, rep, nil); err != nil || out.Len() != 0 {
 		t.Fatalf("plain output = %q, err = %v", out.String(), err)
 	}
 	options.json = true
-	if err := options.output(cmd, nil); err != nil || out.Len() != 0 {
+	if err := options.output(cmd, nil, nil); err != nil || out.Len() != 0 {
 		t.Fatalf("nil report output = %q, err = %v", out.String(), err)
+	}
+}
+
+// TestOutputJSONOnError pins the contract that makes --json usable in
+// automation: a failing run still writes exactly one document, naming the
+// failure, and the human error stays off stdout.
+func TestOutputJSONOnError(t *testing.T) {
+	options := &rootOptions{json: true}
+	root := NewRootCmd()
+	verify, _, err := root.Find([]string{"verify"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	verify.SetOut(&out)
+
+	failure := errors.New("no SKILL.mod found")
+	// jsonEmitted is the signal execute reads to decide whether a stderr
+	// diagnostic is still owed, and execute is what resets it. Both directions
+	// are asserted from a known starting state, so neither depends on which
+	// test happened to run first.
+	jsonEmitted = false
+	options.json = false
+	if err := options.output(verify, nil, failure); err != nil {
+		t.Fatal(err)
+	}
+	if jsonEmitted {
+		t.Fatal("a plain run recorded that it emitted a JSON document")
+	}
+
+	options.json = true
+	if err := options.output(verify, nil, failure); err != nil {
+		t.Fatal(err)
+	}
+	var got engine.Report
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("error output is not JSON: %v\n%s", err, out.String())
+	}
+	if got.Action != engine.CommandVerify || got.Error != failure.Error() {
+		t.Fatalf("error report = %+v, want action %q and error %q", got, engine.CommandVerify, failure.Error())
+	}
+	if !jsonEmitted {
+		t.Fatal("output did not record that it emitted a document")
+	}
+
+	// A report that completed alongside an error keeps its entries and carries
+	// the reason the command failed.
+	out.Reset()
+	rep := &engine.Report{Action: engine.CommandSync, Entries: []engine.EntryReport{{Name: "demo", Action: engine.ActionInstall}}}
+	if err := options.output(verify, rep, &engine.PartialError{Report: rep}); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("partial output is not JSON: %v\n%s", err, out.String())
+	}
+	if len(got.Entries) != 1 || got.Error == "" {
+		t.Fatalf("partial report = %+v, want the entries and the error", got)
 	}
 }
 
@@ -154,6 +214,78 @@ func TestJSONCommandsReturnOutputErrors(t *testing.T) {
 				t.Errorf("skillmod --json %s error = %v, want errors.Is(errTestOutput)", name, err)
 			}
 		})
+	}
+}
+
+// TestJSONFallbackDocumentForHandlerFailures pins the other half of the
+// single-document contract: a handler that fails before reaching output — an
+// unknown --install-mode is the reachable case, because its validation lives
+// in newEngine rather than in a cobra flag — still writes the document, while
+// a flag error, which reaches no handler at all, keeps its plain stderr text.
+func TestJSONFallbackDocumentForHandlerFailures(t *testing.T) {
+	project, _ := isolateCLI(t)
+	if err := modfile.SaveState(project,
+		&modfile.Mod{SchemaVersion: modfile.SchemaVersion},
+		&modfile.Lock{SchemaVersion: modfile.SchemaVersion}); err != nil {
+		t.Fatal(err)
+	}
+
+	run := func(args ...string) (code int, stdout, stderr string) {
+		t.Helper()
+		cmd, options := newRootCmd()
+		var out, errOut bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetErr(&errOut)
+		cmd.SetArgs(args)
+		return execute(cmd, options), out.String(), errOut.String()
+	}
+
+	code, stdout, stderr := run("--json", "--install-mode", "bogus", "list")
+	if code != ExitError {
+		t.Fatalf("handler failure exit code = %d, want %d", code, ExitError)
+	}
+	var rep struct {
+		Action  string `json:"action"`
+		Entries []any  `json:"entries"`
+		Error   string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &rep); err != nil {
+		t.Fatalf("stdout is not exactly one JSON document: %v\n%s", err, stdout)
+	}
+	if rep.Action != "list" || rep.Error == "" {
+		t.Errorf("document = %+v, want the list action and the failure named", rep)
+	}
+	if rep.Entries == nil {
+		t.Errorf("document = %s, want an entries array", stdout)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want the document to carry the failure", stderr)
+	}
+
+	// A flag error never reaches a handler, so it stays plain text with an
+	// empty stdout — the contract the document explicitly exempts. The
+	// diagnostic goes to the process's stderr, so it is captured there rather
+	// than from the cobra buffer.
+	oldStderr := os.Stderr
+	pipe, write, pipeErr := os.Pipe()
+	if pipeErr != nil {
+		t.Fatal(pipeErr)
+	}
+	os.Stderr = write
+	code, stdout, _ = run("--json", "--no-such-flag", "list")
+	os.Stderr = oldStderr
+	if closeErr := write.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	diagnostic, readErr := io.ReadAll(pipe)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if code != ExitError || stdout != "" {
+		t.Errorf("flag error: code = %d, stdout = %q, want a plain failure", code, stdout)
+	}
+	if !strings.Contains(string(diagnostic), "no-such-flag") {
+		t.Errorf("flag error stderr = %q, want the flag named", diagnostic)
 	}
 }
 

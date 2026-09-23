@@ -4,7 +4,11 @@
 
 package engine
 
-import "github.com/huija/skillmod/internal/i18n"
+import (
+	"encoding/json"
+
+	"github.com/huija/skillmod/internal/i18n"
+)
 
 // Command is the stable machine-readable command that produced a report.
 type Command string
@@ -77,6 +81,21 @@ type Report struct {
 	Action  Command       `json:"action"`
 	Entries []EntryReport `json:"entries"`
 	Notes   []string      `json:"notes,omitempty"`
+	// Error names why the run failed. It is filled in for --json output only,
+	// so a document always carries the reason its command exited non-zero;
+	// without --json the same text reaches stderr instead.
+	Error string `json:"error,omitempty"`
+}
+
+// MarshalJSON renders entries as an array even when the command produced none,
+// so a consumer iterating the field never has to special-case null.
+func (r Report) MarshalJSON() ([]byte, error) {
+	type report Report // Shadow the type to drop the custom marshaler.
+	shadow := report(r)
+	if shadow.Entries == nil {
+		shadow.Entries = []EntryReport{}
+	}
+	return json.Marshal(shadow)
 }
 
 // PartialError reports that at least one installation target was safely

@@ -58,9 +58,9 @@ func (options *rootOptions) upgrade(cmd *cobra.Command, tag string, check bool) 
 	// is skipped on failure, where Execute reports the error instead.
 	rep := upgradeReport(result, target, options.dryRun, err != nil)
 	if err != nil {
-		return errors.Join(err, options.output(cmd, rep))
+		return errors.Join(err, options.output(cmd, rep, err))
 	}
-	return errors.Join(options.output(cmd, rep), reportUpgrade(rep, io, result, options.dryRun))
+	return errors.Join(options.output(cmd, rep, nil), reportUpgrade(rep, io, result, options.dryRun))
 }
 
 // upgradeReport renders one upgrade attempt as a report entry. The action

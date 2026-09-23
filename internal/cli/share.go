@@ -53,7 +53,7 @@ func newShareCmd(options *rootOptions) *cobra.Command {
 				share.Remove, share.Agents = targets, nil
 			}
 			rep, err := eng.Share(cmd.Context(), share, options.newIO(cmd), options.mutationOptions())
-			return errors.Join(err, options.output(cmd, rep))
+			return errors.Join(err, options.output(cmd, rep, err))
 		},
 	}
 	cmd.Flags().StringArrayVarP(&skills, "skill", "s", nil, i18n.Text("cli.share.flag_skill"))
