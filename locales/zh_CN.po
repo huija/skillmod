@@ -435,8 +435,8 @@ msgstr "简写地址已解析为 %s；若指本地仓库，请使用 file:/"
 "/ 前缀"
 
 msgid "engine.get.skill_md_missing_repository"
-msgstr "仓库根目录及 skills/ 下所有子目录中均未找到 SKILL."
-"md"
+msgstr "未找到 SKILL.md；已检查仓库根目录、skills/、.agents/s"
+"kills 等 agent 技能目录，以及根目录下的技能目录"
 
 #, go-format
 msgid "engine.get.skill_name_matches_multiple"

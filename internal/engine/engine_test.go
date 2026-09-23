@@ -442,6 +442,215 @@ func TestGet_AllInstallsAllDiscoveredNestedSkills(t *testing.T) {
 	}
 }
 
+// A repository without a skills/ collection publishes its skills directly in
+// the root, or inside an agent skills directory such as .agents/skills; both
+// layouts are discovered so only conventional repositories need a typed path.
+func TestGet_DiscoversSkillsOutsideTheSkillsCollection(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.Write("README.md", "flat layout\n")
+	r.WriteSkill("cool-skill", "cool-skill")
+	r.WriteSkill("other-skill", "other-skill")
+	r.WriteSkill(".agents/skills/wrapped", "wrapped")
+	r.CommitAll("flat and agent layouts")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO(), engine.GetOptions{All: true}); err != nil {
+		t.Fatalf("Get flat layout with --all: %v", err)
+	}
+	mod, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]modfile.ModSkill{}
+	for _, skill := range mod.Skills {
+		byName[skill.Name] = skill
+	}
+	for _, name := range []string{"cool-skill", "other-skill", "wrapped"} {
+		if _, ok := byName[name]; !ok {
+			t.Fatalf("skill %q was not discovered: %+v", name, mod.Skills)
+		}
+	}
+	if byName["cool-skill"].Source != r.URL+"//cool-skill" {
+		t.Errorf("root-level source = %q, want %q", byName["cool-skill"].Source, r.URL+"//cool-skill")
+	}
+	if byName["wrapped"].Source != r.URL+"//.agents/skills/wrapped" {
+		t.Errorf("agent-directory source = %q, want %q", byName["wrapped"].Source, r.URL+"//.agents/skills/wrapped")
+	}
+
+	// The name shorthand resolves a discovered skill wherever it lives, and an
+	// exact subdirectory still wins over name matching.
+	root2 := t.TempDir()
+	eng2 := newEngine(t, root2, t.TempDir())
+	if _, err := eng2.Get(ctx, r.URL+"//wrapped@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get discovered skill by name: %v", err)
+	}
+	lock := loadLockSkill(t, root2, "wrapped")
+	if lock.Source != r.URL+"//.agents/skills/wrapped" {
+		t.Errorf("name-shorthand lock source = %q, want %q", lock.Source, r.URL+"//.agents/skills/wrapped")
+	}
+	if _, err := os.Stat(filepath.Join(installedDir(root2, "wrapped"), "SKILL.md")); err != nil {
+		t.Fatalf("wrapped was not installed: %v", err)
+	}
+}
+
+// One skill under an agent directory needs no selection even though the
+// repository has no conventional layout at all.
+func TestGet_AgentDirectoryRepositoryInstallsWithoutPrompting(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.Write("README.md", "single wrapped skill\n")
+	r.WriteSkill(".agent/skills/only", "only")
+	r.CommitAll("agent layout")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get single wrapped skill: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(installedDir(root, "only"), "SKILL.md")); err != nil {
+		t.Fatal("only was not installed")
+	}
+}
+
+// TestGet_KeepsOneCandidateWhenAnAgentDirectoryMirrorsTheCollection covers a
+// repository that publishes the same skills twice, once under skills/ and again
+// under an agent directory such as .openclaw/skills or .claude/skills. Both
+// would install into one directory under one name, so discovery keeps the copy
+// from the layout a reader looks at first and offers the skill once.
+func TestGet_KeepsOneCandidateWhenAnAgentDirectoryMirrorsTheCollection(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.Write("README.md", "mirrored collection\n")
+	for _, name := range []string{"ponytail", "ponytail-review"} {
+		r.WriteSkill("skills/"+name, name)
+		r.WriteSkill(".openclaw/skills/"+name, name)
+	}
+	r.CommitAll("mirror the collection under an agent directory")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO(), engine.GetOptions{All: true}); err != nil {
+		t.Fatalf("Get mirrored collection with --all: %v", err)
+	}
+	mod, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mod.Skills) != 2 {
+		t.Fatalf("declarations = %+v, want one entry per skill, not one per copy", mod.Skills)
+	}
+	for _, skill := range mod.Skills {
+		if !strings.HasPrefix(skill.Source, r.URL+"//skills/") {
+			t.Errorf("%s source = %q, want the conventional skills/ copy", skill.Name, skill.Source)
+		}
+	}
+	// The name shorthand resolves to the same copy, and a single skill from the
+	// mirrored repository needs no selection at all.
+	root2 := t.TempDir()
+	eng2 := newEngine(t, root2, t.TempDir())
+	if _, err := eng2.Get(ctx, r.URL+"//ponytail-review@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get mirrored skill by name: %v", err)
+	}
+	if lock := loadLockSkill(t, root2, "ponytail-review"); lock.Source != r.URL+"//skills/ponytail-review" {
+		t.Errorf("name-shorthand source = %q, want the conventional skills/ copy", lock.Source)
+	}
+}
+
+// TestGet_KeepsTheRootLevelCopyOverAnAgentDirectory covers the second step of
+// the ranking: a skill a repository leaves in a root directory outranks the same
+// skill in an agent mirror, because the root directory is the repository's own
+// layout and the agent directory is a copy kept for one agent.
+func TestGet_KeepsTheRootLevelCopyOverAnAgentDirectory(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.Write("README.md", "root copy beats agent copy\n")
+	r.WriteSkill("ponytail", "ponytail")
+	r.WriteSkill(".claude/skills/ponytail", "ponytail")
+	r.CommitAll("root copy alongside an agent copy")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	// The agent copy alone still installs, which is what makes the ranking
+	// meaningful rather than a rule that only fires on the conventional layout.
+	solo := testutil.NewRepo(t)
+	solo.Write("README.md", "agent only\n")
+	solo.WriteSkill(".claude/skills/wrapped", "wrapped")
+	solo.CommitAll("agent only")
+	solo.Tag("v1.0.0")
+	solo.Finish()
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get repository with a root copy and an agent copy: %v", err)
+	}
+	mod, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mod.Skills) != 1 || mod.Skills[0].Source != r.URL+"//ponytail" {
+		t.Fatalf("declarations = %+v, want the root-level copy once", mod.Skills)
+	}
+	if _, err := eng.Get(ctx, solo.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatal("only skill published under an agent directory")
+	}
+}
+
+// TestGet_KeepsTheCollectionCopyOverEverythingElse covers the top of the
+// ranking: a skill under skills/ is the one a repository publishes as its own,
+// so it wins over a copy in a root directory and over an agent mirror alike.
+func TestGet_KeepsTheCollectionCopyOverEverythingElse(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.Write("README.md", "the same skill in three places\n")
+	r.WriteSkill("skills/ponytail", "ponytail")
+	r.WriteSkill("ponytail", "ponytail")
+	r.WriteSkill(".openclaw/skills/ponytail", "ponytail")
+	r.CommitAll("one skill, three roots")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	// Discovery with no subdirectory: the ranking decides, because all three
+	// copies were found rather than typed as a path.
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get repository with one skill in three roots: %v", err)
+	}
+	mod, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mod.Skills) != 1 || mod.Skills[0].Source != r.URL+"//skills/ponytail" {
+		t.Fatalf("declarations = %+v, want the conventional skills/ copy", mod.Skills)
+	}
+}
+
+// TestGet_TwoAgentDirectoriesAreNotRankedAgainstEachOther keeps the ambiguity a
+// repository creates when two agent directories hold the same skill and neither
+// outranks the other. Picking one silently would install a copy the caller never
+// chose, so the run reports both paths the way it does for any other ambiguity.
+func TestGet_TwoAgentDirectoriesAreNotRankedAgainstEachOther(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.Write("README.md", "two agent directories, one skill\n")
+	r.WriteSkill(".claude/skills/ponytail", "ponytail")
+	r.WriteSkill(".codex/skills/ponytail", "ponytail")
+	r.CommitAll("mirror for two agents")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	eng := newEngine(t, t.TempDir(), t.TempDir())
+	_, err := eng.Get(ctx, r.URL+"//ponytail@v1.0.0", "", testIO())
+	if err == nil || !strings.Contains(err.Error(), "multiple subdirectories") ||
+		!strings.Contains(err.Error(), ".claude/skills/ponytail") ||
+		!strings.Contains(err.Error(), ".codex/skills/ponytail") {
+		t.Errorf("Get(ambiguous agent mirrors) error = %v, want both paths named", err)
+	}
+}
+
 type getSkillChooser struct {
 	choices []int
 	calls   int
@@ -810,7 +1019,9 @@ func TestGet_ExplicitLocalRepoVersionWinsOverNewSubdirTag(t *testing.T) {
 
 	root := t.TempDir()
 	eng := newEngine(t, root, t.TempDir())
-	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+	// The repository publishes the root skill and beta as root-level skills, so
+	// the first get states the whole set instead of guessing one of them.
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO(), engine.GetOptions{All: true}); err != nil {
 		t.Fatal(err)
 	}
 

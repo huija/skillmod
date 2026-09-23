@@ -442,8 +442,8 @@ msgstr "the short address was resolved as %s; for a local repository, use t"
 "he file:// prefix"
 
 msgid "engine.get.skill_md_missing_repository"
-msgstr "SKILL.md is missing from the repository root and every descendant o"
-"f skills/"
+msgstr "no SKILL.md found; looked in the repository root, skills/, agent sk"
+"ill directories such as .agents/skills, and root-level skill directories"
 
 #, go-format
 msgid "engine.get.skill_name_matches_multiple"

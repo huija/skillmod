@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/huija/skillmod/internal/address"
@@ -413,6 +414,30 @@ type skillCandidate struct {
 	subdir      string
 	name        string
 	description string
+	origin      candidateOrigin
+}
+
+// candidateOrigin ranks the root a candidate was found under. A repository can
+// publish the same skill under more than one conventional root — skills/ and an
+// agent mirror such as .openclaw/skills is the common case — and the two would
+// install into the same directory under the same name, so discovery keeps one of
+// them. The ranking is the one a reader of the repository expects: the
+// conventional skills/ collection, then a root-level directory, then the
+// agent-specific collections, which are mirrors maintained for one agent rather
+// than the repository's own layout.
+type candidateOrigin int
+
+const (
+	originRepositoryRoot candidateOrigin = iota // the repository itself is one skill
+	originCollection
+	originRootDirectory
+	originAgentCollection
+)
+
+// takesPrecedenceOver reports whether this root outranks another, so the copy
+// a repository keeps is the one from the layout a reader looks at first.
+func (o candidateOrigin) takesPrecedenceOver(other candidateOrigin) bool {
+	return o < other
 }
 
 // chooseSkillCandidates lets an interactive caller choose one or more skills.
@@ -524,9 +549,32 @@ func candidateDisplaySubdirs(root string, candidates []skillCandidate) []string 
 	return displaySubdirs
 }
 
+// skillCandidates discovers the skills a repository publishes. Discovery order
+// is the repository root itself (a standalone skill), the conventional skills/
+// collection, any agent-named hidden collection such as .agents/skills or
+// .claude/skills, and the root-level directories as well. Those four are always
+// scanned, in that order, because a repository that publishes a collection can
+// still leave a skill sitting in another root directory, and a skill nobody
+// asked for is what discovery is for; duplicates are collapsed. An explicit
+// subdirectory always wins over discovery, so a repository only has to look
+// conventional to users who never type a path.
 func skillCandidates(root string) ([]skillCandidate, error) {
 	var candidates []skillCandidate
-	addCandidate := func(dir, subdir string) error {
+	// A skill name is the identity an installation directory and a //name address
+	// both use, so the same skill published under two roots cannot both be
+	// offered: they would install into one place under one name. The key pairs
+	// the folded name with the root it was found under, because two skills that
+	// share a name inside one collection are two skills, not a duplicate — they
+	// stay to be reported as the ambiguity they are. The map holds the position
+	// of the copy currently kept, so a copy from a higher-precedence root
+	// replaces it where the first one stood.
+	byName := map[string]int{}
+	seenSubdir := map[string]bool{}
+	addCandidate := func(dir, subdir string, origin candidateOrigin) error {
+		if seenSubdir[subdir] {
+			return nil
+		}
+		seenSubdir[subdir] = true
 		if !hasSkillManifest(dir) {
 			return nil
 		}
@@ -537,33 +585,107 @@ func skillCandidates(root string) ([]skillCandidate, error) {
 		if err != nil {
 			return err
 		}
-		candidates = append(candidates, skillCandidate{subdir: subdir, name: metadata.Name, description: metadata.Description})
+		key := fsutil.FoldKey(metadata.Name)
+		if at, duplicate := byName[key]; duplicate {
+			switch {
+			case origin.takesPrecedenceOver(candidates[at].origin):
+				// A copy from the higher-precedence root replaces the one kept,
+				// in the position that one had taken.
+				candidates[at] = skillCandidate{subdir: subdir, name: metadata.Name, description: metadata.Description, origin: origin}
+			case candidates[at].origin != origin:
+				// The kept copy's root outranks this one, so this copy is the
+				// duplicate and is dropped.
+			default:
+				// Neither outranks: the same name inside one collection, or two
+				// agent mirrors nobody ranks. Two skills rather than a duplicate,
+				// so both stay to be reported as the ambiguity they are.
+				candidates = append(candidates, skillCandidate{subdir: subdir, name: metadata.Name, description: metadata.Description, origin: origin})
+			}
+			return nil
+		}
+		byName[key] = len(candidates)
+		candidates = append(candidates, skillCandidate{subdir: subdir, name: metadata.Name, description: metadata.Description, origin: origin})
 		return nil
 	}
-	if err := addCandidate(root, ""); err != nil {
+	if err := addCandidate(root, "", originRepositoryRoot); err != nil {
 		return nil, err
 	}
-
-	skillsRoot := filepath.Join(root, "skills")
-	_, err := os.Stat(skillsRoot)
-	if os.IsNotExist(err) {
-		return candidates, nil
+	for _, collection := range collectionRoots(root) {
+		if err := walkCollection(root, collection.dir, collection.origin, addCandidate); err != nil {
+			return nil, err
+		}
 	}
+	entries, err := os.ReadDir(root)
 	if err != nil {
 		return nil, err
 	}
-	err = filepath.WalkDir(skillsRoot, func(path string, d fs.DirEntry, walkErr error) error {
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if err := addCandidate(filepath.Join(root, entry.Name()), entry.Name(), originRootDirectory); err != nil {
+			return nil, err
+		}
+	}
+	return candidates, nil
+}
+
+// collectionDirName is the directory name a skill collection is published
+// under, both bare (skills/) and inside an agent directory (.agents/skills).
+const collectionDirName = "skills"
+
+// collectionRoot is one directory a collection is published under, with the
+// origin its skills carry.
+type collectionRoot struct {
+	dir    string
+	origin candidateOrigin
+}
+
+// collectionRoots lists the collection directories a repository may publish
+// under, in discovery order: the conventional skills/ directory and every
+// hidden agent-named directory that holds one, such as .agents/skills,
+// .claude/skills, or .agent/skills. A directory under a hidden one is a mirror
+// kept for a single agent, so its skills carry the lower origin and lose to a
+// same-named skill in the conventional collection.
+func collectionRoots(root string) []collectionRoot {
+	var roots []collectionRoot
+	for _, pattern := range []string{
+		filepath.Join(root, collectionDirName),
+		filepath.Join(root, ".*", collectionDirName),
+	} {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			continue // A malformed pattern is a programming error, not user input.
+		}
+		sort.Strings(matches)
+		for _, match := range matches {
+			origin := originCollection
+			if strings.HasPrefix(filepath.Base(filepath.Dir(match)), ".") {
+				origin = originAgentCollection
+			}
+			roots = append(roots, collectionRoot{dir: match, origin: origin})
+		}
+	}
+	return roots
+}
+
+// walkCollection adds every skill under one collection directory at any depth,
+// stopping at a directory that is itself a skill. The origin every candidate
+// carries is the one the collection itself has, so a skill inside an agent
+// directory never outranks the same skill under skills/.
+func walkCollection(root, collection string, origin candidateOrigin, addCandidate func(dir, subdir string, origin candidateOrigin) error) error {
+	return filepath.WalkDir(collection, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		if !d.IsDir() || path == skillsRoot {
+		if !d.IsDir() || path == collection {
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
-		if err := addCandidate(path, filepath.ToSlash(rel)); err != nil {
+		if err := addCandidate(path, filepath.ToSlash(rel), origin); err != nil {
 			return err
 		}
 		if hasSkillManifest(path) {
@@ -571,10 +693,6 @@ func skillCandidates(root string) ([]skillCandidate, error) {
 		}
 		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	return candidates, nil
 }
 
 func hasSkillManifest(dir string) bool {
