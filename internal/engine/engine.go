@@ -621,8 +621,8 @@ func (e *Engine) resolveAndFetch(ctx context.Context, repo, subdir, ref string, 
 		// ls-remote returns repository-wide refs. If another subdirectory already queried the same repository,
 		// an exact tag can reuse that snapshot, while latest and update still force a remote refresh.
 		if !resolve.IsPseudoVersion(ref) {
-			if cachedRefs, ok, _ := e.Store.GetRepoRefs(repo); ok {
-				cachedRes, resolveErr := resolve.Resolve(resolve.Request{Repo: repo, Subdir: subdir, Ref: ref}, cachedRefs)
+			if cached, ok, _ := e.Store.GetRepoRefs(repo); ok {
+				cachedRes, resolveErr := resolve.Resolve(resolve.Request{Repo: repo, Subdir: subdir, Ref: ref}, cached.Refs)
 				// For a monorepo, trust only the highest-priority <subdir>/<ref> match.
 				// A cached root-tag match may be stale if the remote later added a more specific subdirectory tag.
 				cacheHit := resolveErr == nil && cachedRes.Kind == resolve.KindTag &&

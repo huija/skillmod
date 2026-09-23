@@ -2689,7 +2689,10 @@ func TestList(t *testing.T) {
 	if len(rep.Entries) != 1 || rep.Entries[0].Action != "installed" {
 		t.Errorf("list = %+v", rep.Entries)
 	}
-	// A new upstream version produces an upgrade notice.
+	// A repeated list answers from the reference snapshot the install wrote, so
+	// a new upstream tag is not noticed until that snapshot ages out; the aged-out
+	// half of the contract is asserted in TestListAnswersFromAFreshRefsCache,
+	// which can age the window and TestList cannot. update refreshes on demand.
 	r.Write("v2.md", "x\n")
 	r.CommitAll("v2")
 	r.Evolve("v2.0.0", false)
@@ -2697,8 +2700,8 @@ func TestList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(rep.Entries[0].Note, "upgrade available → ") {
-		t.Errorf("list did not report an available upgrade: %+v", rep.Entries[0])
+	if strings.Contains(rep.Entries[0].Note, "upgrade available") {
+		t.Errorf("list refreshed a cache that is still fresh: %+v", rep.Entries[0])
 	}
 }
 

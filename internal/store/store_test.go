@@ -321,8 +321,11 @@ func TestRepoRefs_RoundTripAndCanonicalIdentity(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("GetRepoRefs = %+v, %v, %v", got, ok, err)
 	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("GetRepoRefs = %+v, want %+v", got, want)
+	if !reflect.DeepEqual(got.Refs, want) {
+		t.Fatalf("GetRepoRefs = %+v, want %+v", got.Refs, want)
+	}
+	if got.FetchedAt.IsZero() {
+		t.Fatal("GetRepoRefs returned no fetch time")
 	}
 	if err := s.PutRepoRefs("ssh://git@example.com:22/acme/skills.git", want); err != nil {
 		t.Fatal(err)
@@ -658,8 +661,11 @@ func TestRepoRefsCacheValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	refs, ok, err := s.GetRepoRefs(repo)
-	if err != nil || !ok || refs.Tags == nil || refs.Heads == nil {
+	if err != nil || !ok || refs.Refs.Tags == nil || refs.Refs.Heads == nil {
 		t.Fatalf("normalized refs = %+v, %v, %v", refs, ok, err)
+	}
+	if refs.FetchedAt.IsZero() {
+		t.Fatal("cached refs carry no fetch time")
 	}
 
 	path := s.repoRefsPath(repo)
@@ -680,6 +686,26 @@ func TestRepoRefsCacheValidation(t *testing.T) {
 	}
 	if _, _, err := s.GetRepoRefs(repo); err == nil || !strings.Contains(err.Error(), "identity mismatch") {
 		t.Fatalf("mismatched refs error = %v", err)
+	}
+
+	// A snapshot written before the fetch time was recorded carries none, which
+	// reads as stale rather than as fresh: refreshing one old file is safe,
+	// treating an unknown age as new silently answers from a snapshot that may
+	// be any age. The record is still valid, so the hit succeeds.
+	legacy := repoRefsRecord{Repo: repo, Refs: resolve.Refs{Tags: map[string]string{"v1.0.0": "refs/tags/v1.0.0"}}}
+	data, err = json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	refs, ok, err = s.GetRepoRefs(repo)
+	if err != nil || !ok {
+		t.Fatalf("legacy refs = %+v, %v, %v", refs, ok, err)
+	}
+	if !refs.FetchedAt.IsZero() {
+		t.Errorf("legacy refs FetchedAt = %v, want the zero time that reads as stale", refs.FetchedAt)
 	}
 }
 

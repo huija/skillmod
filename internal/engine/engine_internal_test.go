@@ -6,7 +6,11 @@ package engine
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -18,9 +22,11 @@ import (
 	"github.com/huija/skillmod/internal/address"
 	"github.com/huija/skillmod/internal/config"
 	"github.com/huija/skillmod/internal/dirhash"
+	"github.com/huija/skillmod/internal/install"
 	"github.com/huija/skillmod/internal/modfile"
 	"github.com/huija/skillmod/internal/source"
 	"github.com/huija/skillmod/internal/store"
+	"github.com/huija/skillmod/internal/testutil"
 )
 
 func TestIOPrintfPropagatesWriteError(t *testing.T) {
@@ -713,4 +719,111 @@ func TestSaveState_RecordsCanonicalSource(t *testing.T) {
 			t.Errorf("saveState rewrote converged %s", filepath.Base(path))
 		}
 	}
+}
+
+// TestListAnswersFromAFreshRefsCacheAndRefreshWhenAgedOut covers both halves of
+// the freshness window. A cache younger than refsCacheMaxAge keeps list local,
+// so a tag published after the install is not noticed yet; the same cache aged
+// out is refreshed over the network, so the tag then produces the upgrade notice.
+// Asserting the two halves on one cache is what distinguishes "read the cache"
+// from "never looks upstream", which is why both live here rather than in
+// engine_test.
+func TestListAnswersFromAFreshRefsCacheAndRefreshWhenAgedOut(t *testing.T) {
+	original := refsCacheMaxAge
+	refsCacheMaxAge = 0
+	t.Cleanup(func() { refsCacheMaxAge = original })
+
+	r := testutil.NewRepo(t)
+	r.WriteSkill("", "hello")
+	r.CommitAll("v1")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	root := t.TempDir()
+	s := store.New(t.TempDir())
+	eng := &Engine{
+		Root:   root,
+		Source: &source.Source{VCSRoot: s.VCSRoot()},
+		Store:  s,
+		Config: &config.Config{InstallMode: install.Copy},
+	}
+	if _, err := eng.Get(context.Background(), r.URL+"@v1.0.0", "", IO{Out: io.Discard, Yes: true}); err != nil {
+		t.Fatalf("Get(%q): %v", r.URL+"@v1.0.0", err)
+	}
+
+	r.Write("v2.md", "x\n")
+	r.CommitAll("v2")
+	r.Evolve("v2.0.0", false)
+
+	rep, err := eng.List(context.Background(), IO{Out: io.Discard, Yes: true})
+	if err != nil {
+		t.Fatalf("List(): %v", err)
+	}
+	if len(rep.Entries) != 1 || !strings.Contains(rep.Entries[0].Note, "upgrade available") {
+		t.Fatalf("List entries = %+v, want the upgrade notice after an aged-out cache", rep.Entries)
+	}
+
+	// A snapshot written before the fetch time existed carries none, and an
+	// unknown age must read as stale: treating it as fresh would answer a
+	// repeated list from a snapshot that could be any age. The file is located
+	// by glob so the store keeps deciding where it lives.
+	r.Write("v3.md", "x\n")
+	r.CommitAll("v3")
+	r.Evolve("v3.0.0", false)
+	legacy, err := stripRefsFetchedAt(s)
+	if err != nil {
+		t.Fatalf("strip fetchedAt: %v", err)
+	}
+	rep, err = eng.List(context.Background(), IO{Out: io.Discard, Yes: true})
+	if err != nil {
+		t.Fatalf("List(): %v", err)
+	}
+	if len(rep.Entries) != 1 || !strings.Contains(rep.Entries[0].Note, "v3.0.0") {
+		t.Fatalf("List entries = %+v, want the tag a cache with no fetch time still reports", rep.Entries)
+	}
+	if _, err := os.Stat(filepath.Join(legacy)); err != nil {
+		t.Errorf("refs cache after a refreshed list: %v", err)
+	}
+}
+
+// stripRefsFetchedAt rewrites every cached ls-remote snapshot in the store as a
+// version written before the fetch time was recorded, and returns the path it
+// rewrote. It finds the caches by name, which is the store's business, and only
+// edits what it finds.
+func stripRefsFetchedAt(s *store.Store) (string, error) {
+	var matches []string
+	err := filepath.WalkDir(s.CacheRoot(), func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && d.Name() == "refs.json" {
+			matches = append(matches, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	if len(matches) == 0 {
+		return "", errors.New("no cached ls-remote snapshot to rewrite")
+	}
+	for _, path := range matches {
+		var rec map[string]json.RawMessage
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return "", err
+		}
+		if err := json.Unmarshal(data, &rec); err != nil {
+			return "", err
+		}
+		delete(rec, "fetchedAt")
+		out, err := json.Marshal(rec)
+		if err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(path, out, 0o600); err != nil {
+			return "", err
+		}
+	}
+	return matches[0], nil
 }
