@@ -9,11 +9,20 @@ import (
 	"time"
 
 	"github.com/huija/skillmod/internal/i18n"
+	repoaddr "github.com/huija/skillmod/internal/repo"
 	"github.com/huija/skillmod/internal/resolve"
 )
 
+// refsCacheMaxAge is how long a cached ls-remote snapshot stays fresh for
+// list's upgrade detection. list is a read-only inspection command: within
+// this window it answers from the local cache, and skillmod update is the
+// command that deliberately contacts the remote. It is a variable so tests can
+// age a cache without waiting.
+var refsCacheMaxAge = 15 * time.Minute
+
 // List implements skillmod list by reporting every declared entry as installed, missing, drifted, or upgradable.
-// It is read-only. Upgrade detection calls ls-remote once per unique repository and skips failures.
+// It is read-only. Upgrade detection calls ls-remote once per unique repository whose cached reference
+// snapshot has gone stale, and skips failures.
 func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 	unlock, err := e.lockState()
 	if err != nil {
@@ -29,21 +38,36 @@ func (e *Engine) List(ctx context.Context, io IO) (*Report, error) {
 		return nil, err
 	}
 
-	// Call ls-remote once per unique repository on a best-effort basis.
+	// Call ls-remote once per unique repository on a best-effort basis, and
+	// only for repositories whose cached reference snapshot is older than the
+	// freshness window: a warm cache makes repeated list runs local-only, and
+	// update remains the command that deliberately refreshes.
 	type latestKey struct{ repo, subdir string }
 	latestCache := map[latestKey]string{}
 	memo := newOperationMemo(nil)
-	var repositories []string
+	queried := map[string]bool{}
+	var stale []string
 	for _, skill := range m.Skills {
 		if skill.Local || findLock(lock, skill) == nil || resolve.IsPseudoVersion(skill.Version) {
 			continue
 		}
 		repo, _, err := splitSource(skill.Source)
-		if err == nil {
-			repositories = append(repositories, repo)
+		if err != nil {
+			continue
 		}
+		identity := repoaddr.Identity(repo)
+		if queried[identity] {
+			continue
+		}
+		queried[identity] = true
+		cached, ok, cacheErr := e.Store.GetRepoRefs(repo)
+		if cacheErr == nil && ok && time.Since(cached.FetchedAt) < refsCacheMaxAge {
+			memo.refs[identity] = refsResult{refs: cached.Refs}
+			continue
+		}
+		stale = append(stale, repo) // Absent, unreadable, or aged out: refresh it.
 	}
-	e.loadRefsBestEffort(ctx, repositories, memo, 10*time.Second)
+	e.loadRefsBestEffort(ctx, stale, memo, 10*time.Second)
 
 	rep := &Report{Action: CommandList}
 	for _, sk := range m.Skills {

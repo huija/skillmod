@@ -17,6 +17,12 @@ breaks a rule is reported instead of being halfway applied.
   changes how the repository is fetched. A file that still spells out
   `https://` works unchanged and is rewritten to the shorter form the next time
   skillmod writes it.
+- A bare `owner/repo` path is completed with `github.com`, the host nearly
+  every skill repository lives on, so `openai/skills` and
+  `github.com/openai/skills` are the same repository. A first segment that
+  already carries a dot is a host, and so is one that carries a port. A first
+  segment that is empty, `.`, or `..` reads as a filesystem path — the same for
+  a Windows drive letter — and none of those take the `github.com` default.
 - `version` is optional. An entry without one tracks the latest immutable
   resolution, which `SKILL.lock` pins. An entry with one is pinned to that tag
   or commit until `update` runs.
@@ -63,9 +69,33 @@ Git credential helper, an SSH agent, or the environment.
 
 When `//<subdirectory>` is a single segment, skillmod first tries an exact
 subdirectory of the repository root, then falls back to a unique skill name
-anywhere below `skills/`. Ambiguous names require the full path. Omitting
-`//<subdirectory>` makes `get` discover the root `SKILL.md` and every `SKILL.md`
-below `skills/`.
+found anywhere in the repository. Ambiguous names require the full path.
+Omitting `//<subdirectory>` makes `get` discover every `SKILL.md` the
+repository publishes, wherever that is: the repository root itself, a `skills/`
+collection at any depth, an agent collection such as `.agents/skills/` or
+`.claude/skills/`, and the root-level directories. Those four are always
+scanned, so a repository that publishes a collection can still leave a skill in
+another root directory and have it installed.
+
+A repository sometimes publishes the same skill under more than one of those
+roots — `skills/` alongside `.openclaw/skills/` is the common case, because an
+agent directory is a mirror maintained for one agent. Both would install into
+one directory under one name, so `get` keeps a single copy, from the root the
+repository's own layout comes from first:
+
+| Kept copy | Discarded copies |
+| --- | --- |
+| `skills/<name>` | a root-level `<name>/`, and any agent collection |
+| root-level `<name>/` | any agent collection |
+| an agent collection | nothing, for the same skill — no agent directory outranks another |
+
+Two agents holding the same skill, with no ranking between them, are not
+collapsed: `get` reports both paths and asks, the way it does for any other
+ambiguous name. Within one collection, two directories sharing a skill name are
+two skills, not a duplicate, and are reported the same way.
+
+An exact subdirectory always wins over discovery, so a repository only has to
+look conventional to people who never type a path.
 
 ## The per-skill `agents` list
 

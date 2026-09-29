@@ -26,7 +26,7 @@ func newUpdateCmd(options *rootOptions) *cobra.Command {
 			rep, err := eng.Update(cmd.Context(), args, engine.UpdateOptions{
 				AllowDowngrade: allowDowngrade, DryRun: options.dryRun,
 			}, options.newIO(cmd))
-			return errors.Join(err, options.output(cmd, rep))
+			return errors.Join(err, options.output(cmd, rep, err))
 		},
 	}
 	// --allow-downgrade deliberately has no shorthand: it overrides a safety

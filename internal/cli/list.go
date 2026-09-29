@@ -22,7 +22,7 @@ func newListCmd(options *rootOptions) *cobra.Command {
 				return err
 			}
 			rep, err := eng.List(cmd.Context(), options.newIO(cmd))
-			return errors.Join(err, options.output(cmd, rep))
+			return errors.Join(err, options.output(cmd, rep, err))
 		},
 	}
 }

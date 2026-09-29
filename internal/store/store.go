@@ -12,7 +12,6 @@
 package store
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -24,6 +23,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/filelock"
@@ -607,6 +607,16 @@ func makeReadOnly(root string) error {
 type repoRefsRecord struct {
 	Repo string       `json:"repo"`
 	Refs resolve.Refs `json:"refs"`
+	// FetchedAt records when the snapshot was taken, so a reader can reuse a
+	// recent one instead of contacting the remote on every read-only command.
+	FetchedAt time.Time `json:"fetchedAt"`
+}
+
+// RepoRefs is one cached ls-remote snapshot: the reference set and when it was
+// taken.
+type RepoRefs struct {
+	Refs      *resolve.Refs
+	FetchedAt time.Time
 }
 
 func (s *Store) repoRefsPath(repo string) string {
@@ -619,7 +629,7 @@ func (s *Store) repoRefsPath(repo string) string {
 
 // GetRepoRefs returns the last complete ls-remote snapshot for a logical repo.
 // Callers may use positive exact-tag matches locally; latest/update must refresh.
-func (s *Store) GetRepoRefs(repo string) (*resolve.Refs, bool, error) {
+func (s *Store) GetRepoRefs(repo string) (*RepoRefs, bool, error) {
 	p := s.repoRefsPath(repo)
 	data, err := os.ReadFile(p)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -641,17 +651,19 @@ func (s *Store) GetRepoRefs(repo string) (*resolve.Refs, bool, error) {
 	if rec.Refs.Heads == nil {
 		rec.Refs.Heads = map[string]string{}
 	}
-	return &rec.Refs, true, nil
+	return &RepoRefs{Refs: &rec.Refs, FetchedAt: rec.FetchedAt}, true, nil
 }
 
-// PutRepoRefs atomically records one complete ls-remote snapshot. Equal content
-// is left untouched so multiple skills from the same repo do not churn the file.
+// PutRepoRefs atomically records one complete ls-remote snapshot together with
+// the time it was taken. The fetch time is rewritten on every call, even when
+// the reference set is unchanged, because it is what tells a reader how old
+// its cache is.
 func (s *Store) PutRepoRefs(repo string, refs *resolve.Refs) error {
 	if refs == nil {
 		return fmt.Errorf("%s", i18n.Text("store.cache_nil"))
 	}
 	p := s.repoRefsPath(repo)
-	rec := repoRefsRecord{Repo: repoaddr.Identity(repo), Refs: *refs}
+	rec := repoRefsRecord{Repo: repoaddr.Identity(repo), Refs: *refs, FetchedAt: time.Now()}
 	data, err := json.Marshal(rec)
 	if err != nil {
 		return err
@@ -661,9 +673,6 @@ func (s *Store) PutRepoRefs(repo string, refs *resolve.Refs) error {
 		return err
 	}
 	defer unlock()
-	if existing, err := os.ReadFile(p); err == nil && bytes.Equal(existing, data) {
-		return nil
-	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}

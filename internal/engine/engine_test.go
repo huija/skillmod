@@ -22,6 +22,7 @@ import (
 	"github.com/huija/skillmod/internal/config"
 	"github.com/huija/skillmod/internal/dirhash"
 	"github.com/huija/skillmod/internal/engine"
+	"github.com/huija/skillmod/internal/i18n"
 	"github.com/huija/skillmod/internal/install"
 	"github.com/huija/skillmod/internal/modfile"
 	"github.com/huija/skillmod/internal/resolve"
@@ -442,6 +443,215 @@ func TestGet_AllInstallsAllDiscoveredNestedSkills(t *testing.T) {
 	}
 }
 
+// A repository without a skills/ collection publishes its skills directly in
+// the root, or inside an agent skills directory such as .agents/skills; both
+// layouts are discovered so only conventional repositories need a typed path.
+func TestGet_DiscoversSkillsOutsideTheSkillsCollection(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.Write("README.md", "flat layout\n")
+	r.WriteSkill("cool-skill", "cool-skill")
+	r.WriteSkill("other-skill", "other-skill")
+	r.WriteSkill(".agents/skills/wrapped", "wrapped")
+	r.CommitAll("flat and agent layouts")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO(), engine.GetOptions{All: true}); err != nil {
+		t.Fatalf("Get flat layout with --all: %v", err)
+	}
+	mod, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]modfile.ModSkill{}
+	for _, skill := range mod.Skills {
+		byName[skill.Name] = skill
+	}
+	for _, name := range []string{"cool-skill", "other-skill", "wrapped"} {
+		if _, ok := byName[name]; !ok {
+			t.Fatalf("skill %q was not discovered: %+v", name, mod.Skills)
+		}
+	}
+	if byName["cool-skill"].Source != r.URL+"//cool-skill" {
+		t.Errorf("root-level source = %q, want %q", byName["cool-skill"].Source, r.URL+"//cool-skill")
+	}
+	if byName["wrapped"].Source != r.URL+"//.agents/skills/wrapped" {
+		t.Errorf("agent-directory source = %q, want %q", byName["wrapped"].Source, r.URL+"//.agents/skills/wrapped")
+	}
+
+	// The name shorthand resolves a discovered skill wherever it lives, and an
+	// exact subdirectory still wins over name matching.
+	root2 := t.TempDir()
+	eng2 := newEngine(t, root2, t.TempDir())
+	if _, err := eng2.Get(ctx, r.URL+"//wrapped@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get discovered skill by name: %v", err)
+	}
+	lock := loadLockSkill(t, root2, "wrapped")
+	if lock.Source != r.URL+"//.agents/skills/wrapped" {
+		t.Errorf("name-shorthand lock source = %q, want %q", lock.Source, r.URL+"//.agents/skills/wrapped")
+	}
+	if _, err := os.Stat(filepath.Join(installedDir(root2, "wrapped"), "SKILL.md")); err != nil {
+		t.Fatalf("wrapped was not installed: %v", err)
+	}
+}
+
+// One skill under an agent directory needs no selection even though the
+// repository has no conventional layout at all.
+func TestGet_AgentDirectoryRepositoryInstallsWithoutPrompting(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.Write("README.md", "single wrapped skill\n")
+	r.WriteSkill(".agent/skills/only", "only")
+	r.CommitAll("agent layout")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get single wrapped skill: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(installedDir(root, "only"), "SKILL.md")); err != nil {
+		t.Fatal("only was not installed")
+	}
+}
+
+// TestGet_KeepsOneCandidateWhenAnAgentDirectoryMirrorsTheCollection covers a
+// repository that publishes the same skills twice, once under skills/ and again
+// under an agent directory such as .openclaw/skills or .claude/skills. Both
+// would install into one directory under one name, so discovery keeps the copy
+// from the layout a reader looks at first and offers the skill once.
+func TestGet_KeepsOneCandidateWhenAnAgentDirectoryMirrorsTheCollection(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.Write("README.md", "mirrored collection\n")
+	for _, name := range []string{"ponytail", "ponytail-review"} {
+		r.WriteSkill("skills/"+name, name)
+		r.WriteSkill(".openclaw/skills/"+name, name)
+	}
+	r.CommitAll("mirror the collection under an agent directory")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO(), engine.GetOptions{All: true}); err != nil {
+		t.Fatalf("Get mirrored collection with --all: %v", err)
+	}
+	mod, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mod.Skills) != 2 {
+		t.Fatalf("declarations = %+v, want one entry per skill, not one per copy", mod.Skills)
+	}
+	for _, skill := range mod.Skills {
+		if !strings.HasPrefix(skill.Source, r.URL+"//skills/") {
+			t.Errorf("%s source = %q, want the conventional skills/ copy", skill.Name, skill.Source)
+		}
+	}
+	// The name shorthand resolves to the same copy, and a single skill from the
+	// mirrored repository needs no selection at all.
+	root2 := t.TempDir()
+	eng2 := newEngine(t, root2, t.TempDir())
+	if _, err := eng2.Get(ctx, r.URL+"//ponytail-review@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get mirrored skill by name: %v", err)
+	}
+	if lock := loadLockSkill(t, root2, "ponytail-review"); lock.Source != r.URL+"//skills/ponytail-review" {
+		t.Errorf("name-shorthand source = %q, want the conventional skills/ copy", lock.Source)
+	}
+}
+
+// TestGet_KeepsTheRootLevelCopyOverAnAgentDirectory covers the second step of
+// the ranking: a skill a repository leaves in a root directory outranks the same
+// skill in an agent mirror, because the root directory is the repository's own
+// layout and the agent directory is a copy kept for one agent.
+func TestGet_KeepsTheRootLevelCopyOverAnAgentDirectory(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.Write("README.md", "root copy beats agent copy\n")
+	r.WriteSkill("ponytail", "ponytail")
+	r.WriteSkill(".claude/skills/ponytail", "ponytail")
+	r.CommitAll("root copy alongside an agent copy")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	// The agent copy alone still installs, which is what makes the ranking
+	// meaningful rather than a rule that only fires on the conventional layout.
+	solo := testutil.NewRepo(t)
+	solo.Write("README.md", "agent only\n")
+	solo.WriteSkill(".claude/skills/wrapped", "wrapped")
+	solo.CommitAll("agent only")
+	solo.Tag("v1.0.0")
+	solo.Finish()
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get repository with a root copy and an agent copy: %v", err)
+	}
+	mod, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mod.Skills) != 1 || mod.Skills[0].Source != r.URL+"//ponytail" {
+		t.Fatalf("declarations = %+v, want the root-level copy once", mod.Skills)
+	}
+	if _, err := eng.Get(ctx, solo.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatal("only skill published under an agent directory")
+	}
+}
+
+// TestGet_KeepsTheCollectionCopyOverEverythingElse covers the top of the
+// ranking: a skill under skills/ is the one a repository publishes as its own,
+// so it wins over a copy in a root directory and over an agent mirror alike.
+func TestGet_KeepsTheCollectionCopyOverEverythingElse(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.Write("README.md", "the same skill in three places\n")
+	r.WriteSkill("skills/ponytail", "ponytail")
+	r.WriteSkill("ponytail", "ponytail")
+	r.WriteSkill(".openclaw/skills/ponytail", "ponytail")
+	r.CommitAll("one skill, three roots")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	// Discovery with no subdirectory: the ranking decides, because all three
+	// copies were found rather than typed as a path.
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get repository with one skill in three roots: %v", err)
+	}
+	mod, err := modfile.LoadMod(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mod.Skills) != 1 || mod.Skills[0].Source != r.URL+"//skills/ponytail" {
+		t.Fatalf("declarations = %+v, want the conventional skills/ copy", mod.Skills)
+	}
+}
+
+// TestGet_TwoAgentDirectoriesAreNotRankedAgainstEachOther keeps the ambiguity a
+// repository creates when two agent directories hold the same skill and neither
+// outranks the other. Picking one silently would install a copy the caller never
+// chose, so the run reports both paths the way it does for any other ambiguity.
+func TestGet_TwoAgentDirectoriesAreNotRankedAgainstEachOther(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.Write("README.md", "two agent directories, one skill\n")
+	r.WriteSkill(".claude/skills/ponytail", "ponytail")
+	r.WriteSkill(".codex/skills/ponytail", "ponytail")
+	r.CommitAll("mirror for two agents")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	eng := newEngine(t, t.TempDir(), t.TempDir())
+	_, err := eng.Get(ctx, r.URL+"//ponytail@v1.0.0", "", testIO())
+	if err == nil || !strings.Contains(err.Error(), "multiple subdirectories") ||
+		!strings.Contains(err.Error(), ".claude/skills/ponytail") ||
+		!strings.Contains(err.Error(), ".codex/skills/ponytail") {
+		t.Errorf("Get(ambiguous agent mirrors) error = %v, want both paths named", err)
+	}
+}
+
 type getSkillChooser struct {
 	choices []int
 	calls   int
@@ -810,7 +1020,9 @@ func TestGet_ExplicitLocalRepoVersionWinsOverNewSubdirTag(t *testing.T) {
 
 	root := t.TempDir()
 	eng := newEngine(t, root, t.TempDir())
-	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO()); err != nil {
+	// The repository publishes the root skill and beta as root-level skills, so
+	// the first get states the whole set instead of guessing one of them.
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO(), engine.GetOptions{All: true}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1331,6 +1543,67 @@ func readFileString(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+// Regression: the empty-candidate path used to report that it had generated an
+// empty manifest and then fall into the shared non-interactive confirmation
+// gate, which returned before the write phase. The report described a write
+// that never happened, and a non-interactive environment could not get past the
+// prompt it could not answer. An empty run has nothing to confirm, so it must
+// reach the write phase and keep the promise its own note made.
+func TestInit_EmptyRunKeepsTheManifestItReports(t *testing.T) {
+	t.Setenv(i18n.Env, "en")
+	// Confirm is nil and Yes is false: the shape a script or CI run sees.
+	unattended := engine.IO{Out: io.Discard}
+
+	t.Run("writes the reported empty manifest", func(t *testing.T) {
+		root := t.TempDir()
+		rep, err := newEngine(t, root, t.TempDir()).Init(ctx, false, unattended)
+		if err != nil {
+			t.Fatalf("an empty init should not require confirmation: %v", err)
+		}
+		if len(rep.Entries) != 0 {
+			t.Errorf("entries = %d, want 0", len(rep.Entries))
+		}
+		if note := strings.Join(rep.Notes, "\n"); !strings.Contains(note, "generated an empty manifest") {
+			t.Errorf("notes = %q, want the manifest already reported as generated", note)
+		}
+		if _, err := os.Stat(filepath.Join(root, modfile.ModFileName)); err != nil {
+			t.Errorf("the reported manifest was not written: %v", err)
+		}
+	})
+
+	t.Run("dry run promises instead of claiming", func(t *testing.T) {
+		root := t.TempDir()
+		rep, err := newEngine(t, root, t.TempDir()).Init(ctx, false, unattended, engine.MutationOptions{DryRun: true})
+		if err != nil {
+			t.Fatalf("init --dry-run: %v", err)
+		}
+		if note := strings.Join(rep.Notes, "\n"); !strings.Contains(note, "will generate an empty manifest") {
+			t.Errorf("notes = %q, want the future tense for a run that writes nothing", note)
+		}
+		if _, err := os.Stat(filepath.Join(root, modfile.ModFileName)); !os.IsNotExist(err) {
+			t.Errorf("dry-run wrote SKILL.mod: %v", err)
+		}
+	})
+
+	// Widening the gate must stay scoped to an empty run: a run with a candidate
+	// still has something to confirm, and silently accepting it would install a
+	// skill the user never approved.
+	t.Run("a run with candidates still requires confirmation", func(t *testing.T) {
+		root := t.TempDir()
+		dir := installedDir(root, "local-skill")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := "---\nname: local-skill\ndescription: local\n---\n# local\n"
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := newEngine(t, root, t.TempDir()).Init(ctx, false, unattended); err == nil {
+			t.Error("a run with candidates should still require confirmation")
+		}
+	})
 }
 
 func TestInit_ScansTheManagedDirectory(t *testing.T) {
@@ -2021,6 +2294,183 @@ func TestRemoveWithoutNamesNeedsASelection(t *testing.T) {
 	assertStateDirs(t, root, "alpha")
 }
 
+// TestRemoveAcceptsARepositorySelector covers remove's repository form: a
+// repository that declares one skill needs no choice, several entries from one
+// repository are offered interactively exactly like get's chooser, and a
+// repository nothing comes from is reported instead of ignored.
+func TestRemoveAcceptsARepositorySelector(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.WriteSkill("skills/alpha", "alpha")
+	r.WriteSkill("skills/beta", "beta")
+	r.CommitAll("collection")
+	r.Tag("v1.0.0")
+	r.Finish()
+	other := newHelloRepo(t)
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO(), engine.GetOptions{All: true}); err != nil {
+		t.Fatalf("Get collection: %v", err)
+	}
+	if _, err := eng.Get(ctx, other.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get hello: %v", err)
+	}
+
+	// A single-entry repository removes without asking.
+	rep, err := eng.Remove(ctx, []string{other.URL}, testIO())
+	if err != nil {
+		t.Fatalf("Remove(single-entry repository): %v", err)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Name != "hello" {
+		t.Fatalf("Remove report = %+v, want only hello", rep.Entries)
+	}
+
+	// Several entries from one repository: the caller picks which.
+	chooser := &shareChooser{selections: [][]int{{1}}}
+	rep, err = eng.Remove(ctx, []string{r.URL}, engine.IO{Out: io.Discard, Confirm: chooser})
+	if err != nil {
+		t.Fatalf("Remove(repository with several entries): %v", err)
+	}
+	if chooser.calls != 1 {
+		t.Fatalf("selector calls = %d, want one repository selection", chooser.calls)
+	}
+	if len(rep.Entries) != 1 || rep.Entries[0].Name != "beta" {
+		t.Fatalf("Remove report = %+v, want only the picked beta", rep.Entries)
+	}
+	if _, err := os.Stat(installedDir(root, "beta")); !os.IsNotExist(err) {
+		t.Errorf("picked installation error = %v, want not exist", err)
+	}
+	if _, err := os.Stat(installedDir(root, "alpha")); err != nil {
+		t.Errorf("unpicked installation = %v, want kept", err)
+	}
+
+	// A repository nothing comes from is reported rather than silently ignored.
+	if _, err := eng.Remove(ctx, []string{"github.com/acme/other"}, testIO()); err == nil ||
+		!strings.Contains(err.Error(), "github.com/acme/other") {
+		t.Errorf("Remove(unknown repository) error = %v, want the repository named", err)
+	}
+}
+
+// TestRemoveRepositorySelectorWithoutAChannelListsCandidates refuses to guess
+// between several entries from one repository when there is no terminal to ask
+// through, and lists them the way get lists multiple skills.
+func TestRemoveRepositorySelectorWithoutAChannelListsCandidates(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.WriteSkill("skills/alpha", "alpha")
+	r.WriteSkill("skills/beta", "beta")
+	r.CommitAll("collection")
+	r.Tag("v1.0.0")
+	r.Finish()
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO(), engine.GetOptions{All: true}); err != nil {
+		t.Fatalf("Get collection: %v", err)
+	}
+	_, err := eng.Remove(ctx, []string{r.URL}, testIO())
+	if err == nil {
+		t.Fatal("Remove(repository) without a channel succeeded, want a candidate listing")
+	}
+	for _, want := range []string{"alpha", "beta"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Remove error = %v, want %q listed", err, want)
+		}
+	}
+	assertStateDirs(t, root, "alpha", "beta")
+}
+
+// TestRemoveRepositorySelectorWithAllTakesEveryEntry pins the non-interactive
+// way to say "everything this repository brought in". --all expands a
+// repository selector, so a run with no terminal deletes the whole set instead
+// of stopping to list candidates, and entries from other repositories stay.
+func TestRemoveRepositorySelectorWithAllTakesEveryEntry(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.WriteSkill("skills/alpha", "alpha")
+	r.WriteSkill("skills/beta", "beta")
+	r.CommitAll("collection")
+	r.Tag("v1.0.0")
+	r.Finish()
+	other := newHelloRepo(t)
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO(), engine.GetOptions{All: true}); err != nil {
+		t.Fatalf("Get collection: %v", err)
+	}
+	if _, err := eng.Get(ctx, other.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get hello: %v", err)
+	}
+
+	rep, err := eng.Remove(ctx, []string{r.URL}, testIO(), engine.RemoveOptions{All: true})
+	if err != nil {
+		t.Fatalf("Remove(repository, all): %v", err)
+	}
+	if len(rep.Entries) != 2 {
+		t.Fatalf("Remove report = %+v, want both collection entries", rep.Entries)
+	}
+	assertStateDirs(t, root, "hello")
+
+	// --all states the set, so naming a skill alongside it is still refused
+	// rather than silently widened to the whole declaration.
+	if _, err := eng.Remove(ctx, []string{"hello"}, testIO(), engine.RemoveOptions{All: true}); err == nil ||
+		!strings.Contains(err.Error(), "--all") {
+		t.Errorf("Remove(name, all) error = %v, want the combination refused", err)
+	}
+	assertStateDirs(t, root, "hello")
+}
+
+// TestRemoveAgentWithAllAndARepositorySelector pins the --agent path's
+// repository form. --all expands a repository selector there exactly as it does
+// for a removal, so one non-interactive command unshares everything that
+// repository declared; the expansion happens before the delegation to share,
+// which is why share does not see a set stated twice and refuse it.
+func TestRemoveAgentWithAllAndARepositorySelector(t *testing.T) {
+	r := testutil.NewRepo(t)
+	r.WriteSkill("skills/alpha", "alpha")
+	r.WriteSkill("skills/beta", "beta")
+	r.CommitAll("collection")
+	r.Tag("v1.0.0")
+	r.Finish()
+	other := newHelloRepo(t)
+
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Get(ctx, r.URL+"@v1.0.0", "", testIO(), engine.GetOptions{All: true}); err != nil {
+		t.Fatalf("Get collection: %v", err)
+	}
+	if _, err := eng.Get(ctx, other.URL+"@v1.0.0", "", testIO()); err != nil {
+		t.Fatalf("Get hello: %v", err)
+	}
+	for _, name := range []string{"alpha", "beta", "hello"} {
+		if _, err := eng.Share(ctx, engine.ShareOptions{Skills: []string{name}, Agents: []string{"claude"}}, testIO()); err != nil {
+			t.Fatalf("Share(%s): %v", name, err)
+		}
+	}
+
+	rep, err := eng.Remove(ctx, []string{r.URL}, testIO(), engine.RemoveOptions{All: true, Agents: []string{"claude"}})
+	if err != nil {
+		t.Fatalf("Remove(repository, all, --agent claude): %v", err)
+	}
+	if len(rep.Entries) != 2 {
+		t.Fatalf("Remove report = %+v, want both collection entries", rep.Entries)
+	}
+	for _, name := range []string{"alpha", "beta"} {
+		if got := agentsOf(loadMod(t, root), name); len(got) != 0 {
+			t.Errorf("%s agents after unsharing the repository = %v, want none", name, got)
+		}
+		if _, err := os.Stat(filepath.Join(agentSkillsDir(root, "claude"), name)); !os.IsNotExist(err) {
+			t.Errorf("%s claude link = %v, want not exist", name, err)
+		}
+	}
+	// hello came from another repository, so it is left linked, and the managed
+	// copies stay either way: --agent only stops the sharing.
+	if got := agentsOf(loadMod(t, root), "hello"); len(got) != 1 || got[0] != "claude" {
+		t.Errorf("hello agents = %v, want [claude]", got)
+	}
+	assertStateDirs(t, root, "alpha", "beta", "hello")
+}
+
+// TestRemoveKeepsModifiedInstallationAndReportsPartial covers the partial path.
 func TestRemoveKeepsModifiedInstallationAndReportsPartial(t *testing.T) {
 	r := newHelloRepo(t)
 	root := t.TempDir()
@@ -2301,7 +2751,10 @@ func TestList(t *testing.T) {
 	if len(rep.Entries) != 1 || rep.Entries[0].Action != "installed" {
 		t.Errorf("list = %+v", rep.Entries)
 	}
-	// A new upstream version produces an upgrade notice.
+	// A repeated list answers from the reference snapshot the install wrote, so
+	// a new upstream tag is not noticed until that snapshot ages out; the aged-out
+	// half of the contract is asserted in TestListAnswersFromAFreshRefsCache,
+	// which can age the window and TestList cannot. update refreshes on demand.
 	r.Write("v2.md", "x\n")
 	r.CommitAll("v2")
 	r.Evolve("v2.0.0", false)
@@ -2309,8 +2762,8 @@ func TestList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(rep.Entries[0].Note, "upgrade available → ") {
-		t.Errorf("list did not report an available upgrade: %+v", rep.Entries[0])
+	if strings.Contains(rep.Entries[0].Note, "upgrade available") {
+		t.Errorf("list refreshed a cache that is still fresh: %+v", rep.Entries[0])
 	}
 }
 
@@ -2522,5 +2975,327 @@ func TestWhyReportsImmutableProvenanceAndTargetResults(t *testing.T) {
 	}
 	if _, err := eng.Why(ctx, "missing", testIO()); err == nil {
 		t.Error("Why(missing) succeeded")
+	}
+}
+
+// TestSyncAdoptsLocallyAddedSkills covers the sync form of init's local
+// adoption: a skill another tool or a manual copy left in the installation
+// directory becomes a local declaration with its content untouched, and a
+// second run is a no-op rather than a re-adoption.
+func TestSyncAdoptsLocallyAddedSkills(t *testing.T) {
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	writeLocalSkill(t, root, "added-later", "echo hi\n")
+
+	rep, err := eng.Sync(ctx, engine.SyncOptions{Adopt: true}, testIO())
+	if err != nil {
+		t.Fatalf("Sync(adopt): %v", err)
+	}
+	var adopted *engine.EntryReport
+	for i := range rep.Entries {
+		if rep.Entries[i].Name == "added-later" {
+			adopted = &rep.Entries[i]
+		}
+	}
+	if adopted == nil || adopted.Action != engine.ActionAdopt || !strings.Contains(adopted.Note, "adopted") {
+		t.Fatalf("Sync(adopt) report = %+v, want an adopted local entry", rep.Entries)
+	}
+	m := loadMod(t, root)
+	if len(m.Skills) != 1 || !m.Skills[0].Local || m.Skills[0].Name != "added-later" {
+		t.Fatalf("declarations after adoption = %+v, want one local entry", m.Skills)
+	}
+	lk := loadLockSkill(t, root, "added-later")
+	if lk.Source != "" || lk.Dirhash == "" {
+		t.Fatalf("lock after adoption = %+v, want a local baseline with a dirhash", lk)
+	}
+	// The adopted content is exactly what was on disk.
+	if got := readFileString(t, filepath.Join(installedDir(root, "added-later"), "run.sh")); got != "echo hi\n" {
+		t.Errorf("adopted run.sh = %q, want the local content preserved", got)
+	}
+
+	// A second run adopts nothing new and reports the local entry as consistent.
+	rep, err = eng.Sync(ctx, engine.SyncOptions{Adopt: true}, testIO())
+	if err != nil {
+		t.Fatalf("second Sync(adopt): %v", err)
+	}
+	for _, entry := range rep.Entries {
+		if entry.Name == "added-later" && strings.Contains(entry.Note, "adopted as") {
+			t.Errorf("second run re-adopted: %+v", entry)
+		}
+	}
+}
+
+// TestSyncAdoptRecordsTheDirectoryAsAlias covers a directory whose frontmatter
+// name is not its own directory name, which is what a skill installed under a
+// local name looks like. The declaration keeps the published name and records
+// the directory as the alias, which is the only identity the filesystem offers.
+func TestSyncAdoptRecordsTheDirectoryAsAlias(t *testing.T) {
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	dir := filepath.Join(root, ".agents", "skills", "vendored-copy")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"),
+		[]byte("---\nname: published-name\ndescription: test skill\n---\n# x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := eng.Sync(ctx, engine.SyncOptions{Adopt: true}, testIO()); err != nil {
+		t.Fatalf("Sync(adopt): %v", err)
+	}
+	m := loadMod(t, root)
+	if len(m.Skills) != 1 {
+		t.Fatalf("declarations after adoption = %+v, want one entry", m.Skills)
+	}
+	if m.Skills[0].Name != "published-name" || m.Skills[0].Alias != "vendored-copy" {
+		t.Errorf("declaration = %+v, want the published name with the directory as alias", m.Skills[0])
+	}
+	// The installation directory stays the one on disk, so the entry resolves
+	// back to the files it came from.
+	if got := m.Skills[0].DirName(); got != "vendored-copy" {
+		t.Errorf("DirName() = %q, want the directory it was found in", got)
+	}
+	if _, err := os.Stat(filepath.Join(installedDir(root, "vendored-copy"), "SKILL.md")); err != nil {
+		t.Errorf("installation = %v, want kept under its own directory", err)
+	}
+}
+
+// TestSyncWithoutAdoptOnlyNamesUndeclaredSkills keeps a plain sync from
+// changing the declaration while still telling the user the flag exists.
+func TestSyncWithoutAdoptOnlyNamesUndeclaredSkills(t *testing.T) {
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	writeLocalSkill(t, root, "added-later", "")
+
+	var out bytes.Buffer
+	rep, err := eng.Sync(ctx, engine.SyncOptions{}, engine.IO{Out: &out, Yes: true})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if len(loadMod(t, root).Skills) != 0 {
+		t.Errorf("declarations after a plain sync = %+v, want none", loadMod(t, root).Skills)
+	}
+	joined := strings.Join(rep.Notes, "\n") + out.String()
+	if !strings.Contains(joined, "--adopt") {
+		t.Errorf("plain sync output = %q, want the --adopt hint", joined)
+	}
+}
+
+// TestSyncAdoptNeedsAChannelOrYes refuses to record provenance on a real run
+// that can neither ask nor state the intent. A dry run is exempt: it only
+// prints the plan, so it never needs an answer
+// (TestSyncAdoptDryRunPlansWithoutAsking).
+func TestSyncAdoptNeedsAChannelOrYes(t *testing.T) {
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	writeLocalSkill(t, root, "added-later", "")
+	if _, err := eng.Sync(ctx, engine.SyncOptions{Adopt: true}, engine.IO{Out: io.Discard}); err == nil {
+		t.Fatal("Sync(adopt) without a channel succeeded, want a diagnostic")
+	}
+	if len(loadMod(t, root).Skills) != 0 {
+		t.Errorf("declarations after a refused adoption = %+v, want none", loadMod(t, root).Skills)
+	}
+}
+
+// TestSyncAdoptCheckIsRefused: --check only verifies, so the adoption flag has
+// nothing to act on and saying so beats silently ignoring it.
+func TestSyncAdoptCheckIsRefused(t *testing.T) {
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	if _, err := eng.Sync(ctx, engine.SyncOptions{CheckOnly: true, Adopt: true}, testIO()); err == nil {
+		t.Fatal("Sync(--check --adopt) succeeded, want a refusal")
+	}
+}
+
+// dryRunAskRecorder fails a dry run that consults the confirmation channel:
+// printing a plan must never wait on input.
+type dryRunAskRecorder struct{ asked bool }
+
+func (r *dryRunAskRecorder) Confirm(string) (bool, error) {
+	r.asked = true
+	return false, nil
+}
+
+func (*dryRunAskRecorder) Choose(string, []string) (int, error) { return 0, nil }
+
+// TestSyncAdoptDryRunPlansWithoutAsking keeps a dry run from blocking on the
+// adoption prompt: the plan lists every candidate as pending, the manifests
+// stay untouched, the confirmation channel is never consulted, and a run
+// without any channel still prints the plan instead of refusing.
+func TestSyncAdoptDryRunPlansWithoutAsking(t *testing.T) {
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	writeLocalSkill(t, root, "added-later", "echo hi\n")
+
+	ask := &dryRunAskRecorder{}
+	rep, err := eng.Sync(ctx, engine.SyncOptions{Adopt: true, DryRun: true}, engine.IO{Out: io.Discard, Confirm: ask})
+	if err != nil {
+		t.Fatalf("Sync(adopt, dry-run): %v", err)
+	}
+	if ask.asked {
+		t.Error("dry run consulted the confirmation channel")
+	}
+	if skills := loadMod(t, root).Skills; len(skills) != 0 {
+		t.Errorf("declarations after a dry run = %+v, want none", skills)
+	}
+	var planned *engine.EntryReport
+	for i := range rep.Entries {
+		if rep.Entries[i].Name == "added-later" {
+			planned = &rep.Entries[i]
+		}
+	}
+	// The plan carries the adoption action, so a --json consumer can tell a
+	// pending adoption from an existing local entry in the same document
+	// without parsing the note.
+	if planned == nil || planned.Action != engine.ActionAdopt || !strings.Contains(planned.Note, "will be adopted") {
+		t.Fatalf("dry-run report = %+v, want a pending adoption entry", rep.Entries)
+	}
+	if notes := strings.Join(rep.Notes, "\n"); !strings.Contains(notes, "--yes") {
+		t.Errorf("dry-run notes = %q, want the real-run hint", notes)
+	}
+
+	// Without any channel the dry run still succeeds: refusing to ask is a
+	// real-run refusal, not a plan-time one.
+	rep, err = eng.Sync(ctx, engine.SyncOptions{Adopt: true, DryRun: true}, engine.IO{Out: io.Discard})
+	if err != nil {
+		t.Fatalf("Sync(adopt, dry-run) without a channel: %v", err)
+	}
+	if skills := loadMod(t, root).Skills; len(skills) != 0 {
+		t.Errorf("declarations after a channel-less dry run = %+v, want none", skills)
+	}
+	if len(rep.Entries) == 0 {
+		t.Error("channel-less dry run produced no planned entries")
+	}
+}
+
+// TestSyncAdoptRejectsCaseCollidingDirectories keeps the portability guard init
+// applies: two directories that differ only in letter case map to one
+// installation directory on Windows and macOS, so adopting both would write a
+// declaration no other machine can materialize. The run is refused before
+// either declaration is written, and the message says how to get past it.
+func TestSyncAdoptRejectsCaseCollidingDirectories(t *testing.T) {
+	root := t.TempDir()
+	if caseInsensitiveFS(root) {
+		t.Skip("requires a case-sensitive filesystem")
+	}
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	for _, dirName := range []string{"Demo", "demo"} {
+		writeLocalSkill(t, root, dirName, "echo hi\n")
+	}
+
+	_, err := eng.Sync(ctx, engine.SyncOptions{Adopt: true}, testIO())
+	if err == nil {
+		t.Fatal("Sync(adopt) accepted installation directories that collide when case is folded")
+	}
+	for _, want := range []string{"Demo", "demo", "rename"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Sync error = %v, want %q named", err, want)
+		}
+	}
+	if skills := loadMod(t, root).Skills; len(skills) != 0 {
+		t.Errorf("declarations after a refused adoption = %+v, want none", skills)
+	}
+}
+
+// TestSyncSummaryNamesLocalDrift keeps the human summary from claiming "no
+// changes" on a run whose most important fact is a detected and preserved
+// local edit; the detail stays in the report, the summary must name it.
+func TestSyncSummaryNamesLocalDrift(t *testing.T) {
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	writeLocalSkill(t, root, "added-later", "echo hi\n")
+	if _, err := eng.Sync(ctx, engine.SyncOptions{Adopt: true}, testIO()); err != nil {
+		t.Fatalf("Sync(adopt): %v", err)
+	}
+
+	// Edit the adopted skill behind sync's back, then run a plain sync.
+	skillMd := filepath.Join(installedDir(root, "added-later"), "SKILL.md")
+	if err := os.WriteFile(skillMd, []byte("---\nname: added-later\ndescription: edited\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	rep, err := eng.Sync(ctx, engine.SyncOptions{}, engine.IO{Out: &out, Yes: true})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	drifted := false
+	for _, entry := range rep.Entries {
+		if entry.Action == engine.ActionLocalDrift {
+			drifted = true
+		}
+	}
+	if !drifted {
+		t.Fatalf("Sync report = %+v, want a local-drift entry", rep.Entries)
+	}
+	joined := strings.Join(rep.Notes, "\n") + out.String()
+	if !strings.Contains(joined, "differ from their lock records") {
+		t.Errorf("sync summary = %q, want the local-drift line", joined)
+	}
+	if strings.Contains(joined, "no changes") {
+		t.Errorf("sync summary = %q, must not claim no changes while local edits exist", joined)
+	}
+
+	// The drifted lock record is untouched: sync informs, it does not re-baseline.
+	if lk := loadLockSkill(t, root, "added-later"); lk.Dirhash == "" {
+		t.Errorf("lock after a drifted sync = %+v, want the original baseline kept", lk)
+	}
+}
+
+// TestSyncAdoptLeavesStaleLockRecordsForPrune: a directory a lock record still
+// occupies is not local content to adopt, it is a stale declaration's remains.
+func TestSyncAdoptLeavesStaleLockRecordsForPrune(t *testing.T) {
+	root := t.TempDir()
+	eng := newEngine(t, root, t.TempDir())
+	if _, err := eng.Init(ctx, false, testIO()); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	writeLocalSkill(t, root, "declared", "")
+	if _, err := eng.Sync(ctx, engine.SyncOptions{Adopt: true}, testIO()); err != nil {
+		t.Fatalf("Sync(adopt): %v", err)
+	}
+	// Hand-edit the declaration away, exactly the state prune exists for.
+	m := loadMod(t, root)
+	m.Skills = nil
+	if err := modfile.SaveMod(root, m); err != nil {
+		t.Fatal(err)
+	}
+	writeLocalSkill(t, root, "brand-new", "")
+
+	rep, err := eng.Sync(ctx, engine.SyncOptions{Adopt: true}, testIO())
+	if err != nil {
+		t.Fatalf("Sync(adopt) with a stale record: %v", err)
+	}
+	for _, entry := range rep.Entries {
+		if entry.Name == "declared" && strings.Contains(entry.Note, "adopted as") {
+			t.Errorf("stale lock record was adopted: %+v", entry)
+		}
+	}
+	if got := loadMod(t, root).Skills; len(got) != 1 || got[0].Name != "brand-new" {
+		t.Errorf("declarations = %+v, want only brand-new adopted", got)
 	}
 }

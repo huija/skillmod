@@ -22,7 +22,7 @@ func newWhyCmd(options *rootOptions) *cobra.Command {
 				return err
 			}
 			rep, err := eng.Why(cmd.Context(), args[0], options.newIO(cmd))
-			return errors.Join(err, options.output(cmd, rep))
+			return errors.Join(err, options.output(cmd, rep, err))
 		},
 	}
 }

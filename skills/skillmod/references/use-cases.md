@@ -94,6 +94,9 @@ one unresolved entry does not discard the rest of the import.
 
 Import writes both `SKILL.mod` and `SKILL.lock`. Replacing an existing
 declaration requires `--force`, which first backs it up as `SKILL.mod.bak`.
+Every detected entry is confirmed before the write, so a non-interactive
+environment passes `--yes`; a scan that finds nothing has no entry to confirm
+and writes the empty manifest rather than stopping at an unanswerable prompt.
 
 Use global scope only when requested:
 
@@ -113,20 +116,28 @@ Addresses have this form:
 Examples:
 
 ```sh
+skillmod get openai/skills//gh-fix-ci
 skillmod get github.com/acme/agent-skills//skills/review@v1.2.0
 skillmod get github.com/acme/agent-skills//review
 skillmod get github.com/acme/single-skill
 ```
 
-The repository is always named; `//` then selects the skill inside it. The
-second form writes the skill name in place of its path, so a collection is
-addressed with two short words instead of the directory layout. An exact
-subdirectory always wins over a name, and a unique name resolves to the skill's
-real path, so `source` records
+The repository is always named; `//` then selects the skill inside it. The host
+defaults to `github.com`, so `openai/skills//gh-fix-ci` is the shortest
+spelling of `github.com/openai/skills//gh-fix-ci`. `//review` writes the skill
+name in place of its path, so a collection is addressed with two short words
+instead of the directory layout, and `@v1.2.0` pins an explicit version on that
+same form. An exact subdirectory always wins over a name, and a unique name
+resolves to the skill's real path, so `source` records
 `github.com/acme/agent-skills//skills/review` rather than the shorthand that was
 typed. When several skills in the repository answer the same name, skillmod
 reports the candidate paths and refuses to guess. A repository that is itself a
-single skill needs no `//`, as in the third form.
+single skill needs no `//`, as `github.com/acme/single-skill` shows.
+
+Discovery does not assume a layout. A collection usually lives under `skills/`,
+but a repository whose skills sit directly in the root, or under an agent
+directory such as `.agents/skills/` or `.claude/skills/`, is scanned the same
+way, so unusual repositories install without anyone typing an internal path.
 
 Omitting a version asks skillmod to resolve the latest immutable tag, with a
 pseudo-version fallback for an untagged repository. A branch name is rejected,
@@ -181,6 +192,28 @@ using the configured install mode:
 skillmod sync --relink --dry-run
 skillmod sync --relink
 ```
+
+Use `sync --adopt` when skills appeared on disk outside skillmod — installed by
+`npx`, copied in, or written by hand. It declares each one as a local entry and
+records its current content as the lock baseline, which is the same thing `init`
+does for a machine's existing skills. No file is rewritten, so a later edit
+shows up as `local-drift` instead of being reset:
+
+```sh
+skillmod sync --dry-run --adopt
+skillmod sync --adopt --yes
+```
+
+Each adopted skill is confirmed in a terminal, and `--yes` adopts all of them.
+A plain `sync` does not change the declaration; it names the undeclared skills
+and points at the flag. A directory a stale lock record still occupies is left
+for `prune`, never adopted.
+
+`sync --adopt` cannot be combined with `--check`: `--check` is `verify`, which
+only reports drift and never writes. A non-interactive run without `--yes` is
+refused and told to pass `--yes`, rather than adopting skills nobody approved;
+`sync --adopt --dry-run` plans the whole set without asking, because printing a
+plan must not block on a prompt.
 
 ## Inspect state and provenance
 
@@ -275,8 +308,22 @@ skillmod remove --all
 skillmod remove
 ```
 
-`--all` takes every declared entry without asking. A bare `remove` picks from
-the declarations interactively, so it needs a terminal; `--yes` is not a
+A positional argument that contains a `/` is a repository selector instead,
+which is the same distinction a skill name can never trip: names are single
+portable segments. Name the repository and the skills declared from it are
+selected, exactly the way `get` lists what a repository publishes — one entry
+needs no choice, several are offered in a terminal, and a non-interactive run
+lists them and exits:
+
+```sh
+skillmod remove github.com/acme/agent-skills --dry-run
+skillmod remove openai/skills
+```
+
+`--all` takes every declared entry without asking, and with a repository
+selector it takes every entry that repository declares, which is how a script
+says "everything this repository brought in". A bare `remove` picks from the
+declarations interactively, so it needs a terminal; `--yes` is not a
 substitute for either, because it answers the deletion confirmation rather than
 choosing what to delete.
 
@@ -292,7 +339,9 @@ skillmod remove --all --agent claude
 Without skill names, the picker offers only skills shared to the named agents
 and starts with nothing checked. With `--all`, all matching skills are unshared;
 skills shared only to other agents are unaffected. Agent values may repeat or
-use comma-separated names. Names and `--all` cannot be combined.
+use comma-separated names. A skill name and `--all` cannot be combined, because
+each already states the set; a repository selector can, and `--all` then takes
+everything it declares.
 
 Clean managed installations are removed transactionally. Locally modified or
 unverifiable directories are preserved and reported as partial completion.

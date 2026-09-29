@@ -25,6 +25,18 @@ func TestParse(t *testing.T) {
 		{"bare repository with subdirectory", "github.com/a/b//sub", &Address{Repo: "https://github.com/a/b", Subdir: "sub"}, ""},
 		{"bare repository with subdirectory and version", "github.com/a/b//sub@v1.2.0", &Address{Repo: "https://github.com/a/b", Subdir: "sub", Ref: "v1.2.0"}, ""},
 		{"bare repository with version", "github.com/a/b@v1.2.0", &Address{Repo: "https://github.com/a/b", Ref: "v1.2.0"}, ""},
+		// A bare owner/repo path defaults to github.com, and the parse result
+		// records that the host was added, so a failed fetch can name it.
+		{"owner/repo defaults to github", "openai/skills", &Address{Repo: "https://github.com/openai/skills", Completed: true}, ""},
+		{"owner/repo with subdirectory", "openai/skills//gh-fix-ci", &Address{Repo: "https://github.com/openai/skills", Subdir: "gh-fix-ci", Completed: true}, ""},
+		{"owner/repo with version", "openai/skills@v1.0.0", &Address{Repo: "https://github.com/openai/skills", Ref: "v1.0.0", Completed: true}, ""},
+		// Any other first segment is a host, not an owner.
+		{"host with port", "localhost:8080/a/b", &Address{Repo: "https://localhost:8080/a/b"}, ""},
+		// A first segment that reads as a path is not an owner, so it is left
+		// alone rather than completed with a host that cannot exist.
+		{"relative current directory", "./a/b", &Address{Repo: "https://./a/b"}, ""},
+		{"relative parent directory", "../a/b", &Address{Repo: "https://../a/b"}, ""},
+		{"windows drive letter", "C:/x/y", &Address{Repo: "https://C:/x/y"}, ""},
 		// Preserve a complete URL.
 		{"https", "https://github.com/a/b", &Address{Repo: "https://github.com/a/b"}, ""},
 		{"https with subdirectory", "https://github.com/a/b//sub/dir@v2.0.0", &Address{Repo: "https://github.com/a/b", Subdir: "sub/dir", Ref: "v2.0.0"}, ""},
@@ -122,6 +134,8 @@ func TestManifestSource_DropsImpliedHTTPSAndKeepsExplicitTransports(t *testing.T
 	}{
 		{"bare path is already canonical", "github.com/a/b", "github.com/a/b"},
 		{"https prefix is not recorded", "https://github.com/a/b", "github.com/a/b"},
+		{"owner/repo records the default host", "openai/skills", "github.com/openai/skills"},
+		{"owner/repo with subdirectory", "openai/skills//gh-fix-ci", "github.com/openai/skills//gh-fix-ci"},
 		{"uppercase https prefix is not recorded", "HTTPS://github.com/a/b", "github.com/a/b"},
 		{"https with subdirectory", "https://github.com/a/b//sub/dir", "github.com/a/b//sub/dir"},
 		{"non-default port survives", "https://github.com:8443/a/b", "github.com:8443/a/b"},

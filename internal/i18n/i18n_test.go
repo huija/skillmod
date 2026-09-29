@@ -183,7 +183,8 @@ func TestContractWordingIsPinned(t *testing.T) {
 	english := englishCatalog(t)
 	pinned := map[string]string{
 		"resolve.branch_not_lockable":           "branches cannot be locked; use a tag or commit SHA (%q is a branch name)",
-		"engine.skill_mod_found_advice":         "SKILL.mod not found\nAdvice: run skillmod init or skillmod get first",
+		"engine.skill_mod_found_advice":         "SKILL.mod not found\nAdvice: run skillmod init or skillmod get to manage this directory as a project, or add --global to manage global skills",
+		"engine.skill_mod_found_advice_global":  "SKILL.mod not found\nAdvice: run skillmod --global init or skillmod --global get to manage global skills",
 		"engine.verify.skill_lock_found_advice": "SKILL.lock not found\nAdvice: run skillmod sync first to generate the lock file",
 		"cli.get.use":                           "get <repository>[//<subdirectory-or-skill-name>][@<version>]",
 		"cli.remove.use":                        "remove [names…]",

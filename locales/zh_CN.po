@@ -211,6 +211,9 @@ msgstr "把已安装技能记录为链接到其他 agent 目录"
 msgid "cli.share.use"
 msgstr "share [技能名...]"
 
+msgid "cli.sync.flag_adopt"
+msgstr "把 skillmod 之外新增的 skill 收录为本地条目"
+
 msgid "cli.sync.flag_check"
 msgstr "只校验不修改（skillmod verify 的别名）"
 
@@ -429,9 +432,14 @@ msgstr "%s — %s\n  %s"
 msgid "engine.get.reading_skill_metadata"
 msgstr "正在读取 skill 元数据"
 
+#, go-format
+msgid "engine.get.short_address_resolved"
+msgstr "简写地址已解析为 %s；若指本地仓库，请使用 file:/"
+"/ 前缀"
+
 msgid "engine.get.skill_md_missing_repository"
-msgstr "仓库根目录及 skills/ 下所有子目录中均未找到 SKILL."
-"md"
+msgstr "未找到 SKILL.md；已检查仓库根目录、skills/、.agents/s"
+"kills 等 agent 技能目录，以及根目录下的技能目录"
 
 #, go-format
 msgid "engine.get.skill_name_matches_multiple"
@@ -511,6 +519,9 @@ msgstr "正在恢复已安装技能来源：%s"
 
 msgid "engine.init.skills_found_generated_empty"
 msgstr "未发现 skill，已生成空清单，可用 skillmod get 添加"
+
+msgid "engine.init.skills_found_will_generate_empty"
+msgstr "未发现 skill，将生成空清单，可用 skillmod get 添加"
 
 #, go-format
 msgid "engine.init.source_unverified_local"
@@ -708,12 +719,21 @@ msgstr "本地条目，无版本"
 msgid "engine.remove.locally_modified_kept"
 msgstr "存在本地修改，已保留安装文件："
 
+#, go-format
+msgid "engine.remove.multiple_from_repository"
+msgstr "%s 中有多个条目；交互模式中选择一个或多个，或"
+"直接指定：%s"
+
 msgid "engine.remove.needs_selection"
 msgstr "未指定条目；请给出名称或传 --all，或在终端中运"
 "行 remove"
 
 msgid "engine.remove.no_entries_selected"
 msgstr "未选择任何条目"
+
+#, go-format
+msgid "engine.remove.no_entry_from_repository"
+msgstr "SKILL.mod 中没有来自 %s 的条目"
 
 msgid "engine.remove.nothing_declared"
 msgstr "SKILL.mod 中没有声明条目"
@@ -724,6 +744,10 @@ msgstr "已删除 %d 个声明和 %d 个内容未改动的安装目录"
 
 msgid "engine.remove.select_entries"
 msgstr "选择要删除的条目"
+
+#, go-format
+msgid "engine.remove.select_from_repository"
+msgstr "%s 中有多个 skill；选择一个或多个"
 
 msgid "engine.remove.share_cleanup_failed"
 msgstr "清理部分分享链接失败"
@@ -865,7 +889,13 @@ msgstr "SKILL.lock 由工具维护；请手工修复出错的条目，或"
 "备份并删除该文件后重新运行 skillmod sync 重新生成"
 
 msgid "engine.skill_mod_found_advice"
-msgstr "未找到 SKILL.mod\n建议先执行 skillmod init 或 skillmod get"
+msgstr "未找到 SKILL.mod\n建议：执行 skillmod init 或 skillmod get"
+" 将当前目录作为项目管理；若要管理全局技能，请在命"
+"令中加入 --global"
+
+msgid "engine.skill_mod_found_advice_global"
+msgstr "未找到 SKILL.mod\n建议先执行 skillmod --global init 或 ski"
+"llmod --global get 管理全局技能"
 
 #, go-format
 msgid "engine.skill_path_not_materializable"
@@ -917,6 +947,41 @@ msgstr "恢复 %s 失败：%w"
 msgid "engine.state.stage_removal"
 msgstr "暂存删除 %s 失败：%w"
 
+#, go-format
+msgid "engine.sync.adopt_case_collision"
+msgstr "两个 skill 仅大小写不同：%s 与 %s，会映射到同一个"
+"安装目录；请重命名其中一个目录"
+
+#, go-format
+msgid "engine.sync.adopt_confirm"
+msgstr "将 %s（%s）收录为本地条目？"
+
+msgid "engine.sync.adopt_dry_run_confirm"
+msgstr "真实运行将逐个确认；传 --yes 全部收录"
+
+msgid "engine.sync.adopt_dry_run_entry"
+msgstr "真实运行将收录为本地条目"
+
+#, go-format
+msgid "engine.sync.adopt_needs_confirmation"
+msgstr "发现 %d 个未声明 skill；传 --yes 全部收录，或在终"
+"端中选择"
+
+#, go-format
+msgid "engine.sync.adopt_skipped"
+msgstr "跳过 %s：%s"
+
+msgid "engine.sync.adopt_with_check"
+msgstr "--adopt 不能与 --check 同时使用；--check 只校验、不写"
+"任何文件"
+
+#, go-format
+msgid "engine.sync.adopted_entries"
+msgstr "已收录 %d 个本地条目"
+
+msgid "engine.sync.adopted_local_entry"
+msgstr "已收录为本地条目"
+
 msgid "engine.sync.baseline_re_established"
 msgstr "已从已安装文件重建本地基线（此前的 remote lock 记"
 "录已移除）"
@@ -939,6 +1004,10 @@ msgid "engine.sync.contents_match_baseline_local"
 msgstr "内容与基线不符（本地改动）"
 
 #, go-format
+msgid "engine.sync.dry_run_adopt_planned"
+msgstr "dry-run: 将收录 %d 个未声明 skill"
+
+#, go-format
 msgid "engine.sync.dry_run_entries_installed"
 msgstr "dry-run: %d 个条目将被安装或更新"
 
@@ -949,12 +1018,19 @@ msgstr "dry-run: 所有条目已一致"
 msgid "engine.sync.dry_run_writes_planned"
 msgstr "试运行：没有计划写入；将保留 %d 个冲突目标"
 
+#, go-format
+msgid "engine.sync.local_drift_preserved"
+msgstr "%d 个本地条目与锁定记录不一致（改动保留）"
+
 msgid "engine.sync.missing"
 msgstr "缺失: "
 
 msgid "engine.sync.no_baseline"
 msgstr "lock 中无基线记录，跳过校验（重新 init 可建立基"
 "线）"
+
+msgid "engine.sync.no_skills_adopted"
+msgstr "没有收录任何未声明 skill"
 
 msgid "engine.sync.removed_mod_files_kept"
 msgstr "已从 mod 移除，文件保留；运行 skillmod prune 清理"
@@ -965,6 +1041,11 @@ msgstr "重建部分分享链接失败；再次运行 sync 可重试"
 #, go-format
 msgid "engine.sync.synchronized_entries"
 msgstr "已同步 %d 项，校验通过"
+
+#, go-format
+msgid "engine.sync.undeclared_skills_found"
+msgstr "发现 %d 个未声明 skill；运行 skillmod sync --adopt 可将"
+"它们收录为本地条目"
 
 msgid "engine.update.already_up_to_date"
 msgstr "已是最新"
